@@ -1,0 +1,116 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Palette Archeologia: terre calde, pergamena, ocra ─────────────────────── */
+@layer base {
+  :root {
+    /* Surfaces — pergamena/argilla */
+    --background: 38 22% 95%;
+    --foreground: 30 20% 12%;
+    --card: 38 20% 97%;
+    --card-foreground: 30 20% 12%;
+    --popover: 38 20% 97%;
+    --popover-foreground: 30 20% 12%;
+
+    /* Primary — terra bruciata (rosso mattone) */
+    --primary: 14 60% 38%;
+    --primary-foreground: 38 22% 97%;
+
+    /* Secondary — ocra dorata */
+    --secondary: 38 35% 88%;
+    --secondary-foreground: 30 20% 18%;
+
+    /* Muted */
+    --muted: 38 15% 90%;
+    --muted-foreground: 38 8% 48%;
+
+    /* Accent — verde oliva */
+    --accent: 78 25% 40%;
+    --accent-foreground: 38 22% 97%;
+
+    /* Destructive */
+    --destructive: 0 65% 45%;
+    --destructive-foreground: 38 22% 97%;
+
+    /* Border / Input / Ring */
+    --border: 38 12% 82%;
+    --input: 38 12% 82%;
+    --ring: 14 60% 38%;
+
+    --radius: 0.5rem;
+
+    /* Semantic colors per QC */
+    --color-ok: 103 56% 31%;
+    --color-warning: 36 90% 42%;
+    --color-error: 0 65% 45%;
+    --color-pending: 38 8% 55%;
+  }
+
+  .dark {
+    --background: 30 15% 8%;
+    --foreground: 38 15% 82%;
+    --card: 30 13% 11%;
+    --card-foreground: 38 15% 82%;
+    --popover: 30 13% 11%;
+    --popover-foreground: 38 15% 82%;
+
+    --primary: 14 55% 52%;
+    --primary-foreground: 30 15% 8%;
+
+    --secondary: 30 10% 18%;
+    --secondary-foreground: 38 15% 75%;
+
+    --muted: 30 10% 16%;
+    --muted-foreground: 38 8% 52%;
+
+    --accent: 78 22% 52%;
+    --accent-foreground: 30 15% 8%;
+
+    --destructive: 0 60% 52%;
+    --destructive-foreground: 38 15% 97%;
+
+    --border: 30 10% 22%;
+    --input: 30 10% 22%;
+    --ring: 14 55% 52%;
+
+    --color-ok: 97 43% 47%;
+    --color-warning: 36 80% 52%;
+    --color-error: 0 60% 52%;
+    --color-pending: 38 8% 45%;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'DM Sans', system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, h4, h5, h6 { line-height: 1.2; }
+  code, pre, .mono { font-family: 'DM Mono', 'Courier New', monospace; }
+}
+
+/* ─── QC status badges ────────────────────────────────────────────────────── */
+.qc-ok      { @apply bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400; }
+.qc-warning { @apply bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400; }
+.qc-error   { @apply bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400; }
+.qc-pending { @apply bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400; }
+
+/* ─── Upload drop zone ────────────────────────────────────────────────────── */
+.dropzone {
+  @apply border-2 border-dashed border-border rounded-lg p-8 text-center cursor-pointer transition-colors;
+}
+.dropzone:hover, .dropzone.active {
+  @apply border-primary bg-primary/5;
+}
+
+/* ─── Scrollbar sottile ───────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { @apply bg-border rounded-full; }
