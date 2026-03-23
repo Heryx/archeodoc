@@ -23,6 +23,7 @@ import { ShieldCheck, Sun, Cloud, CloudRain, ChevronRight, Layers, Plus, Pencil,
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { getCurrentProjectId } from "@/lib/project";
+import GoogleDocsImport from "@/components/GoogleDocsImport";
 
 const meteOptions = [
   { value: "soleggiato", label: "Soleggiato", icon: Sun },
@@ -299,6 +300,14 @@ export function GiornataPage() {
                 <DialogHeader>
                   <DialogTitle>Registra giornata di scavo</DialogTitle>
                 </DialogHeader>
+                <GoogleDocsImport mode="giornata" onImport={(data) => {
+                  if (data.mode === "structured") {
+                    setCreateForm(prev => ({ ...prev, ...data.mapped }));
+                  } else {
+                    setCreateForm(prev => ({ ...prev, note: data.text }));
+                    toast({ title: "Testo importato nel campo note" });
+                  }
+                }} />
                 <GiornataFormFields form={createForm} setForm={setCreateForm} />
                 <Button
                   data-testid="button-salva-giornata"
@@ -327,6 +336,14 @@ export function GiornataPage() {
           <DialogHeader>
             <DialogTitle>Modifica giornata</DialogTitle>
           </DialogHeader>
+          <GoogleDocsImport mode="giornata" onImport={(data) => {
+            if (data.mode === "structured") {
+              setEditForm(prev => ({ ...prev, ...data.mapped }));
+            } else {
+              setEditForm(prev => ({ ...prev, note: data.text }));
+              toast({ title: "Testo importato nel campo note" });
+            }
+          }} />
           <GiornataFormFields form={editForm} setForm={setEditForm} />
           <Button
             className="w-full"

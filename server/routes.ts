@@ -33,7 +33,11 @@ import { checkGiornata } from "./qc";
 import { analizzaTestoUS, analizzaTestoGiornata, AI_AVAILABLE, AI_PROVIDER, reloadAIProvider } from "./ai";
 import { exportSchedaUSDocx, exportReportGiornalieroDocx } from "./docx_export";
 import { getAllSettings, setSetting, resetToDefault } from "./ai_settings";
-import { getLogPath } from "./logger";
+import { getLogPath, logger } from "./logger";
+import {
+  hasCredentials, hasToken, getAuthUrl, exchangeCode, revokeToken
+} from "./google_auth";
+import { getDocumentText, mapSectionsToUS, mapSectionsToGiornata } from "./google_docs";
 
 type ProjectContext = {
   project: ProjectDefinition;
@@ -555,6 +559,83 @@ export async function registerRoutes(_httpServer: Server, app: Express): Promise
 
     next();
   });
+
+  // --- Google Auth status ---
+  app.get("/api/google/status", (_req, res) => {
+    res.json({
+      hasCredentials: hasCredentials(),
+      hasToken: hasToken(),
+      credentialsPath: process.cwd() + "/credentials.json",
+    });
+  });
+
+  // --- Avvia il flusso OAuth: redirige al login Google ---
+  app.get("/api/google/auth", (_req, res) => {
+    try {
+      const url = getAuthUrl();
+      res.redirect(url);
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  // --- Callback OAuth: riceve il code e salva il token ---
+  app.get("/api/google/callback", async (req, res) => {
+    const code = req.query.code as string;
+    if (!code) { res.status(400).send("Codice mancante"); return; }
+    try {
+      await exchangeCode(code);
+      res.redirect("/?google=connected");
+    } catch (e: any) {
+      res.status(500).send("Errore autenticazione: " + e.message);
+    }
+  });
+
+  // --- Revoca token (disconnect) ---
+  app.post("/api/google/revoke", (_req, res) => {
+    revokeToken();
+    res.json({ ok: true });
+  });
+
+  // --- Import da Google Docs per una US ---
+  app.post("/api/google/import/us", withProject(async (_ctx, req, res) => {
+    const { url } = req.body as { url: string };
+    if (!url) { res.status(400).json({ error: "url obbligatorio" }); return; }
+    try {
+      const { title, text, sections } = await getDocumentText(url);
+      const mapped = mapSectionsToUS(sections);
+      const hasMappedFields = Object.keys(mapped).length >= 2;
+
+      if (hasMappedFields) {
+        res.json({ mode: "structured", title, mapped, text });
+      } else {
+        res.json({ mode: "ai", title, text, mapped: {} });
+      }
+    } catch (e: any) {
+      logger.error("Import Google Docs US fallito", { err: e.message });
+      res.status(500).json({ error: e.message });
+    }
+  }));
+
+  // --- Import da Google Docs per una giornata ---
+  app.post("/api/google/import/giornata", withProject(async (_ctx, req, res) => {
+    const { url } = req.body as { url: string };
+    if (!url) { res.status(400).json({ error: "url obbligatorio" }); return; }
+    try {
+      const { title, text, sections } = await getDocumentText(url);
+      const mapped = mapSectionsToGiornata(sections);
+      const hasMappedFields = Object.keys(mapped).length >= 2;
+
+      if (hasMappedFields) {
+        res.json({ mode: "structured", title, mapped, text });
+      } else {
+        res.json({ mode: "ai", title, text, mapped: {} });
+      }
+    } catch (e: any) {
+      logger.error("Import Google Docs giornata fallito", { err: e.message });
+      res.status(500).json({ error: e.message });
+    }
+  }));
 
   // Projects management
   app.get("/api/projects", (_req, res) => {

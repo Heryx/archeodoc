@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Eye, EyeOff, Save, CheckCircle2, XCircle, Wand2, RefreshCw, Download, FileText } from "lucide-react";
+import { Eye, EyeOff, Save, CheckCircle2, XCircle, Wand2, RefreshCw, Download, FileText, ExternalLink, Unlink } from "lucide-react";
 import { PromptEditor } from "@/components/PromptEditor";
 
 type AiSettings = {
@@ -52,6 +52,22 @@ export function ImpostazioniPage() {
   // ─── Log di sistema ─────────────────────────────────────────────────────
   const [logLines, setLogLines] = useState<string[]>([]);
   const [logPath, setLogPath] = useState("");
+
+  // ─── Google Docs ───────────────────────────────────────────────────────
+  type GoogleStatus = { hasCredentials: boolean; hasToken: boolean; credentialsPath: string };
+  const [googleStatus, setGoogleStatus] = useState<GoogleStatus | null>(null);
+  const [googleLoading, setGoogleLoading] = useState(true);
+
+  const fetchGoogleStatus = useCallback(() => {
+    setGoogleLoading(true);
+    fetch("/api/google/status")
+      .then(r => r.json())
+      .then(d => setGoogleStatus(d))
+      .catch(() => setGoogleStatus(null))
+      .finally(() => setGoogleLoading(false));
+  }, []);
+
+  useEffect(() => { fetchGoogleStatus(); }, [fetchGoogleStatus]);
 
   const fetchLogs = useCallback(() => {
     fetch("/api/logs")
@@ -343,6 +359,65 @@ export function ImpostazioniPage() {
                 initialValue={s.value}
               />
             ))
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Google Docs */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <FileText size={16} className="text-primary" />
+            Google Docs
+          </CardTitle>
+          <CardDescription>
+            Importa testo direttamente dai tuoi documenti Google Docs nelle schede US e giornate.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {googleLoading ? (
+            <p className="text-sm text-muted-foreground">Verifica connessione Google...</p>
+          ) : !googleStatus ? (
+            <p className="text-sm text-muted-foreground">Impossibile verificare lo stato di Google Docs.</p>
+          ) : !googleStatus.hasCredentials ? (
+            <div className="space-y-3">
+              <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-50">
+                <XCircle size={12} className="mr-1" /> Configurazione richiesta
+              </Badge>
+              <p className="text-sm text-muted-foreground">Per abilitare l'importazione da Google Docs:</p>
+              <ol className="text-sm text-muted-foreground list-decimal list-inside space-y-1">
+                <li>Vai su <a href="https://console.cloud.google.com" target="_blank" rel="noreferrer" className="underline inline-flex items-center gap-1">Google Cloud Console <ExternalLink className="h-3 w-3 inline" /></a></li>
+                <li>Seleziona il progetto e abilita la <strong>Google Docs API</strong></li>
+                <li>Crea credenziali <strong>OAuth 2.0</strong> (tipo: App desktop)</li>
+                <li>Scarica il JSON e salvalo come <code className="bg-muted px-1 rounded">credentials.json</code></li>
+              </ol>
+              <p className="text-xs text-muted-foreground">Percorso: <code className="bg-muted px-1 rounded">{googleStatus.credentialsPath}</code></p>
+              <Button variant="outline" size="sm" onClick={fetchGoogleStatus}>Ho salvato il file</Button>
+            </div>
+          ) : !googleStatus.hasToken ? (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">Credenziali presenti. Clicca per collegare il tuo account Google.</p>
+              <Button onClick={() => { window.location.href = "/api/google/auth"; }}>
+                Collega account Google
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <Badge variant="outline" className="text-green-700 border-green-300 bg-green-50">
+                <CheckCircle2 size={12} className="mr-1" /> Account Google collegato
+              </Badge>
+              <Button variant="outline" size="sm" className="gap-1" onClick={async () => {
+                try {
+                  await apiRequest("POST", "/api/google/revoke");
+                  fetchGoogleStatus();
+                  toast({ title: "Account Google disconnesso" });
+                } catch (e: any) {
+                  toast({ title: "Errore", description: e.message, variant: "destructive" });
+                }
+              }}>
+                <Unlink size={13} /> Disconnetti
+              </Button>
+            </div>
           )}
         </CardContent>
       </Card>

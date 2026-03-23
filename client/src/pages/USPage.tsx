@@ -25,6 +25,7 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { buildProjectUrl, getCurrentProjectId } from "@/lib/project";
 import { BASE_US_MODEL_KEY, BUILTIN_US_MODELS, type USModelDefinition, type USModelField } from "@shared/us_models";
+import GoogleDocsImport from "@/components/GoogleDocsImport";
 
 const tipiUS = ["strato", "struttura", "interfaccia", "tomba", "riempimento", "buca", "altro"];
 
@@ -1041,6 +1042,14 @@ export function USPage() {
               <DialogHeader>
                 <DialogTitle>Registra Unita Stratigrafica</DialogTitle>
               </DialogHeader>
+              <GoogleDocsImport mode="us" onImport={(data) => {
+                if (data.mode === "structured") {
+                  setCreateForm(prev => ({ ...prev, ...data.mapped }));
+                } else {
+                  setCreateForm(prev => ({ ...prev, descrizione: data.text }));
+                  toast({ title: "Testo importato — clicca Analisi AI per compilare i campi" });
+                }
+              }} />
               <USFormFields form={createForm} setForm={setCreateForm} giornate={giornate} activeModel={activeModel} />
               {createMissingRequired.length > 0 && (
                 <p className="text-xs text-red-600">
@@ -1071,6 +1080,14 @@ export function USPage() {
           <DialogHeader>
             <DialogTitle>Modifica Unita Stratigrafica</DialogTitle>
           </DialogHeader>
+          <GoogleDocsImport mode="us" onImport={(data) => {
+            if (data.mode === "structured") {
+              setEditForm(prev => ({ ...prev, ...data.mapped }));
+            } else {
+              setEditForm(prev => ({ ...prev, descrizione: data.text }));
+              toast({ title: "Testo importato — clicca Analisi AI per compilare i campi" });
+            }
+          }} />
           <USFormFields form={editForm} setForm={setEditForm} giornate={giornate} activeModel={editModel} />
           {editMissingRequired.length > 0 && (
             <p className="text-xs text-red-600">
