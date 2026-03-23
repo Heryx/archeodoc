@@ -392,11 +392,13 @@ export function ImpostazioniPage() {
                 <li>Scarica il JSON e salvalo come <code className="bg-muted px-1 rounded">credentials.json</code></li>
               </ol>
               <p className="text-xs text-muted-foreground">Percorso: <code className="bg-muted px-1 rounded">{googleStatus.credentialsPath}</code></p>
+              <p className="text-xs text-muted-foreground">Assicurati di aggiungere questo URI di reindirizzamento nel Google Cloud Console: <code className="bg-muted px-1 rounded">http://localhost:5000/api/google/callback</code></p>
               <Button variant="outline" size="sm" onClick={fetchGoogleStatus}>Ho salvato il file</Button>
             </div>
           ) : !googleStatus.hasToken ? (
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">Credenziali presenti. Clicca per collegare il tuo account Google.</p>
+              <p className="text-xs text-muted-foreground">Assicurati di aggiungere questo URI di reindirizzamento nel Google Cloud Console: <code className="bg-muted px-1 rounded">http://localhost:5000/api/google/callback</code></p>
               <Button onClick={() => { window.location.href = "/api/google/auth"; }}>
                 Collega account Google
               </Button>

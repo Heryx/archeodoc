@@ -16,8 +16,10 @@ export function createOAuth2Client() {
     throw new Error("credentials.json non trovato. Scaricalo dal progetto Google Cloud e salvalo nella cartella di ArcheoDoc.");
   }
   const creds = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, "utf-8"));
-  const { client_id, client_secret, redirect_uris } = creds.installed || creds.web;
-  return new google.auth.OAuth2(client_id, client_secret, redirect_uris[0] || "http://localhost:5000/api/google/callback");
+  const { client_id, client_secret } = creds.installed || creds.web;
+  // Forza sempre localhost:5000 come redirect URI
+  const REDIRECT_URI = "http://localhost:5000/api/google/callback";
+  return new google.auth.OAuth2(client_id, client_secret, REDIRECT_URI);
 }
 
 export function getAuthUrl(): string {
