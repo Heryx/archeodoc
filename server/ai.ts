@@ -87,7 +87,7 @@ async function callAI(prompt: string, maxTokens = 3000, systemPrompt?: string): 
   if (AI_PROVIDER === "gemini") {
     const { GoogleGenerativeAI } = await import("@google/generative-ai");
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
     const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
     const result = await model.generateContent(fullPrompt);
     return result.response.text();
@@ -140,8 +140,14 @@ MATERIALI RINVENUTI: ${us.materialiRinvenuti || "nessuno"}
 CAMPIONI PRELEVATI: ${us.campioni || "nessuno"}
   `.trim();
 
-  const systemPrompt = getSetting("system_prompt") || "Sei un assistente specializzato in archeologia professionale.";
-  const schedaTemplate = getSetting("scheda_us_template") || "";
+  let systemPrompt = "Sei un assistente specializzato in archeologia professionale.";
+  let schedaTemplate = "";
+  try {
+    systemPrompt = getSetting("system_prompt") || systemPrompt;
+    schedaTemplate = getSetting("scheda_us_template") || schedaTemplate;
+  } catch (e) {
+    console.warn("Impossibile leggere impostazioni AI dal DB, uso defaults:", e);
+  }
 
   const prompt = `${schedaTemplate ? schedaTemplate + "\n\n" : ""}Analizza i dati di questa Unità Stratigrafica.
 
@@ -183,7 +189,8 @@ Rispondi SOLO con questo JSON (nessun testo prima o dopo):
     };
   } catch (err) {
     console.error("Errore analisi AI testo US:", err);
-    throw new Error("Impossibile analizzare la scheda US con l'AI.");
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Impossibile analizzare la scheda US con l'AI. Causa: ${msg}`);
   }
 }
 
@@ -215,8 +222,14 @@ NOTE OPERATIVE: ${giornata.note || "NON INSERITE"}
     ? qcIssues.map(i => `[${i.livello.toUpperCase()}] ${i.messaggio}`).join("\n")
     : "Nessuna criticità rilevata";
 
-  const systemPrompt = getSetting("system_prompt") || "Sei un assistente specializzato in archeologia professionale.";
-  const giornaleFormat = getSetting("giornale_format") || "";
+  let systemPrompt = "Sei un assistente specializzato in archeologia professionale.";
+  let giornaleFormat = "";
+  try {
+    systemPrompt = getSetting("system_prompt") || systemPrompt;
+    giornaleFormat = getSetting("giornale_format") || giornaleFormat;
+  } catch (e) {
+    console.warn("Impossibile leggere impostazioni AI dal DB, uso defaults:", e);
+  }
 
   const prompt = `${giornaleFormat ? giornaleFormat + "\n\n" : ""}Analizza i dati di questa giornata di scavo.
 
@@ -262,6 +275,7 @@ Rispondi SOLO con questo JSON (nessun testo prima o dopo):
     };
   } catch (err) {
     console.error("Errore analisi AI testo giornata:", err);
-    throw new Error("Impossibile analizzare il report giornaliero con l'AI.");
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Impossibile analizzare il report giornaliero con l'AI. Causa: ${msg}`);
   }
 }
