@@ -23,18 +23,13 @@ if errorlevel 1 (
 echo  Node.js trovato: 
 node --version
 
-REM Controlla se node_modules esiste
-if not exist "node_modules\" (
-    echo.
-    echo  Prima installazione - scarico le dipendenze...
-    echo  (richiede connessione Internet, solo la prima volta)
-    echo.
-    call npm install
-    if errorlevel 1 (
-        echo  ERRORE durante l'installazione delle dipendenze.
-        pause
-        exit /b 1
-    )
+REM Installa/aggiorna le dipendenze (veloce se gia' aggiornate)
+echo  Verifica dipendenze...
+call npm install
+if errorlevel 1 (
+    echo  ERRORE durante l'installazione delle dipendenze.
+    pause
+    exit /b 1
 )
 
 REM Crea la cartella uploads se non esiste
