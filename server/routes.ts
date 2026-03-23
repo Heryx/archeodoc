@@ -1496,10 +1496,20 @@ export async function registerRoutes(_httpServer: Server, app: Express): Promise
     }
 
     // Ricarica le variabili in process.env immediatamente
-    if (geminiKey !== undefined)    process.env.GEMINI_API_KEY    = geminiKey.trim() || undefined!;
-    if (anthropicKey !== undefined) process.env.ANTHROPIC_API_KEY = anthropicKey.trim() || undefined!;
-    if (aiProvider !== undefined && aiProvider !== "auto") process.env.AI_PROVIDER = aiProvider.trim();
-    else if (aiProvider === "auto") delete process.env.AI_PROVIDER;
+    if (geminiKey !== undefined) {
+      const v = geminiKey.trim();
+      if (v) process.env.GEMINI_API_KEY = v;
+      else delete process.env.GEMINI_API_KEY;
+    }
+    if (anthropicKey !== undefined) {
+      const v = anthropicKey.trim();
+      if (v) process.env.ANTHROPIC_API_KEY = v;
+      else delete process.env.ANTHROPIC_API_KEY;
+    }
+    if (aiProvider !== undefined) {
+      if (aiProvider && aiProvider !== "auto") process.env.AI_PROVIDER = aiProvider.trim();
+      else delete process.env.AI_PROVIDER;
+    }
 
     // Ricarica il provider AI immediatamente (senza riavvio del server)
     const newState = reloadAIProvider();

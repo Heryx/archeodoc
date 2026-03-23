@@ -3,12 +3,14 @@ import type { UnitaStratigrafica, Giornata } from "@shared/schema";
 // ─── Rilevamento provider ────────────────────────────────────────────────────
 // Preferisce Gemini (gratuito) se la chiave è presente, altrimenti Claude.
 // AI_PROVIDER può forzare la scelta: "gemini" | "claude"
-
-const envProvider = (process.env.AI_PROVIDER || "").toLowerCase().trim();
-const hasGemini   = !!(process.env.GEMINI_API_KEY?.trim());
-const hasClaude   = !!(process.env.ANTHROPIC_API_KEY?.trim());
+// IMPORTANTE: legge sempre process.env al momento della chiamata (non cached)
+// in modo che reloadAIProvider() funzioni dopo il salvataggio dalle Impostazioni.
 
 function resolveProvider(): "gemini" | "claude" | "none" {
+  const envProvider = (process.env.AI_PROVIDER || "").toLowerCase().trim();
+  const hasGemini   = !!(process.env.GEMINI_API_KEY?.trim());
+  const hasClaude   = !!(process.env.ANTHROPIC_API_KEY?.trim());
+
   if (envProvider === "claude") return hasClaude ? "claude" : "none";
   if (envProvider === "gemini") return hasGemini ? "gemini" : "none";
   // Auto-detect: Gemini preferito (gratuito)
