@@ -16,6 +16,7 @@ import {
   Sun,
   Moon,
   Settings,
+  BarChart3,
 } from "lucide-react";
 
 export function Sidebar() {
@@ -55,6 +56,7 @@ export function Sidebar() {
         { href: `/cantiere/${cid}/upload`, icon: Upload, label: "Carica Doc." },
         { href: `/cantiere/${cid}/qc`, icon: ShieldCheck, label: "QC Check" },
         { href: `/cantiere/${cid}/report`, icon: FileText, label: "Report AI" },
+        { href: `/cantiere/${cid}/stats`, icon: BarChart3, label: "Statistiche" },
       ]
     : [];
 

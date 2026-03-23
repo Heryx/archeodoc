@@ -267,12 +267,11 @@ export function ImpostazioniPage() {
             </p>
           </div>
 
-          {/* Avviso riavvio */}
-          <div className="flex items-start gap-2 rounded-md bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800">
+          {/* Info aggiornamento live */}
+          <div className="flex items-start gap-2 rounded-md bg-blue-50 border border-blue-200 p-3 text-xs text-blue-800">
             <RefreshCw size={13} className="mt-0.5 shrink-0" />
             <span>
-              Dopo il salvataggio, <strong>riavvia il server</strong> (chiudi e riapri <code className="bg-amber-100 px-0.5 rounded">avvia.bat</code>)
-              affinché il nuovo provider AI sia attivo.
+              Il provider AI viene aggiornato immediatamente dopo il salvataggio, senza riavviare il server.
             </span>
           </div>
 

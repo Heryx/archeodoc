@@ -17,8 +17,15 @@ function resolveProvider(): "gemini" | "claude" | "none" {
   return "none";
 }
 
-export const AI_PROVIDER = resolveProvider();
-export const AI_AVAILABLE = AI_PROVIDER !== "none";
+export let AI_PROVIDER = resolveProvider();
+export let AI_AVAILABLE = AI_PROVIDER !== "none";
+
+/** Ricalcola il provider dopo una modifica al .env (es. dalle Impostazioni). */
+export function reloadAIProvider(): { provider: typeof AI_PROVIDER; available: boolean } {
+  AI_PROVIDER = resolveProvider();
+  AI_AVAILABLE = AI_PROVIDER !== "none";
+  return { provider: AI_PROVIDER, available: AI_AVAILABLE };
+}
 
 // ─── Campi obbligatori / raccomandati per ogni tipo di US ────────────────────
 export const CAMPI_OBBLIGATORI_US: Record<string, string[]> = {
