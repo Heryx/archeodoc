@@ -7,3 +7,12 @@ vite.config.ts.*
 *.db
 *.db-shm
 *.db-wal
+
+# Credenziali e segreti
+.env
+credentials.json
+token.json
+
+# File temporanei
+tmp_*.txt
+tmp_*.json
