@@ -36,11 +36,8 @@ if errorlevel 1 (
 REM Crea la cartella uploads se non esiste
 if not exist "uploads\" mkdir uploads
 
-REM Chiudi eventuale processo node precedente sulla porta 5000
-for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":5000 " ^| findstr "LISTENING"') do (
-    echo  Chiudo processo precedente sulla porta 5000 (PID %%P)...
-    taskkill /PID %%P /F >nul 2>&1
-)
+REM Chiudi eventuale processo precedente sulla porta 5000
+powershell -NoProfile -Command "$p = Get-NetTCPConnection -LocalPort 5000 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if ($p) { Write-Host ' Chiudo processo precedente (PID' $p.OwningProcess ')...'; Stop-Process -Id $p.OwningProcess -Force -ErrorAction SilentlyContinue }"
 timeout /t 1 >nul
 
 echo.
