@@ -25,6 +25,14 @@ fi
 mkdir -p uploads
 
 echo ""
+echo " Compilazione applicazione (build produzione)..."
+npm run build
+if [ $? -ne 0 ]; then
+    echo " ERRORE durante la build dell'applicazione."
+    exit 1
+fi
+
+echo ""
 echo " ================================================"
 echo "  Server avviato su http://localhost:5000"
 echo "  Apri il browser su quella URL."

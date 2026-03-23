@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { UnitaStratigrafica, Giornata, Allegato } from "@shared/schema";
 
 const client = new Anthropic();
-const MODEL = "claude_sonnet_4_6";
+const MODEL = "claude-sonnet-4-5";
 
 // ─── Campi obbligatori / raccomandati per ogni tipo di US ────────────────────
 export const CAMPI_OBBLIGATORI_US: Record<string, string[]> = {
