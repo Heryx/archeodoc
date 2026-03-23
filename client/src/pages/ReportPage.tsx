@@ -5,7 +5,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Wand2, Download, ChevronDown, ChevronUp, Loader2, FileText } from "lucide-react";
+import { Wand2, Download, ChevronDown, ChevronUp, Loader2, FileText, KeyRound } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { buildProjectUrl, getCurrentProjectId, getProjectHeader } from "@/lib/project";
 
@@ -22,6 +22,13 @@ export function ReportPage() {
     queryFn: async () => (await apiRequest("GET", `/api/cantieri/${cid}/giornate`)).json(),
     enabled: !!cid,
   });
+
+  const { data: aiStatus } = useQuery<{ available: boolean }>({
+    queryKey: ["/api/ai/status"],
+    queryFn: async () => (await apiRequest("GET", "/api/ai/status")).json(),
+    staleTime: Infinity,
+  });
+  const aiAvailable = aiStatus?.available ?? false;
 
   const generateReport = async (gid: number) => {
     setGenerating(gid);
@@ -62,6 +69,21 @@ export function ReportPage() {
           L'AI analizza i dati inseriti, le immagini e i risultati QC.
         </p>
       </div>
+
+      {/* Banner chiave AI mancante */}
+      {!aiAvailable && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6 text-sm flex items-start gap-3">
+          <KeyRound size={16} className="text-amber-600 mt-0.5 shrink-0" />
+          <div>
+            <p className="font-medium text-amber-800">Chiave API Anthropic non configurata</p>
+            <p className="text-amber-700 mt-1">
+              Le funzioni AI non sono disponibili. Per attivarle, crea un file <code className="bg-amber-100 px-1 rounded">.env</code> nella
+              cartella dell'applicazione con il contenuto:<br />
+              <code className="bg-amber-100 px-1 rounded mt-1 inline-block">ANTHROPIC_API_KEY=sk-ant-la-tua-chiave</code>
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Info box */}
       <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 mb-6 text-sm">
@@ -122,7 +144,8 @@ export function ReportPage() {
                     <Button size="sm" className="gap-1"
                       data-testid={`button-genera-report-${g.id}`}
                       onClick={() => generateReport(g.id)}
-                      disabled={generating === g.id}
+                      disabled={generating === g.id || !aiAvailable}
+                      title={!aiAvailable ? "Configura ANTHROPIC_API_KEY nel file .env per usare l'AI" : undefined}
                     >
                       {generating === g.id ? (
                         <><Loader2 size={13} className="animate-spin" /> Generazione...</>

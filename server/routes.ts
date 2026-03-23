@@ -1385,6 +1385,12 @@ export async function registerRoutes(_httpServer: Server, app: Express): Promise
     res.json(ctx.storage.getQcLogs(giornata.cantiereId, id));
   }));
 
+  // AI status — verifica se la chiave API è configurata
+  app.get("/api/ai/status", (_req, res) => {
+    const hasKey = !!(process.env.ANTHROPIC_API_KEY?.trim());
+    res.json({ available: hasKey });
+  });
+
   // AI US
   app.post("/api/us/:id/analizza-ai", withProject(async (ctx, req, res) => {
     const id = Number(req.params.id);

@@ -198,12 +198,14 @@ function USCard({
   onGenerate,
   onEdit,
   onDelete,
+  aiAvailable,
 }: {
   us: any;
   modelName?: string;
   onGenerate: (id: number) => void;
   onEdit: (us: any) => void;
   onDelete: (us: any) => void;
+  aiAvailable?: boolean;
 }) {
   const [showScheda, setShowScheda] = useState(false);
   let qcIssues: any[] = [];
@@ -269,7 +271,7 @@ function USCard({
             )}
           </div>
           <div className="flex flex-col gap-1.5 shrink-0">
-            <Button size="sm" variant="outline" className="gap-1 text-xs" onClick={() => onGenerate(us.id)}>
+            <Button size="sm" variant="outline" className="gap-1 text-xs" onClick={() => onGenerate(us.id)} disabled={!aiAvailable} title={!aiAvailable ? "Configura ANTHROPIC_API_KEY nel file .env per usare l'AI" : undefined}>
               <Wand2 size={12} /> Analizza AI
             </Button>
             <Button size="sm" variant="ghost" className="gap-1 text-xs" onClick={() => onEdit(us)}>
@@ -552,6 +554,13 @@ export function USPage() {
     staleTime: 0,
     refetchOnMount: true,
   });
+
+  const { data: aiStatus } = useQuery<{ available: boolean }>({
+    queryKey: ["/api/ai/status"],
+    queryFn: async () => (await apiRequest("GET", "/api/ai/status")).json(),
+    staleTime: Infinity,
+  });
+  const aiAvailable = aiStatus?.available ?? false;
 
   const availableModels = useMemo(
     () => cantiereModelData?.availableModels || usModelsData?.models || BUILTIN_US_MODELS,
@@ -1135,6 +1144,7 @@ export function USPage() {
               onGenerate={(id) => generateScheda.mutate(id)}
               onEdit={openEditDialog}
               onDelete={openDeleteDialog}
+              aiAvailable={aiAvailable}
             />
           ))}
         </div>
