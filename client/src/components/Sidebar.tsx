@@ -15,6 +15,7 @@ import {
   FolderOpen,
   Sun,
   Moon,
+  Settings,
 } from "lucide-react";
 
 export function Sidebar() {
@@ -144,14 +145,29 @@ export function Sidebar() {
       {/* Footer */}
       <div className="px-3 pb-4 mt-auto border-t border-border pt-3 flex items-center justify-between">
         <span className="text-xs text-muted-foreground">v1.0</span>
-        <button
-          onClick={toggle}
-          data-testid="button-theme-toggle"
-          className="p-1.5 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
-          aria-label="Cambia tema"
-        >
-          {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
-        </button>
+        <div className="flex items-center gap-1">
+          <Link
+            href="/impostazioni"
+            className={cn(
+              "p-1.5 rounded-md transition-colors",
+              location === "/impostazioni"
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+            )}
+            aria-label="Impostazioni"
+            title="Impostazioni"
+          >
+            <Settings size={15} />
+          </Link>
+          <button
+            onClick={toggle}
+            data-testid="button-theme-toggle"
+            className="p-1.5 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+            aria-label="Cambia tema"
+          >
+            {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+          </button>
+        </div>
       </div>
     </aside>
   );

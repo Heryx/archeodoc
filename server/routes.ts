@@ -1385,6 +1385,73 @@ export async function registerRoutes(_httpServer: Server, app: Express): Promise
     res.json(ctx.storage.getQcLogs(giornata.cantiereId, id));
   }));
 
+  // ─── Impostazioni AI: lettura chiavi dal .env ─────────────────────────────
+  app.get("/api/settings/ai", (_req, res) => {
+    // Restituisce le chiavi mascherate (mostra solo se presenti, non il valore)
+    const geminiKey = process.env.GEMINI_API_KEY?.trim() || "";
+    const anthropicKey = process.env.ANTHROPIC_API_KEY?.trim() || "";
+    const aiProvider = process.env.AI_PROVIDER?.trim() || "";
+    res.json({
+      geminiKeySet: geminiKey.length > 0,
+      anthropicKeySet: anthropicKey.length > 0,
+      geminiKeyPreview: geminiKey.length > 6 ? geminiKey.slice(0, 4) + "..." + geminiKey.slice(-4) : (geminiKey.length > 0 ? "***" : ""),
+      anthropicKeyPreview: anthropicKey.length > 6 ? anthropicKey.slice(0, 8) + "..." + anthropicKey.slice(-4) : (anthropicKey.length > 0 ? "***" : ""),
+      aiProvider: aiProvider || "auto",
+      currentProvider: AI_PROVIDER,
+      available: AI_AVAILABLE,
+    });
+  });
+
+  // ─── Impostazioni AI: salvataggio chiavi nel .env ──────────────────────────
+  app.post("/api/settings/ai", (req, res) => {
+    const { geminiKey, anthropicKey, aiProvider } = req.body as {
+      geminiKey?: string;
+      anthropicKey?: string;
+      aiProvider?: string;
+    };
+
+    // Percorso del file .env nella root del progetto (accanto a package.json)
+    const envPath = path.join(process.cwd(), ".env");
+
+    // Leggi il .env esistente (se presente)
+    let envContent = "";
+    try { envContent = fs.readFileSync(envPath, "utf-8"); } catch { envContent = ""; }
+
+    // Helper: aggiorna o inserisce una variabile nel contenuto .env
+    function setEnvVar(content: string, key: string, value: string | undefined): string {
+      if (value === undefined || value === null) return content; // non toccare se non passato
+      const trimmed = value.trim();
+      const regex = new RegExp(`^${key}=.*$`, "m");
+      if (trimmed === "") {
+        // Rimuovi la riga se il valore è vuoto
+        return content.replace(regex, "").replace(/\n{3,}/g, "\n\n").trim();
+      }
+      if (regex.test(content)) {
+        return content.replace(regex, `${key}=${trimmed}`);
+      }
+      return content ? content.trimEnd() + `\n${key}=${trimmed}\n` : `${key}=${trimmed}\n`;
+    }
+
+    let updated = envContent;
+    if (geminiKey !== undefined)    updated = setEnvVar(updated, "GEMINI_API_KEY", geminiKey);
+    if (anthropicKey !== undefined) updated = setEnvVar(updated, "ANTHROPIC_API_KEY", anthropicKey);
+    if (aiProvider !== undefined)   updated = setEnvVar(updated, "AI_PROVIDER", aiProvider === "auto" ? "" : aiProvider);
+
+    try {
+      fs.writeFileSync(envPath, updated.trimEnd() + "\n", "utf-8");
+    } catch (e: any) {
+      return res.status(500).json({ error: "Impossibile scrivere il file .env: " + e.message });
+    }
+
+    // Ricarica le variabili in process.env immediatamente
+    if (geminiKey !== undefined)    process.env.GEMINI_API_KEY    = geminiKey.trim() || undefined!;
+    if (anthropicKey !== undefined) process.env.ANTHROPIC_API_KEY = anthropicKey.trim() || undefined!;
+    if (aiProvider !== undefined && aiProvider !== "auto") process.env.AI_PROVIDER = aiProvider.trim();
+    else if (aiProvider === "auto") delete process.env.AI_PROVIDER;
+
+    res.json({ ok: true, message: "Impostazioni salvate. Riavvia il server per applicare il nuovo provider AI." });
+  });
+
   // AI status — verifica quale provider AI è configurato
   app.get("/api/ai/status", (_req, res) => {
     res.json({ available: AI_AVAILABLE, provider: AI_PROVIDER });

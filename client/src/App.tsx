@@ -12,6 +12,7 @@ import { UploadPage } from "@/pages/UploadPage";
 import { QCPage } from "@/pages/QCPage";
 import { ReportPage } from "@/pages/ReportPage";
 import { ProjectsPage } from "@/pages/ProjectsPage";
+import { ImpostazioniPage } from "@/pages/ImpostazioniPage";
 import NotFound from "@/pages/not-found";
 
 function AppLayout() {
@@ -29,6 +30,7 @@ function AppLayout() {
             <Route path="/cantiere/:cid/upload" component={UploadPage} />
             <Route path="/cantiere/:cid/qc" component={QCPage} />
             <Route path="/cantiere/:cid/report" component={ReportPage} />
+            <Route path="/impostazioni" component={ImpostazioniPage} />
             <Route component={NotFound} />
           </Switch>
         </main>
