@@ -13,6 +13,9 @@ vite.config.ts.*
 credentials.json
 token.json
 
+# Log
+logs/
+
 # File temporanei
 tmp_*.txt
 tmp_*.json

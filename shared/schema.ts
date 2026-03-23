@@ -145,6 +145,7 @@ export const qcLogs = sqliteTable("qc_logs", {
   categoria: text("categoria").notNull(),
   messaggio: text("messaggio").notNull(),
   campoInteressato: text("campo_interessato"),
+  dismissed: integer("dismissed", { mode: "boolean" }).default(false),
   createdAt: text("created_at").notNull(),
 });
 

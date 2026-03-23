@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Eye, EyeOff, Save, CheckCircle2, XCircle, Wand2, RefreshCw } from "lucide-react";
+import { Eye, EyeOff, Save, CheckCircle2, XCircle, Wand2, RefreshCw, Download, FileText } from "lucide-react";
 import { PromptEditor } from "@/components/PromptEditor";
 
 type AiSettings = {
@@ -48,6 +48,26 @@ export function ImpostazioniPage() {
       .catch(() => {})
       .finally(() => setLoadingPrompts(false));
   }, []);
+
+  // ─── Log di sistema ─────────────────────────────────────────────────────
+  const [logLines, setLogLines] = useState<string[]>([]);
+  const [logPath, setLogPath] = useState("");
+
+  const fetchLogs = useCallback(() => {
+    fetch("/api/logs")
+      .then((r) => r.json())
+      .then((data: { lines: string[]; path: string }) => {
+        setLogLines(data.lines ?? []);
+        setLogPath(data.path ?? "");
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetchLogs();
+    const interval = setInterval(fetchLogs, 30_000);
+    return () => clearInterval(interval);
+  }, [fetchLogs]);
 
   // Inizializza i valori del form dalla risposta server (solo la prima volta)
   if (settings && !initialized) {
@@ -323,6 +343,52 @@ export function ImpostazioniPage() {
                 initialValue={s.value}
               />
             ))
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Log di sistema */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <FileText size={16} className="text-primary" />
+            Log di sistema
+          </CardTitle>
+          {logPath && <p className="text-xs text-muted-foreground">{logPath}</p>}
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" className="gap-1" onClick={fetchLogs}>
+              <RefreshCw size={13} />
+              Aggiorna
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1"
+              onClick={() => window.open("/api/logs/download", "_blank")}
+            >
+              <Download size={13} />
+              Scarica log
+            </Button>
+          </div>
+          {logLines.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nessun log disponibile.</p>
+          ) : (
+            <div className="font-mono text-xs max-h-72 overflow-y-auto rounded-md border bg-muted/30 p-3">
+              {logLines.map((line, i) => {
+                let cls = "";
+                if (line.includes("[ERROR]")) cls = "text-red-500";
+                else if (line.includes("[WARN]")) cls = "text-amber-500";
+                else if (line.includes("[INFO]")) cls = "text-green-600";
+                else if (line.includes("[DEBUG]")) cls = "text-gray-400";
+                return (
+                  <div key={i} className={cls}>
+                    {line}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </CardContent>
       </Card>

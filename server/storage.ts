@@ -223,6 +223,7 @@ function migrate(sqlite: Database.Database) {
   ensureColumn(sqlite, "unita_stratigrafiche", "scheda_data", "scheda_data TEXT");
   ensureColumn(sqlite, "sas_records", "data", "data TEXT");
   ensureColumn(sqlite, "ra_records", "data", "data TEXT");
+  ensureColumn(sqlite, "qc_logs", "dismissed", "dismissed INTEGER DEFAULT 0");
 }
 
 export interface IStorage {
@@ -271,6 +272,8 @@ export interface IStorage {
   getQcLogs(cantiereId: number, giornataId?: number): QcLog[];
   createQcLog(data: InsertQcLog): QcLog;
   deleteQcLogsByGiornata(giornataId: number): void;
+  dismissQcLog(id: number): void;
+  undismissQcLog(id: number): void;
 }
 
 function now() {
@@ -496,6 +499,14 @@ class SQLiteStorage implements IStorage {
 
   deleteQcLogsByGiornata(giornataId: number) {
     this.db.delete(qcLogs).where(eq(qcLogs.giornataId, giornataId)).run();
+  }
+
+  dismissQcLog(id: number) {
+    this.db.update(qcLogs).set({ dismissed: true }).where(eq(qcLogs.id, id)).run();
+  }
+
+  undismissQcLog(id: number) {
+    this.db.update(qcLogs).set({ dismissed: false }).where(eq(qcLogs.id, id)).run();
   }
 }
 

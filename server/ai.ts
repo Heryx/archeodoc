@@ -1,5 +1,6 @@
 import type { UnitaStratigrafica, Giornata } from "@shared/schema";
 import { getSetting } from "./ai_settings";
+import { logger } from "./logger";
 
 // ─── Rilevamento provider ────────────────────────────────────────────────────
 // Preferisce Gemini (gratuito) se la chiave è presente, altrimenti Claude.
@@ -105,6 +106,7 @@ async function callAI(prompt: string, maxTokens = 3000, systemPrompt?: string): 
     return response.content[0].type === "text" ? response.content[0].text : "";
   }
 
+  logger.error("callAI: nessun provider AI configurato");
   throw new Error("Nessun provider AI configurato.");
 }
 
@@ -190,6 +192,7 @@ Rispondi SOLO con questo JSON (nessun testo prima o dopo):
   } catch (err) {
     console.error("Errore analisi AI testo US:", err);
     const msg = err instanceof Error ? err.message : String(err);
+    logger.error("analizzaTestoUS fallita", { err: msg });
     throw new Error(`Impossibile analizzare la scheda US con l'AI. Causa: ${msg}`);
   }
 }
@@ -276,6 +279,7 @@ Rispondi SOLO con questo JSON (nessun testo prima o dopo):
   } catch (err) {
     console.error("Errore analisi AI testo giornata:", err);
     const msg = err instanceof Error ? err.message : String(err);
+    logger.error("analizzaTestoGiornata fallita", { err: msg });
     throw new Error(`Impossibile analizzare il report giornaliero con l'AI. Causa: ${msg}`);
   }
 }

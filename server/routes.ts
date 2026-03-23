@@ -33,6 +33,7 @@ import { checkGiornata } from "./qc";
 import { analizzaTestoUS, analizzaTestoGiornata, AI_AVAILABLE, AI_PROVIDER, reloadAIProvider } from "./ai";
 import { exportSchedaUSDocx, exportReportGiornalieroDocx } from "./docx_export";
 import { getAllSettings, setSetting, resetToDefault } from "./ai_settings";
+import { getLogPath } from "./logger";
 
 type ProjectContext = {
   project: ProjectDefinition;
@@ -1748,4 +1749,34 @@ export async function registerRoutes(_httpServer: Server, app: Express): Promise
     const newValue = getAllSettings().find((s) => s.key === key)?.value ?? "";
     res.json({ ok: true, value: newValue });
   });
+
+  // ─── Log di sistema ────────────────────────────────────────────────────────
+
+  app.get("/api/logs", (_req, res) => {
+    const logPath = getLogPath();
+    if (!fs.existsSync(logPath)) return res.json({ lines: [], path: logPath, totalLines: 0 });
+    const content = fs.readFileSync(logPath, "utf-8");
+    const lines = content.split("\n").filter(Boolean);
+    const last200 = lines.slice(-200);
+    res.json({ lines: last200, path: logPath, totalLines: lines.length });
+  });
+
+  app.get("/api/logs/download", (_req, res) => {
+    const logPath = getLogPath();
+    if (!fs.existsSync(logPath)) return res.status(404).json({ error: "Nessun file di log" });
+    res.download(logPath, "archeodoc.log");
+  });
+
+  // ─── Dismiss QC logs ──────────────────────────────────────────────────────
+
+  app.post("/api/qc-logs/:id/dismiss", withProject((ctx, req, res) => {
+    const id = Number(req.params.id);
+    const { dismissed } = req.body as { dismissed: boolean };
+    if (dismissed) {
+      ctx.storage.dismissQcLog(id);
+    } else {
+      ctx.storage.undismissQcLog(id);
+    }
+    res.json({ ok: true });
+  }));
 }
