@@ -1383,6 +1383,53 @@ export async function registerRoutes(_httpServer: Server, app: Express): Promise
     res.json(result);
   }));
 
+  // QC globale cantiere: esegue QC su tutte le giornate
+  app.post("/api/cantieri/:cid/qc-all", withProject(async (ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const cantiere = ctx.storage.getCantiere(cid);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const giornate = ctx.storage.getGiornate(cid);
+    const tutteLeUS = ctx.storage.getUSList(cid);
+    let totalOk = 0, totalWarning = 0, totalError = 0;
+
+    for (const giornata of giornate) {
+      const usList = ctx.storage.getUSList(cid, giornata.id);
+      const allegatiGiornata = ctx.storage.getAllegati(cid, giornata.id);
+      const result = checkGiornata(giornata, usList, allegatiGiornata, tutteLeUS);
+
+      ctx.storage.updateGiornata(giornata.id, { qcStatus: result.status, qcReport: JSON.stringify(result.issues) });
+      ctx.storage.deleteQcLogsByGiornata(giornata.id);
+
+      for (const issue of result.issues) {
+        ctx.storage.createQcLog({
+          cantiereId: cid,
+          giornataId: giornata.id,
+          usId: issue.usId || null,
+          livello: issue.livello,
+          categoria: issue.categoria,
+          messaggio: issue.messaggio,
+          campoInteressato: issue.campoInteressato || null,
+        });
+      }
+
+      for (const us of usList) {
+        const usIssues = result.issues.filter((i) => i.usId === us.id);
+        ctx.storage.updateUS(us.id, {
+          qcStatus: usIssues.some((i) => i.livello === "error") ? "error"
+            : usIssues.some((i) => i.livello === "warning") ? "warning" : "ok",
+          qcProblemi: JSON.stringify(usIssues),
+        });
+      }
+
+      if (result.status === "ok") totalOk++;
+      else if (result.status === "warning") totalWarning++;
+      else totalError++;
+    }
+
+    res.json({ ok: true, giornate: giornate.length, totalOk, totalWarning, totalError });
+  }));
+
   app.get("/api/giornate/:id/qc-logs", withProject((ctx, req, res) => {
     const id = Number(req.params.id);
     const giornata = ctx.storage.getGiornata(id);

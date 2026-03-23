@@ -53,13 +53,14 @@ export function QCPage() {
     onError: () => toast({ title: "Errore QC", variant: "destructive" }),
   });
 
-  const runAllQc = async () => {
-    for (const g of giornate) {
-      await apiRequest("POST", `/api/giornate/${g.id}/qc`, {});
-    }
-    qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "giornate", activeProjectId] });
-    toast({ title: "QC completato su tutte le giornate" });
-  };
+  const runAllQcMutation = useMutation({
+    mutationFn: async () => (await apiRequest("POST", `/api/cantieri/${cid}/qc-all`, {})).json(),
+    onSuccess: (data) => {
+      qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "giornate", activeProjectId] });
+      toast({ title: "QC completato", description: `${data.totalOk} OK · ${data.totalWarning} avvisi · ${data.totalError} errori` });
+    },
+    onError: () => toast({ title: "Errore QC globale", variant: "destructive" }),
+  });
 
   // Statistiche globali
   const stats = { ok: 0, warning: 0, error: 0, pending: 0 };
@@ -75,8 +76,9 @@ export function QCPage() {
           <h1 className="text-2xl font-bold">Quality Control</h1>
           <p className="text-muted-foreground mt-1">Verifica completezza e coerenza della documentazione</p>
         </div>
-        <Button variant="outline" className="gap-2" onClick={runAllQc} disabled={giornate.length === 0}>
-          <RefreshCw size={15} /> Esegui QC su tutto
+        <Button variant="outline" className="gap-2" onClick={() => runAllQcMutation.mutate()} disabled={giornate.length === 0 || runAllQcMutation.isPending}>
+          <RefreshCw size={15} className={runAllQcMutation.isPending ? "animate-spin" : ""} />
+          {runAllQcMutation.isPending ? "In corso..." : "Esegui QC su tutto"}
         </Button>
       </div>
 

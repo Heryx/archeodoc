@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import { buildProjectUrl, getCurrentProjectId, getProjectHeader } from "@/lib/project";
@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   CalendarDays, Layers, Image, ShieldCheck, Wand2,
-  AlertCircle, AlertTriangle, CheckCircle2, Clock, Download, BarChart3,
+  AlertCircle, CheckCircle2, Download, BarChart3, RefreshCw,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useState } from "react";
@@ -61,6 +61,16 @@ export function StatsPage() {
   const activeProjectId = getCurrentProjectId();
   const { toast } = useToast();
   const [exportLoading, setExportLoading] = useState(false);
+  const qcClient = useQueryClient();
+
+  const runAllQc = useMutation({
+    mutationFn: async () => (await apiRequest("POST", `/api/cantieri/${cid}/qc-all`, {})).json(),
+    onSuccess: (data) => {
+      toast({ title: "QC completato", description: `${data.totalOk} OK · ${data.totalWarning} avvisi · ${data.totalError} errori` });
+      qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "statistiche", activeProjectId] });
+    },
+    onError: () => toast({ title: "Errore QC", variant: "destructive" }),
+  });
 
   const { data: stats, isLoading } = useQuery<Stats>({
     queryKey: ["/api/cantieri", cid, "statistiche", activeProjectId],
@@ -139,10 +149,16 @@ export function StatsPage() {
             {cantiere.codice} — {cantiere.localita}
           </p>
         </div>
-        <Button onClick={handleExportZip} disabled={exportLoading} className="gap-2 shrink-0">
-          <Download size={15} />
-          {exportLoading ? "Preparazione..." : "Esporta tutto ZIP"}
-        </Button>
+        <div className="flex gap-2 shrink-0">
+          <Button variant="outline" onClick={() => runAllQc.mutate()} disabled={runAllQc.isPending} className="gap-2">
+            <RefreshCw size={15} className={runAllQc.isPending ? "animate-spin" : ""} />
+            {runAllQc.isPending ? "QC in corso..." : "Esegui QC"}
+          </Button>
+          <Button onClick={handleExportZip} disabled={exportLoading} className="gap-2">
+            <Download size={15} />
+            {exportLoading ? "Preparazione..." : "Esporta ZIP"}
+          </Button>
+        </div>
       </div>
 
       {/* KPI principali */}
