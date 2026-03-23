@@ -970,7 +970,8 @@ export async function registerRoutes(_httpServer: Server, app: Express): Promise
       const schedaDataRecord = parseDataRecord(req.body?.schedaData);
       const usBaseInput = pickUSBaseFromPayload(req.body || {}, {});
       const usValidationInput = toUSValidationInput(usBaseInput, schedaDataRecord);
-      const usValidator = buildEntityZodSchema(projectSchema, "us", { allowUnknown: false });
+      // Usa passthrough per consentire i campi extra del modello US (es. ICCD)
+      const usValidator = buildEntityZodSchema(projectSchema, "us", { allowUnknown: true });
       const parsed = usValidator.safeParse(usValidationInput);
       if (!parsed.success) {
         return res.status(422).json({
@@ -1014,7 +1015,11 @@ export async function registerRoutes(_httpServer: Server, app: Express): Promise
     const existingUSBase = pickUSBaseFromPayload(existing as unknown as Record<string, unknown>, {});
     const nextUSBase = pickUSBaseFromPayload(payload, existingUSBase);
     const projectSchema = getProjectSchemaDefinition(ctx.project.id);
-    const usValidator = buildEntityZodSchema(projectSchema, "us", { allowUnknown: false });
+    // Usa passthrough (allowUnknown: true) per le US: i campi extra del modello
+    // (es. ICCD) vengono già separati da stripTopLevelKeysFromSchedaData e salvati
+    // in schedaData. La validazione strict bloccherebbe i campi ICCD non presenti
+    // nello schema base del progetto.
+    const usValidator = buildEntityZodSchema(projectSchema, "us", { allowUnknown: true });
     const parsed = usValidator.safeParse(toUSValidationInput(nextUSBase, nextSchedaData));
     if (!parsed.success) {
       return res.status(422).json({

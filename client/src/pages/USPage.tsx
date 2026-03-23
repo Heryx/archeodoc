@@ -725,7 +725,12 @@ export function USPage() {
       });
       toast({ title: "US creata" });
     },
-    onError: () => toast({ title: "Errore nella creazione", variant: "destructive" }),
+    onError: (err: any) => {
+      const raw = err?.message || "";
+      let desc = "";
+      try { const body = JSON.parse(raw.replace(/^\d+: /, "")); desc = body.error || ""; } catch { desc = raw; }
+      toast({ title: "Errore nella creazione", description: desc || undefined, variant: "destructive" });
+    },
   });
 
   const updateUS = useMutation({
@@ -740,7 +745,12 @@ export function USPage() {
       setEditingId(null);
       toast({ title: "US aggiornata" });
     },
-    onError: () => toast({ title: "Errore aggiornamento US", variant: "destructive" }),
+    onError: (err: any) => {
+      const raw = err?.message || "";
+      let desc = "";
+      try { const body = JSON.parse(raw.replace(/^\d+: /, "")); desc = body.error || ""; } catch { desc = raw; }
+      toast({ title: "Errore aggiornamento US", description: desc || undefined, variant: "destructive" });
+    },
   });
 
   const deleteUS = useMutation({
