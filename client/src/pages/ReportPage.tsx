@@ -23,12 +23,13 @@ export function ReportPage() {
     enabled: !!cid,
   });
 
-  const { data: aiStatus } = useQuery<{ available: boolean }>({
+  const { data: aiStatus } = useQuery<{ available: boolean; provider: string }>({
     queryKey: ["/api/ai/status"],
     queryFn: async () => (await apiRequest("GET", "/api/ai/status")).json(),
     staleTime: Infinity,
   });
   const aiAvailable = aiStatus?.available ?? false;
+  const aiProvider = aiStatus?.provider ?? "none";
 
   const generateReport = async (gid: number) => {
     setGenerating(gid);
@@ -65,21 +66,39 @@ export function ReportPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold">Report AI</h1>
         <p className="text-muted-foreground mt-1">
-          Genera diari di scavo e schede US formattate con Claude AI.
-          L'AI analizza i dati inseriti, le immagini e i risultati QC.
+          Genera diari di scavo e schede US formattate con AI.
+          L'AI analizza i dati inseriti e i risultati QC per produrre documentazione professionale.
         </p>
       </div>
+
+      {/* Banner provider AI attivo */}
+      {aiAvailable && (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6 text-sm flex items-start gap-3">
+          <Wand2 size={16} className="text-green-600 mt-0.5 shrink-0" />
+          <div>
+            <p className="font-medium text-green-800">
+              {aiProvider === "gemini" ? "Google Gemini 1.5 Flash attivo (gratuito)" : "Claude Sonnet attivo"}
+            </p>
+            <p className="text-green-700 mt-1">
+              {aiProvider === "gemini"
+                ? "L'AI usa Gemini 1.5 Flash tramite la tua GEMINI_API_KEY. Nessun costo per le richieste."
+                : "L'AI usa Claude Sonnet tramite la tua ANTHROPIC_API_KEY."}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Banner chiave AI mancante */}
       {!aiAvailable && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6 text-sm flex items-start gap-3">
           <KeyRound size={16} className="text-amber-600 mt-0.5 shrink-0" />
           <div>
-            <p className="font-medium text-amber-800">Chiave API Anthropic non configurata</p>
+            <p className="font-medium text-amber-800">Nessuna chiave AI configurata</p>
             <p className="text-amber-700 mt-1">
-              Le funzioni AI non sono disponibili. Per attivarle, crea un file <code className="bg-amber-100 px-1 rounded">.env</code> nella
-              cartella dell'applicazione con il contenuto:<br />
-              <code className="bg-amber-100 px-1 rounded mt-1 inline-block">ANTHROPIC_API_KEY=sk-ant-la-tua-chiave</code>
+              Le funzioni AI non sono disponibili. Crea un file <code className="bg-amber-100 px-1 rounded">.env</code> nella
+              cartella dell'applicazione con almeno una di queste chiavi:<br />
+              <code className="bg-amber-100 px-1 rounded mt-1 inline-block">GEMINI_API_KEY=la-tua-chiave</code> (gratuita da aistudio.google.com)<br />
+              <code className="bg-amber-100 px-1 rounded mt-1 inline-block">ANTHROPIC_API_KEY=sk-ant-la-tua-chiave</code> (a pagamento)
             </p>
           </div>
         </div>

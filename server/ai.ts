@@ -1,8 +1,24 @@
-import Anthropic from "@anthropic-ai/sdk";
-import type { UnitaStratigrafica, Giornata, Allegato } from "@shared/schema";
+import type { UnitaStratigrafica, Giornata } from "@shared/schema";
 
-const client = new Anthropic();
-const MODEL = "claude-sonnet-4-5";
+// ─── Rilevamento provider ────────────────────────────────────────────────────
+// Preferisce Gemini (gratuito) se la chiave è presente, altrimenti Claude.
+// AI_PROVIDER può forzare la scelta: "gemini" | "claude"
+
+const envProvider = (process.env.AI_PROVIDER || "").toLowerCase().trim();
+const hasGemini   = !!(process.env.GEMINI_API_KEY?.trim());
+const hasClaude   = !!(process.env.ANTHROPIC_API_KEY?.trim());
+
+function resolveProvider(): "gemini" | "claude" | "none" {
+  if (envProvider === "claude") return hasClaude ? "claude" : "none";
+  if (envProvider === "gemini") return hasGemini ? "gemini" : "none";
+  // Auto-detect: Gemini preferito (gratuito)
+  if (hasGemini) return "gemini";
+  if (hasClaude) return "claude";
+  return "none";
+}
+
+export const AI_PROVIDER = resolveProvider();
+export const AI_AVAILABLE = AI_PROVIDER !== "none";
 
 // ─── Campi obbligatori / raccomandati per ogni tipo di US ────────────────────
 export const CAMPI_OBBLIGATORI_US: Record<string, string[]> = {
@@ -56,6 +72,37 @@ export const CAMPI_OBBLIGATORI_GIORNATA = [
   "condizioni meteo",
 ];
 
+// ─── Helper: chiama l'AI con il provider attivo ───────────────────────────────
+async function callAI(prompt: string, maxTokens = 3000): Promise<string> {
+  if (AI_PROVIDER === "gemini") {
+    const { GoogleGenerativeAI } = await import("@google/generative-ai");
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const result = await model.generateContent(prompt);
+    return result.response.text();
+  }
+
+  if (AI_PROVIDER === "claude") {
+    const Anthropic = (await import("@anthropic-ai/sdk")).default;
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const response = await client.messages.create({
+      model: "claude-sonnet-4-5",
+      max_tokens: maxTokens,
+      messages: [{ role: "user", content: prompt }],
+    });
+    return response.content[0].type === "text" ? response.content[0].text : "";
+  }
+
+  throw new Error("Nessun provider AI configurato.");
+}
+
+// ─── Helper: estrai JSON dalla risposta ──────────────────────────────────────
+function parseJsonResponse(raw: string): Record<string, unknown> {
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error("Risposta AI non in formato JSON");
+  return JSON.parse(jsonMatch[0]);
+}
+
 // ─── Analisi e formattazione testo US ────────────────────────────────────────
 export async function analizzaTestoUS(
   us: UnitaStratigrafica,
@@ -63,7 +110,6 @@ export async function analizzaTestoUS(
   const tipo = us.tipo || "default";
   const campiAttesi = CAMPI_OBBLIGATORI_US[tipo] || CAMPI_OBBLIGATORI_US.default;
 
-  // Costruisci il testo dei dati esistenti
   const datiUS = `
 CODICE US: ${us.codiceUS || "NON INSERITO"}
 TIPO: ${us.tipo || "NON INSERITO"}
@@ -113,21 +159,12 @@ Rispondi SOLO con questo JSON (nessun testo prima o dopo):
 }`;
 
   try {
-    const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: 3000,
-      messages: [{ role: "user", content: prompt }],
-    });
-
-    const raw = response.content[0].type === "text" ? response.content[0].text : "";
-    // Estrai JSON anche se c'è testo attorno
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error("Risposta AI non in formato JSON");
-    const result = JSON.parse(jsonMatch[0]);
+    const raw = await callAI(prompt, 3000);
+    const result = parseJsonResponse(raw);
     return {
-      campiMancanti: Array.isArray(result.campiMancanti) ? result.campiMancanti : [],
-      schedaFormattata: result.schedaFormattata || "",
-      note: result.note || "",
+      campiMancanti: Array.isArray(result.campiMancanti) ? (result.campiMancanti as string[]) : [],
+      schedaFormattata: (result.schedaFormattata as string) || "",
+      note: (result.note as string) || "",
     };
   } catch (err) {
     console.error("Errore analisi AI testo US:", err);
@@ -198,20 +235,12 @@ Rispondi SOLO con questo JSON (nessun testo prima o dopo):
 }`;
 
   try {
-    const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: 3000,
-      messages: [{ role: "user", content: prompt }],
-    });
-
-    const raw = response.content[0].type === "text" ? response.content[0].text : "";
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error("Risposta AI non in formato JSON");
-    const result = JSON.parse(jsonMatch[0]);
+    const raw = await callAI(prompt, 3000);
+    const result = parseJsonResponse(raw);
     return {
-      campiMancanti: Array.isArray(result.campiMancanti) ? result.campiMancanti : [],
-      reportFormattato: result.reportFormattato || "",
-      note: result.note || "",
+      campiMancanti: Array.isArray(result.campiMancanti) ? (result.campiMancanti as string[]) : [],
+      reportFormattato: (result.reportFormattato as string) || "",
+      note: (result.note as string) || "",
     };
   } catch (err) {
     console.error("Errore analisi AI testo giornata:", err);

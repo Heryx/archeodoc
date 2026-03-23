@@ -271,7 +271,7 @@ function USCard({
             )}
           </div>
           <div className="flex flex-col gap-1.5 shrink-0">
-            <Button size="sm" variant="outline" className="gap-1 text-xs" onClick={() => onGenerate(us.id)} disabled={!aiAvailable} title={!aiAvailable ? "Configura ANTHROPIC_API_KEY nel file .env per usare l'AI" : undefined}>
+            <Button size="sm" variant="outline" className="gap-1 text-xs" onClick={() => onGenerate(us.id)} disabled={!aiAvailable} title={!aiAvailable ? "Configura GEMINI_API_KEY o ANTHROPIC_API_KEY nel file .env per usare l'AI" : undefined}>
               <Wand2 size={12} /> Analizza AI
             </Button>
             <Button size="sm" variant="ghost" className="gap-1 text-xs" onClick={() => onEdit(us)}>

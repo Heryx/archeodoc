@@ -30,7 +30,7 @@ import { BASE_US_MODEL_KEY } from "@shared/us_models";
 import { buildEntityZodSchema } from "@shared/validation/buildZodSchema";
 import { normalizeDocumentationSchemaDefinition } from "@shared/documentation_schema";
 import { checkGiornata } from "./qc";
-import { analizzaTestoUS, analizzaTestoGiornata } from "./ai";
+import { analizzaTestoUS, analizzaTestoGiornata, AI_AVAILABLE, AI_PROVIDER } from "./ai";
 import { exportSchedaUSDocx, exportReportGiornalieroDocx } from "./docx_export";
 
 type ProjectContext = {
@@ -1385,10 +1385,9 @@ export async function registerRoutes(_httpServer: Server, app: Express): Promise
     res.json(ctx.storage.getQcLogs(giornata.cantiereId, id));
   }));
 
-  // AI status — verifica se la chiave API è configurata
+  // AI status — verifica quale provider AI è configurato
   app.get("/api/ai/status", (_req, res) => {
-    const hasKey = !!(process.env.ANTHROPIC_API_KEY?.trim());
-    res.json({ available: hasKey });
+    res.json({ available: AI_AVAILABLE, provider: AI_PROVIDER });
   });
 
   // AI US
