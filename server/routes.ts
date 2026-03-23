@@ -32,6 +32,7 @@ import { normalizeDocumentationSchemaDefinition } from "@shared/documentation_sc
 import { checkGiornata } from "./qc";
 import { analizzaTestoUS, analizzaTestoGiornata, AI_AVAILABLE, AI_PROVIDER, reloadAIProvider } from "./ai";
 import { exportSchedaUSDocx, exportReportGiornalieroDocx } from "./docx_export";
+import { getAllSettings, setSetting, resetToDefault } from "./ai_settings";
 
 type ProjectContext = {
   project: ProjectDefinition;
@@ -1722,4 +1723,29 @@ export async function registerRoutes(_httpServer: Server, app: Express): Promise
       res.status(500).json({ error: error.message });
     }
   }));
+
+  // ─── Istruzioni AI personalizzabili ─────────────────────────────────────────
+
+  app.get("/api/settings/ai-prompts", (_req, res) => {
+    const settings = getAllSettings();
+    res.json(settings);
+  });
+
+  app.put("/api/settings/ai-prompts/:key", (req, res) => {
+    const { key } = req.params;
+    const { value } = req.body as { value: string };
+    if (!value || typeof value !== "string") {
+      return res.status(400).json({ error: "value è obbligatorio" });
+    }
+    setSetting(key, value);
+    res.json({ ok: true });
+  });
+
+  app.post("/api/settings/ai-prompts/reset", (req, res) => {
+    const { key } = req.body as { key: string };
+    const ok = resetToDefault(key);
+    if (!ok) return res.status(404).json({ error: "Chiave non trovata o file default mancante" });
+    const newValue = getAllSettings().find((s) => s.key === key)?.value ?? "";
+    res.json({ ok: true, value: newValue });
+  });
 }

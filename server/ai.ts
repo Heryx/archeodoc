@@ -1,4 +1,5 @@
 import type { UnitaStratigrafica, Giornata } from "@shared/schema";
+import { getSetting } from "./ai_settings";
 
 // ─── Rilevamento provider ────────────────────────────────────────────────────
 // Preferisce Gemini (gratuito) se la chiave è presente, altrimenti Claude.
@@ -82,12 +83,13 @@ export const CAMPI_OBBLIGATORI_GIORNATA = [
 ];
 
 // ─── Helper: chiama l'AI con il provider attivo ───────────────────────────────
-async function callAI(prompt: string, maxTokens = 3000): Promise<string> {
+async function callAI(prompt: string, maxTokens = 3000, systemPrompt?: string): Promise<string> {
   if (AI_PROVIDER === "gemini") {
     const { GoogleGenerativeAI } = await import("@google/generative-ai");
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-    const result = await model.generateContent(prompt);
+    const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
+    const result = await model.generateContent(fullPrompt);
     return result.response.text();
   }
 
@@ -97,6 +99,7 @@ async function callAI(prompt: string, maxTokens = 3000): Promise<string> {
     const response = await client.messages.create({
       model: "claude-sonnet-4-5",
       max_tokens: maxTokens,
+      ...(systemPrompt ? { system: systemPrompt } : {}),
       messages: [{ role: "user", content: prompt }],
     });
     return response.content[0].type === "text" ? response.content[0].text : "";
@@ -137,7 +140,10 @@ MATERIALI RINVENUTI: ${us.materialiRinvenuti || "nessuno"}
 CAMPIONI PRELEVATI: ${us.campioni || "nessuno"}
   `.trim();
 
-  const prompt = `Sei un archeologo specializzato in documentazione stratigrafica italiana. Analizza i dati di questa Unità Stratigrafica.
+  const systemPrompt = getSetting("system_prompt") || "Sei un assistente specializzato in archeologia professionale.";
+  const schedaTemplate = getSetting("scheda_us_template") || "";
+
+  const prompt = `${schedaTemplate ? schedaTemplate + "\n\n" : ""}Analizza i dati di questa Unità Stratigrafica.
 
 DATI INSERITI:
 ${datiUS}
@@ -149,7 +155,7 @@ COMPITO:
 1. Identifica quali dei campi attesi sono MANCANTI o insufficienti nei dati inseriti.
    - Per "mancante" intendi: campo vuoto, "NON INSERITO", "nessuna relazione" quando richiesta, o testo troppo generico (<10 caratteri).
    - Restituisci un array JSON dei campi mancanti, es: ["quota", "settore", "relazioni stratigrafiche"]
-   
+
 2. Produci una scheda US formattata in italiano con le sezioni standard:
    - INTESTAZIONE (codice, tipo)
    - DESCRIZIONE STRATIGRAFICA (riscrivi e migliora il testo inserito mantenendo il significato, correggi eventuali errori grammaticali, usa terminologia tecnica appropriata)
@@ -168,7 +174,7 @@ Rispondi SOLO con questo JSON (nessun testo prima o dopo):
 }`;
 
   try {
-    const raw = await callAI(prompt, 3000);
+    const raw = await callAI(prompt, 3000, systemPrompt);
     const result = parseJsonResponse(raw);
     return {
       campiMancanti: Array.isArray(result.campiMancanti) ? (result.campiMancanti as string[]) : [],
@@ -209,7 +215,10 @@ NOTE OPERATIVE: ${giornata.note || "NON INSERITE"}
     ? qcIssues.map(i => `[${i.livello.toUpperCase()}] ${i.messaggio}`).join("\n")
     : "Nessuna criticità rilevata";
 
-  const prompt = `Sei un archeologo specializzato in documentazione di scavo italiana. Analizza i dati di questa giornata di scavo.
+  const systemPrompt = getSetting("system_prompt") || "Sei un assistente specializzato in archeologia professionale.";
+  const giornaleFormat = getSetting("giornale_format") || "";
+
+  const prompt = `${giornaleFormat ? giornaleFormat + "\n\n" : ""}Analizza i dati di questa giornata di scavo.
 
 DATI GIORNATA:
 ${datiGiornata}
@@ -244,7 +253,7 @@ Rispondi SOLO con questo JSON (nessun testo prima o dopo):
 }`;
 
   try {
-    const raw = await callAI(prompt, 3000);
+    const raw = await callAI(prompt, 3000, systemPrompt);
     const result = parseJsonResponse(raw);
     return {
       campiMancanti: Array.isArray(result.campiMancanti) ? (result.campiMancanti as string[]) : [],

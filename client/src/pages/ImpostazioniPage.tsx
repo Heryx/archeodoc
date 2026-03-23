@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { Eye, EyeOff, Save, CheckCircle2, XCircle, Wand2, RefreshCw } from "lucide-react";
+import { PromptEditor } from "@/components/PromptEditor";
 
 type AiSettings = {
   geminiKeySet: boolean;
@@ -35,6 +36,18 @@ export function ImpostazioniPage() {
   const [showGemini, setShowGemini] = useState(false);
   const [showAnthropic, setShowAnthropic] = useState(false);
   const [initialized, setInitialized] = useState(false);
+
+  type AiPromptSetting = { key: string; value: string; label: string | null; description: string | null };
+  const [aiPrompts, setAiPrompts] = useState<AiPromptSetting[]>([]);
+  const [loadingPrompts, setLoadingPrompts] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/settings/ai-prompts")
+      .then((r) => r.json())
+      .then((data) => setAiPrompts(data))
+      .catch(() => {})
+      .finally(() => setLoadingPrompts(false));
+  }, []);
 
   // Inizializza i valori del form dalla risposta server (solo la prima volta)
   if (settings && !initialized) {
@@ -286,6 +299,31 @@ export function ImpostazioniPage() {
               <><Save size={14} className="mr-2" /> Salva impostazioni</>
             )}
           </Button>
+        </CardContent>
+      </Card>
+
+      {/* Istruzioni AI personalizzabili */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Istruzioni AI</CardTitle>
+          <CardDescription>
+            Personalizza i prompt e le istruzioni usate dall'assistente AI per analisi US e giornali di cantiere.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {loadingPrompts ? (
+            <p className="text-sm text-muted-foreground">Caricamento istruzioni...</p>
+          ) : (
+            aiPrompts.map((s) => (
+              <PromptEditor
+                key={s.key}
+                settingKey={s.key}
+                label={s.label ?? s.key}
+                description={s.description ?? undefined}
+                initialValue={s.value}
+              />
+            ))
+          )}
         </CardContent>
       </Card>
     </div>

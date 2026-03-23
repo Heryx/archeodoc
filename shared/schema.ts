@@ -1,4 +1,5 @@
 import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -150,3 +151,15 @@ export const qcLogs = sqliteTable("qc_logs", {
 export const insertQcLogSchema = createInsertSchema(qcLogs).omit({ id: true, createdAt: true });
 export type InsertQcLog = z.infer<typeof insertQcLogSchema>;
 export type QcLog = typeof qcLogs.$inferSelect;
+
+// Impostazioni AI (prompt personalizzabili)
+export const aiSettings = sqliteTable("ai_settings", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  key: text("key").notNull().unique(),
+  value: text("value").notNull(),
+  label: text("label"),
+  description: text("description"),
+  updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export type AiSetting = typeof aiSettings.$inferSelect;
