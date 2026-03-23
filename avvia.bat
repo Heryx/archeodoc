@@ -35,28 +35,15 @@ if errorlevel 1 (
 REM Crea la cartella uploads se non esiste
 if not exist "uploads\" mkdir uploads
 
-REM Evita processo vecchio su porta 5000 (server stale)
+REM Chiudi eventuale processo precedente sulla porta 5000
 set "PORT_PID="
 for /f %%P in ('powershell -NoProfile -Command "$c = Get-NetTCPConnection -LocalPort 5000 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if ($c) { $c.OwningProcess }"') do set "PORT_PID=%%P"
 
 if defined PORT_PID (
-    set "PORT_CMD="
-    for /f "usebackq delims=" %%C in (`powershell -NoProfile -Command "$p = Get-CimInstance Win32_Process -Filter 'ProcessId=%PORT_PID%'; if ($p) { $p.CommandLine }"`) do set "PORT_CMD=%%C"
-
     echo.
-    echo  Porta 5000 gia in uso (PID %PORT_PID%).
-    echo  Comando: %PORT_CMD%
-    echo %PORT_CMD% | findstr /I /C:"dist\index.cjs" >nul
-    if not errorlevel 1 (
-        echo  Trovata istanza precedente di ArcheoDoc: la chiudo per usare la build aggiornata...
-        taskkill /PID %PORT_PID% /F >nul 2>&1
-        timeout /t 1 >nul
-    ) else (
-        echo  ERRORE: la porta 5000 e' occupata da un altro processo.
-        echo  Chiudi quel processo e riprova.
-        pause
-        exit /b 1
-    )
+    echo  Chiudo processo precedente sulla porta 5000 (PID %PORT_PID%)...
+    taskkill /PID %PORT_PID% /F >nul 2>&1
+    timeout /t 2 >nul
 )
 
 echo.
@@ -76,12 +63,16 @@ echo   Per chiudere: tieni premuto Ctrl+C
 echo  ================================================
 echo.
 
-REM Apri automaticamente il browser
+REM Avvia il server in background e aspetta che sia pronto, poi apri il browser
+set NODE_ENV=production
+start /b node dist\index.cjs
+timeout /t 3 >nul
 start http://localhost:5000
 
-REM Avvia il server (cmd resta aperto)
-set NODE_ENV=production
-node dist\index.cjs
+REM Tieni la finestra aperta (il server gira in background)
+echo  Premi un tasto per fermare il server...
+pause >nul
+taskkill /IM node.exe /F >nul 2>&1
 
 echo.
 echo  Server fermato.
