@@ -20,10 +20,11 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo  Node.js trovato: 
+echo  Node.js trovato:
 node --version
+echo.
 
-REM Installa/aggiorna le dipendenze (veloce se gia' aggiornate)
+REM Installa/aggiorna le dipendenze
 echo  Verifica dipendenze...
 call npm install
 if errorlevel 1 (
@@ -35,44 +36,37 @@ if errorlevel 1 (
 REM Crea la cartella uploads se non esiste
 if not exist "uploads\" mkdir uploads
 
-REM Chiudi eventuale processo precedente sulla porta 5000
-set "PORT_PID="
-for /f %%P in ('powershell -NoProfile -Command "$c = Get-NetTCPConnection -LocalPort 5000 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if ($c) { $c.OwningProcess }"') do set "PORT_PID=%%P"
-
-if defined PORT_PID (
-    echo.
-    echo  Chiudo processo precedente sulla porta 5000 (PID %PORT_PID%)...
-    taskkill /PID %PORT_PID% /F >nul 2>&1
-    timeout /t 2 >nul
+REM Chiudi eventuale processo node precedente sulla porta 5000
+for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":5000 " ^| findstr "LISTENING"') do (
+    echo  Chiudo processo precedente sulla porta 5000 (PID %%P)...
+    taskkill /PID %%P /F >nul 2>&1
 )
+timeout /t 1 >nul
 
 echo.
-echo  Compilazione applicazione (build produzione)...
+echo  Compilazione applicazione...
 call npm run build
 if errorlevel 1 (
-    echo  ERRORE durante la build dell'applicazione.
+    echo.
+    echo  ERRORE durante la build. Dettagli sopra.
     pause
     exit /b 1
 )
 
 echo.
 echo  ================================================
-echo   Server avviato su http://localhost:5000
-echo   Apri il browser e vai su quella URL.
-echo   Per chiudere: tieni premuto Ctrl+C
+echo   Server in avvio su http://localhost:5000
+echo   Il browser si aprira' automaticamente.
+echo   Per chiudere il server: chiudi questa finestra
 echo  ================================================
 echo.
 
-REM Avvia il server in background e aspetta che sia pronto, poi apri il browser
-set NODE_ENV=production
-start /b node dist\index.cjs
-timeout /t 3 >nul
-start http://localhost:5000
+REM Apri il browser dopo 2 secondi (in background)
+start "" cmd /c "timeout /t 2 >nul && start http://localhost:5000"
 
-REM Tieni la finestra aperta (il server gira in background)
-echo  Premi un tasto per fermare il server...
-pause >nul
-taskkill /IM node.exe /F >nul 2>&1
+REM Avvia il server (questa finestra resta aperta finche' non la chiudi)
+set NODE_ENV=production
+node dist\index.cjs
 
 echo.
 echo  Server fermato.
