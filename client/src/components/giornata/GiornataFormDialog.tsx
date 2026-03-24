@@ -50,17 +50,27 @@ export function GiornataFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
+      <DialogContent className="w-[95vw] max-w-5xl max-h-[92vh] overflow-hidden p-0">
+        <DialogHeader className="border-b border-border bg-muted/20 px-4 py-3 sm:px-6">
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
 
-        <GoogleDocsImport mode="giornata" onImport={handleImport} />
-        <GiornataFormFields form={form} setForm={setForm} />
+        <div className="max-h-[calc(92vh-146px)] overflow-y-auto px-4 py-4 sm:px-6">
+          <div className="space-y-4">
+            <div className="rounded-md border border-border bg-muted/10 p-3">
+              <GoogleDocsImport mode="giornata" onImport={handleImport} />
+            </div>
+            <GiornataFormFields form={form} setForm={setForm} />
+          </div>
+        </div>
 
-        <Button className="w-full" onClick={onSubmit} disabled={submitDisabled}>
-          {submitPending ? submitLabelPending : submitLabelIdle}
-        </Button>
+        <div className="border-t border-border bg-background px-4 py-3 sm:px-6">
+          <div className="flex justify-end">
+            <Button className="w-full sm:w-auto sm:min-w-56" onClick={onSubmit} disabled={submitDisabled}>
+              {submitPending ? submitLabelPending : submitLabelIdle}
+            </Button>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );

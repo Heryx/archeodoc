@@ -60,24 +60,40 @@ export function USFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="w-[97vw] max-w-[1400px] max-h-[95vh] overflow-hidden p-0">
+        <DialogHeader className="border-b border-border bg-muted/20 px-4 py-3 sm:px-6">
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
 
-        <GoogleDocsImport mode="us" onImport={handleImport} />
-        <USFormFields form={form} setForm={setForm} giornate={giornate} usThesaurus={usThesaurus} activeModel={activeModel} />
+        <div className="max-h-[calc(95vh-158px)] overflow-y-auto px-4 py-4 sm:px-6">
+          <div className="space-y-4">
+            <div className="rounded-md border border-border bg-muted/10 p-3">
+              <GoogleDocsImport mode="us" onImport={handleImport} />
+            </div>
+            <USFormFields
+              form={form}
+              setForm={setForm}
+              giornate={giornate}
+              usThesaurus={usThesaurus}
+              activeModel={activeModel}
+            />
+          </div>
+        </div>
 
-        {missingRequired.length > 0 && (
-          <p className="text-xs text-red-600">
-            Campi obbligatori mancanti: {missingRequired.slice(0, 3).join(", ")}
-            {missingRequired.length > 3 ? "..." : ""}
-          </p>
-        )}
+        <div className="border-t border-border bg-background px-4 py-3 sm:px-6">
+          {missingRequired.length > 0 && (
+            <p className="mb-2 text-xs text-red-600">
+              Campi obbligatori mancanti: {missingRequired.slice(0, 3).join(", ")}
+              {missingRequired.length > 3 ? "..." : ""}
+            </p>
+          )}
 
-        <Button className="w-full" onClick={onSubmit} disabled={submitDisabled}>
-          {submitPending ? submitLabelPending : submitLabelIdle}
-        </Button>
+          <div className="flex justify-end">
+            <Button className="w-full sm:w-auto sm:min-w-56" onClick={onSubmit} disabled={submitDisabled}>
+              {submitPending ? submitLabelPending : submitLabelIdle}
+            </Button>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );
