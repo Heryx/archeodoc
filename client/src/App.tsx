@@ -153,7 +153,7 @@ function AppShell() {
       </main>
 
       <Sheet open={!!panel} onOpenChange={(open) => { if (!open) closePanel(); }}>
-        <SheetContent side="right" className="p-0 w-[92vw] sm:max-w-3xl">
+        <SheetContent side="right" className="z-50 bg-background p-0 w-[92vw] sm:max-w-3xl">
           <SheetHeader className="px-4 pt-4 pb-2 border-b border-border">
             <SheetTitle>{panelTitle}</SheetTitle>
             <SheetDescription>{panelDescription}</SheetDescription>
