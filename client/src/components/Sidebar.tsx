@@ -74,7 +74,7 @@ export function Sidebar() {
       next.set("panel", panel);
     }
     const query = next.toString();
-    return `${cleanLocation}${query ? `?${query}` : ""}`;
+    return `${cleanLocation}${query ? `?${query}` : "?panel="}`;
   };
 
   const { data: cantieri = [] } = useQuery<any[]>({

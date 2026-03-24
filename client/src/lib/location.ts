@@ -27,6 +27,11 @@ function normalizePath(value: string): string {
 
 // Read query params reliably with hash routing (#/path?x=1) and normal routing.
 export function extractSearchFromLocation(location: string): string {
+  if (typeof window !== "undefined") {
+    const fromSearch = (window.location.search || "").replace(/^\?/, "");
+    if (fromSearch) return fromSearch;
+  }
+
   const fromLocation = queryFromRaw(location || "");
   if (fromLocation) return fromLocation;
 
@@ -45,12 +50,7 @@ export function extractSearchFromLocation(location: string): string {
   const fromRawHash = queryFromRaw(rawHash);
   if (fromRawHash) return fromRawHash;
 
-  // With hash routing, ignore query params before "#" (e.g. /?panel=x#/path),
-  // otherwise side panels can get stuck open/closed due to stale search state.
-  if (rawHash) return "";
-
-  const fromSearch = (window.location.search || "").replace(/^\?/, "");
-  return fromSearch || "";
+  return "";
 }
 
 // Read path reliably with hash routing (#/path?x=1), including encoded `?` (`%3F`).

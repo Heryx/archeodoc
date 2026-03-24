@@ -92,7 +92,7 @@ function AppShell() {
     const next = new URLSearchParams(search);
     next.delete("panel");
     const qs = next.toString();
-    navigate(`${cleanLocation}${qs ? `?${qs}` : ""}`);
+    navigate(`${cleanLocation}${qs ? `?${qs}` : "?panel="}`);
   }
 
   const panelTitle =
