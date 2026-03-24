@@ -65,6 +65,7 @@ const FIELD_TYPE_OPTIONS: Array<{ value: DocumentationFieldType; label: string }
   { value: "textarea", label: "Testo lungo" },
   { value: "date", label: "Data" },
   { value: "select", label: "Thesaurus" },
+  { value: "multiselect", label: "Scelta multipla" },
   { value: "number", label: "Numero" },
   { value: "boolean", label: "Si/No" },
 ];
@@ -165,6 +166,7 @@ function extractUsThesaurusFields(schema: SchemaDefinition): ThesaurusField[] {
 
       const shouldExpose =
         field.type === "select" ||
+        field.type === "multiselect" ||
         key === "tipo" ||
         key === "definizione" ||
         (Array.isArray(field.vocabulary) && field.vocabulary.length > 0);
@@ -236,7 +238,7 @@ function validateSchemaDraft(schema: SchemaDefinition): string | null {
         }
         keys.add(key);
 
-        if (field.type === "select" && (!field.vocabulary || field.vocabulary.length === 0)) {
+        if ((field.type === "select" || field.type === "multiselect") && (!field.vocabulary || field.vocabulary.length === 0)) {
           return `${entity.label}: il campo ${key} e di tipo thesaurus ma non ha voci.`;
         }
       }
@@ -872,7 +874,10 @@ export function ProjectSchemaDialog({
                                                 onValueChange={(value) =>
                                                   {
                                                     const preserveVocabulary =
-                                                      value === "select" || field.key === "tipo" || field.key === "definizione";
+                                                      value === "select" ||
+                                                      value === "multiselect" ||
+                                                      field.key === "tipo" ||
+                                                      field.key === "definizione";
                                                     updateField(entity.value, paragraphIndex, fieldIndex, {
                                                       type: value as DocumentationFieldType,
                                                       vocabulary: preserveVocabulary
@@ -921,7 +926,10 @@ export function ProjectSchemaDialog({
                                             </div>
                                           </div>
 
-                                          {(field.type === "select" || field.key === "tipo" || field.key === "definizione") && (
+                                          {(field.type === "select" ||
+                                            field.type === "multiselect" ||
+                                            field.key === "tipo" ||
+                                            field.key === "definizione") && (
                                             <div>
                                               <Label>Thesaurus (una voce per riga)</Label>
                                               <Textarea

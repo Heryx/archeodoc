@@ -67,7 +67,7 @@ export function mapUsToForm(us: any): USForm {
       if (parsed && typeof parsed === "object") {
         schedaData = Object.entries(parsed as Record<string, unknown>).reduce<Record<string, string>>((acc, [k, v]) => {
           if (v == null) return acc;
-          acc[k] = String(v);
+          acc[k] = Array.isArray(v) ? JSON.stringify(v) : String(v);
           return acc;
         }, {});
       }

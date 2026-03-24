@@ -23,6 +23,27 @@ function fieldToZodType(field: FieldDefinition): ZodTypeAny {
         "Valore non ammesso",
       );
       break;
+    case "multiselect":
+      base = z.string().refine((value) => {
+        if (!Array.isArray(vocabulary) || vocabulary.length === 0) return true;
+        const trimmed = String(value || "").trim();
+        if (!trimmed) return true;
+
+        let values: string[] = [];
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) {
+            values = parsed.map((item) => String(item || "").trim()).filter(Boolean);
+          } else {
+            values = trimmed.split(/[|,;\n]+/g).map((item) => item.trim()).filter(Boolean);
+          }
+        } catch {
+          values = trimmed.split(/[|,;\n]+/g).map((item) => item.trim()).filter(Boolean);
+        }
+
+        return values.every((item) => vocabulary.includes(item));
+      }, "Valore non ammesso");
+      break;
     default:
       base = z.any();
       break;

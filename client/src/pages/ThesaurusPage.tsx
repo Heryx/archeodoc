@@ -112,6 +112,7 @@ function extractUsThesaurusFields(schema: SchemaDefinition): ThesaurusField[] {
 
       const shouldExpose =
         field.type === "select" ||
+        field.type === "multiselect" ||
         key === "tipo" ||
         key === "definizione" ||
         (Array.isArray(field.vocabulary) && field.vocabulary.length > 0);
@@ -446,4 +447,3 @@ export function ThesaurusPage({ embedded = false }: ThesaurusPageProps = {}) {
     </div>
   );
 }
-

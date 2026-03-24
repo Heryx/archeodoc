@@ -7,12 +7,16 @@ export interface USData {
   tipo?: string;
   definizione?: string;
   descrizione?: string;
+  localita?: string;
+  anno?: string;
   colore?: string;
   consistenza?: string;
   inclusi?: string;
   misure?: string;
   quota?: string;
   settore?: string;
+  saggio?: string;
+  quadrati?: string;
   periodoIniziale?: string;
   periodoFinale?: string;
   materialiRinvenuti?: string;
@@ -24,6 +28,7 @@ export interface USData {
   ambienteUnitaFunzionale?: string;
   piante?: string;
   sezioni?: string;
+  prospetti?: string;
   fotografie?: string;
   criteriDistinzione?: string;
   naturaAzione?: string;
@@ -32,6 +37,8 @@ export interface USData {
   modoFormazione?: string;
   componentiInorganici?: string;
   componentiOrganici?: string;
+  densitaMaterialeInorganici?: "fitta" | "media" | "rada" | string;
+  densitaMaterialeOrganici?: "fitta" | "media" | "rada" | string;
   componentiArtificiali?: string;
   stratoConfigurazioneSuperficie?: string;
   stratoSpessoreVariazioni?: string;
@@ -62,10 +69,12 @@ export interface USData {
   statoConservazioneModificazioni?: string;
   statoConservazionePercentuale?: string;
   osservazioniMetodoScavo?: string;
+  metodoScavo?: "integrale" | "parziale" | "asportata_con_altri" | string;
   interpretazioneEstesa?: string;
   elementiDatanti?: string;
   datazioneAssoluta?: string;
   periodoFase?: string;
+  epoca?: string;
   riferimentiTabelleMateriali?: string;
   datiQuantitativiReperti?: string;
   campionature?: string;
@@ -75,6 +84,8 @@ export interface USData {
   setacciaturaSecchi?: string;
   affidabilitaStratigrafica?: string;
   motivazioneAffidabilita?: string;
+  responsabileSABAPUMB?: string;
+  responsabileArcheosistemi?: string;
   direttoreScientifico?: string;
   responsabileSettore?: string;
   compilatoreScheda?: string;
@@ -124,12 +135,16 @@ const US_TEXT_FIELD_ALIASES: Record<string, keyof USData> = {
   tipo: "tipo",
   definizione: "definizione",
   descrizione: "descrizione",
+  localita: "localita",
+  anno: "anno",
   colore: "colore",
   consistenza: "consistenza",
   inclusi: "inclusi",
   misure: "misure",
   quota: "quota",
   settore: "settore",
+  saggio: "saggio",
+  quadrati: "quadrati",
   "periodo iniziale": "periodoIniziale",
   "periodo finale": "periodoFinale",
   "materiali rinvenuti": "materialiRinvenuti",
@@ -145,6 +160,7 @@ const US_TEXT_FIELD_ALIASES: Record<string, keyof USData> = {
   ambiente: "ambienteUnitaFunzionale",
   piante: "piante",
   sezioni: "sezioni",
+  prospetti: "prospetti",
   foto: "fotografie",
   fotografie: "fotografie",
   "foto f d dg": "fotografie",
@@ -162,6 +178,14 @@ const US_TEXT_FIELD_ALIASES: Record<string, keyof USData> = {
   "componenti geologici": "componentiInorganici",
   "componenti inorganici": "componentiInorganici",
   "componenti organici": "componentiOrganici",
+  "densita materiale inorganici": "densitaMaterialeInorganici",
+  "densita materiale inorganico": "densitaMaterialeInorganici",
+  "densita del materiale inorganici": "densitaMaterialeInorganici",
+  "densita del materiale inorganico": "densitaMaterialeInorganici",
+  "densita materiale organici": "densitaMaterialeOrganici",
+  "densita materiale organico": "densitaMaterialeOrganici",
+  "densita del materiale organici": "densitaMaterialeOrganici",
+  "densita del materiale organico": "densitaMaterialeOrganici",
   "componenti artificiali": "componentiArtificiali",
   "descrizione strato configurazione superficie": "stratoConfigurazioneSuperficie",
   "descrizione strato spessore e variazioni": "stratoSpessoreVariazioni",
@@ -181,10 +205,13 @@ const US_TEXT_FIELD_ALIASES: Record<string, keyof USData> = {
   "stato conservazione conservato per circa": "statoConservazionePercentuale",
   "stato conservazione conservato per circa percentuale": "statoConservazionePercentuale",
   "osservazioni sul metodo di scavo": "osservazioniMetodoScavo",
+  "metodo di scavo": "metodoScavo",
+  "metodo scavo": "metodoScavo",
   "interpretazione estesa": "interpretazioneEstesa",
   "elementi datanti": "elementiDatanti",
   "datazione assoluta": "datazioneAssoluta",
   "periodo fase": "periodoFase",
+  epoca: "epoca",
   "riferimenti schede materiali": "riferimentiTabelleMateriali",
   "dati quantitativi reperti": "datiQuantitativiReperti",
   campionature: "campionature",
@@ -194,6 +221,8 @@ const US_TEXT_FIELD_ALIASES: Record<string, keyof USData> = {
   "setacciatura n secchi": "setacciaturaSecchi",
   "affidabilita stratigrafica": "affidabilitaStratigrafica",
   "affidabilita motivazione": "motivazioneAffidabilita",
+  "responsabile sabap umb": "responsabileSABAPUMB",
+  "responsabile archeosistemi": "responsabileArcheosistemi",
   "direttore scientifico": "direttoreScientifico",
   "responsabile del settore": "responsabileSettore",
   compilatore: "compilatoreScheda",
@@ -301,6 +330,22 @@ function canonicalizeNaturaUs(value: string): string {
   return value.trim();
 }
 
+function canonicalizeDensity(value: string): string {
+  const normalized = normalizeKey(value);
+  if (normalized.includes("fitt")) return "fitta";
+  if (normalized.includes("medi")) return "media";
+  if (normalized.includes("rad")) return "rada";
+  return value.trim();
+}
+
+function canonicalizeMetodoScavo(value: string): string {
+  const normalized = normalizeKey(value);
+  if (normalized.includes("integral")) return "integrale";
+  if (normalized.includes("parzial")) return "parziale";
+  if (normalized.includes("asport")) return "asportata_con_altri";
+  return value.trim();
+}
+
 function parseItalianDateToIso(value: string): string | null {
   const match = value.match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/);
   if (!match) return null;
@@ -362,6 +407,16 @@ function assignUsField(target: USData, key: string, value: string): boolean {
 
   if (mapped === "naturaUs") {
     target.naturaUs = canonicalizeNaturaUs(normalizedValue);
+    return true;
+  }
+
+  if (mapped === "densitaMaterialeInorganici" || mapped === "densitaMaterialeOrganici") {
+    (target as unknown as Record<string, unknown>)[mapped] = canonicalizeDensity(normalizedValue);
+    return true;
+  }
+
+  if (mapped === "metodoScavo") {
+    target.metodoScavo = canonicalizeMetodoScavo(normalizedValue);
     return true;
   }
 

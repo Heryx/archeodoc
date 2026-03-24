@@ -1,6 +1,7 @@
 import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { BookOpen, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -31,6 +32,34 @@ function setFieldValue(
       [fieldKey]: value,
     },
   }));
+}
+
+function parseMultiSelectValue(raw: string): string[] {
+  const text = String(raw || "").trim();
+  if (!text) return [];
+
+  try {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) => String(item || "").trim()).filter(Boolean);
+    }
+  } catch {
+    // Fallback for legacy plain strings.
+  }
+
+  return text
+    .split(/[|,;\n]+/g)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function setMultiSelectValue(
+  setForm: Dispatch<SetStateAction<USFormModel>>,
+  fieldKey: string,
+  values: string[],
+) {
+  const normalized = Array.from(new Set(values.map((v) => String(v || "").trim()).filter(Boolean)));
+  setFieldValue(setForm, fieldKey, normalized.length > 0 ? JSON.stringify(normalized) : "");
 }
 
 export function USFormFields({ form, setForm, giornate, usThesaurus, activeModel }: USFormFieldsProps) {
@@ -252,6 +281,30 @@ export function USFormFields({ form, setForm, giornate, usThesaurus, activeModel
                         ))}
                       </SelectContent>
                     </Select>
+                  ) : field.type === "multiselect" ? (
+                    <div className="rounded-md border border-border p-2 space-y-2">
+                      {(field.options || []).map((option) => {
+                        const selectedValues = parseMultiSelectValue(value);
+                        const selected = selectedValues.includes(option);
+                        return (
+                          <label
+                            key={`${field.key}-${option}`}
+                            className="flex items-center gap-2 text-sm cursor-pointer"
+                          >
+                            <Checkbox
+                              checked={selected}
+                              onCheckedChange={(checked) => {
+                                const next = checked
+                                  ? [...selectedValues, option]
+                                  : selectedValues.filter((item) => item !== option);
+                                setMultiSelectValue(setForm, field.key, next);
+                              }}
+                            />
+                            <span>{option}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
                   ) : (
                     <Input
                       type={field.type === "date" ? "date" : "text"}

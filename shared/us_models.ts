@@ -1,4 +1,4 @@
-﻿export type USModelFieldType = "text" | "textarea" | "date" | "select";
+export type USModelFieldType = "text" | "textarea" | "date" | "select" | "multiselect";
 
 export type USModelField = {
   key: string;
@@ -21,6 +21,7 @@ export type USModelDefinition = {
 
 export const BASE_US_MODEL_KEY = "base-us";
 export const ICCD_US_2021_MODEL_KEY = "iccd-us-2021";
+export const ARCHEOSISTEMI_US_MODEL_KEY = "archeosistemi-us";
 
 // Campi presenti nel form base della scheda US.
 export const BASE_US_FIELD_KEYS = new Set<string>([
@@ -419,7 +420,162 @@ export const ICCD_US_2021_MODEL: USModelDefinition = {
   ],
 };
 
-export const BUILTIN_US_MODELS: USModelDefinition[] = [BASE_US_MODEL, ICCD_US_2021_MODEL];
+export const ARCHEOSISTEMI_US_MODEL: USModelDefinition = {
+  key: ARCHEOSISTEMI_US_MODEL_KEY,
+  name: "Archeosistemi US",
+  source: "base",
+  locked: true,
+  description: "Scheda US Archeosistemi con campi specifici del modello AR/S.",
+  fields: [
+    { key: "enteCompilatore", label: "Ente compilatore", type: "text", required: true, locked: true },
+    { key: "nCatalogoGeneraleArcheosistemi", label: "N. catalogo generale", type: "text", locked: true },
+    { key: "nCatalogoInternazionaleArcheosistemi", label: "N. catalogo internazionale", type: "text", locked: true },
+    { key: "soprintendenza", label: "Soprintendenza", type: "text", locked: true },
+    { key: "localita", label: "Localita", type: "text", locked: true },
+    { key: "anno", label: "Anno", type: "text", locked: true },
+    { key: "areaEdificioStruttura", label: "Area", type: "text", locked: true },
+    { key: "saggio", label: "Saggio", type: "text", locked: true },
+    { key: "settori", label: "Settore/i", type: "text", locked: true },
+    { key: "quadrati", label: "Quadrati/i", type: "text", locked: true },
+    { key: "quoteSlm", label: "Quote s.l.m.", type: "text", locked: true },
+    { key: "ambiente", label: "Ambiente", type: "text", locked: true },
+    { key: "piante", label: "Piante", type: "text", locked: true },
+    { key: "sezioni", label: "Sezioni", type: "text", locked: true },
+    { key: "prospetti", label: "Prospetti", type: "text", locked: true },
+    { key: "fotografie", label: "Foto", type: "text", locked: true },
+    { key: "tabelleMateriali", label: "Tabelle materiali", type: "text", locked: true },
+
+    {
+      key: "naturaUs",
+      label: "Natura US (N/ART)",
+      type: "select",
+      required: true,
+      locked: true,
+      options: ["N - Naturale", "ART - Artificiale"],
+    },
+
+    { key: "definizionePosizione", label: "Definizione e posizione", type: "textarea", locked: true },
+    { key: "criteriDistinzione", label: "Criteri di distinzione", type: "textarea", locked: true },
+    {
+      key: "modoFormazioneOrigine",
+      label: "Modo di formazione - origine",
+      type: "select",
+      locked: true,
+      options: ["Artificiale", "Naturale"],
+    },
+    { key: "modoFormazione", label: "Modo di formazione - nota", type: "textarea", locked: true },
+
+    {
+      key: "componentiInorganici",
+      label: "Componenti inorganici",
+      type: "multiselect",
+      locked: true,
+      options: [
+        "Materiale da costruzione",
+        "Ceramica",
+        "Metalli",
+        "Vetro",
+        "Ciottoli",
+        "Ghiaia",
+        "Altro",
+      ],
+    },
+    { key: "componentiInorganiciAltro", label: "Componenti inorganici - altro", type: "text", locked: true },
+    {
+      key: "densitaMaterialeInorganici",
+      label: "Densita materiale inorganici",
+      type: "select",
+      locked: true,
+      options: ["Fitta", "Media", "Rada"],
+    },
+
+    {
+      key: "componentiOrganici",
+      label: "Componenti organici",
+      type: "multiselect",
+      locked: true,
+      options: ["Osso", "Corno", "Semi", "Frutti", "Carboni", "Legno", "Tessuti", "Altro"],
+    },
+    { key: "componentiOrganiciAltro", label: "Componenti organici - altro", type: "text", locked: true },
+    {
+      key: "densitaMaterialeOrganici",
+      label: "Densita materiale organici",
+      type: "select",
+      locked: true,
+      options: ["Fitta", "Media", "Rada"],
+    },
+
+    { key: "consistenza", label: "Consistenza", type: "text", locked: true },
+    { key: "colore", label: "Colore", type: "text", locked: true },
+    { key: "misure", label: "Misure", type: "text", locked: true },
+    {
+      key: "statoConservazioneValutazione",
+      label: "Stato di conservazione",
+      type: "select",
+      locked: true,
+      options: ["Intatto", "Buono", "Discreto", "Mediocre", "Pessimo"],
+    },
+    { key: "statoConservazioneModificazioni", label: "L'unita e stata danneggiata da", type: "text", locked: true },
+    { key: "descrizioneEstesaArcheosistemi", label: "Descrizione estesa", type: "textarea", locked: true },
+
+    {
+      key: "metodoScavo",
+      label: "Osservazioni metodo di scavo",
+      type: "multiselect",
+      locked: true,
+      options: [
+        "Unita scavata integralmente",
+        "Unita scavata parzialmente",
+        "Corrisponde ad altra unita in altro punto",
+        "Asportata insieme ad altri strati",
+      ],
+    },
+    { key: "metodoScavoAltro", label: "Metodo scavo - altro", type: "text", locked: true },
+    { key: "interpretazioneEstesa", label: "Interpretazione", type: "textarea", locked: true },
+
+    { key: "elementiDatanti", label: "Elementi datanti", type: "textarea", locked: true },
+    {
+      key: "elementiDatantiFonte",
+      label: "Elementi datanti - fonte",
+      type: "multiselect",
+      locked: true,
+      options: ["Sequenza stratigrafica", "Reperti diagnostici"],
+    },
+    { key: "datazione", label: "Datazione", type: "text", locked: true },
+    { key: "periodoFase", label: "Periodo o fase", type: "text", locked: true },
+    { key: "epoca", label: "Epoca", type: "text", locked: true },
+    { key: "datiQuantitativiReperti", label: "Dati quantitativi dei reperti", type: "textarea", locked: true },
+    { key: "campionature", label: "Campionature", type: "textarea", locked: true },
+    {
+      key: "flottazione",
+      label: "Flottazione",
+      type: "select",
+      locked: true,
+      options: ["Non effettuata", "Di tutta l'unita", "Parziale"],
+    },
+    { key: "flottazioneSecchi", label: "Flottazione - n.", type: "text", locked: true },
+    {
+      key: "setacciatura",
+      label: "Setacciatura",
+      type: "select",
+      locked: true,
+      options: ["Non effettuata", "Di tutta l'unita", "Parziale"],
+    },
+    { key: "setacciaturaSecchi", label: "Setacciatura - n.", type: "text", locked: true },
+
+    {
+      key: "affidabilitaStratigrafica",
+      label: "Affidabilita stratigrafica",
+      type: "select",
+      locked: true,
+      options: ["Nessuna", "Modesta", "Buona"],
+    },
+    { key: "responsabileSABAPUMB", label: "Responsabile SABAP-UMB", type: "text", locked: true },
+    { key: "responsabileArcheosistemi", label: "Responsabile Archeosistemi", type: "text", locked: true },
+    { key: "dataCompilazione", label: "Data compilazione", type: "date", locked: true },
+  ],
+};
+export const BUILTIN_US_MODELS: USModelDefinition[] = [BASE_US_MODEL, ICCD_US_2021_MODEL, ARCHEOSISTEMI_US_MODEL];
 
 export function isBuiltinUSModelKey(modelKey: string): boolean {
   return BUILTIN_US_MODELS.some((model) => model.key === modelKey);
@@ -428,3 +584,4 @@ export function isBuiltinUSModelKey(modelKey: string): boolean {
 export function getBuiltinUSModel(modelKey: string): USModelDefinition | undefined {
   return BUILTIN_US_MODELS.find((model) => model.key === modelKey);
 }
+

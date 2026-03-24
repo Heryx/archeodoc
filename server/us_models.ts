@@ -74,7 +74,7 @@ function parseCustomModels(filePath: string): USModelDefinition[] {
             if (!field || typeof field !== "object") return null;
             const f = field as USModelField;
             if (!f.key || !f.label) return null;
-            if (!["text", "textarea", "date", "select"].includes(f.type)) return null;
+            if (!["text", "textarea", "date", "select", "multiselect"].includes(f.type)) return null;
 
             return {
               key: normalizeFieldKey(f.key),
@@ -122,7 +122,9 @@ function toFieldList(fields: unknown): USModelField[] {
     }
 
     const typeRaw = String(item.type || "text").toLowerCase();
-    const type = (["text", "textarea", "date", "select"].includes(typeRaw) ? typeRaw : "text") as USModelField["type"];
+    const type = (
+      ["text", "textarea", "date", "select", "multiselect"].includes(typeRaw) ? typeRaw : "text"
+    ) as USModelField["type"];
     const key = normalizeFieldKey(String(item.key || label));
     if (BASE_US_FIELD_KEYS.has(key)) {
       throw new Error(`Il campo '${label}' usa una chiave riservata (${key})`);
@@ -136,7 +138,7 @@ function toFieldList(fields: unknown): USModelField[] {
       ? item.options.map((v) => String(v).trim()).filter(Boolean)
       : undefined;
 
-    if (type === "select" && (!options || options.length === 0)) {
+    if ((type === "select" || type === "multiselect") && (!options || options.length === 0)) {
       throw new Error(`Il campo '${label}' richiede almeno una opzione`);
     }
 

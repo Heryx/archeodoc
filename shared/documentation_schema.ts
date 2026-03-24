@@ -1,4 +1,6 @@
 import {
+  ARCHEOSISTEMI_US_MODEL,
+  ARCHEOSISTEMI_US_MODEL_KEY,
   BASE_US_MODEL_KEY,
   ICCD_US_2021_MODEL,
   ICCD_US_2021_MODEL_KEY,
@@ -62,6 +64,7 @@ export type ProjectSchemaPresetSummary = Omit<ProjectSchemaPreset, "schema">;
 
 export const ARCHEODOC_CUSTOM_SCHEMA_KEY = "archeodoc-us-base-v1";
 export const ICCD_US_SCHEMA_KEY = "iccd-us-2021-v1";
+export const ARCHEOSISTEMI_US_SCHEMA_KEY = "archeosistemi-us-v1";
 
 const ARCHEODOC_BASE_US_FIELDS: DocumentationFieldDefinition[] = [
   { key: "codiceUS", code: "US_CD", label: "Codice US", type: "text", required: true },
@@ -98,6 +101,16 @@ const ARCHEODOC_BASE_RA_FIELDS: DocumentationFieldDefinition[] = [
 ];
 
 const ICCD_US_FIELDS: DocumentationFieldDefinition[] = ICCD_US_2021_MODEL.fields.map((field) => ({
+  key: field.key,
+  code: field.key.toUpperCase(),
+  label: field.label,
+  type: field.type,
+  required: !!field.required,
+  vocabulary: field.options,
+  help: field.help,
+}));
+
+const ARCHEOSISTEMI_US_FIELDS: DocumentationFieldDefinition[] = ARCHEOSISTEMI_US_MODEL.fields.map((field) => ({
   key: field.key,
   code: field.key.toUpperCase(),
   label: field.label,
@@ -203,6 +216,46 @@ const ICCD_US_SCHEMA: DocumentationSchemaDefinition = {
   ],
 };
 
+const ARCHEOSISTEMI_US_SCHEMA: DocumentationSchemaDefinition = {
+  key: ARCHEOSISTEMI_US_SCHEMA_KEY,
+  label: "Schema AR/S Archeosistemi",
+  version: "2026",
+  description: "Schema operativo Archeosistemi con campi e vocabolari dedicati alla scheda AR/S.",
+  mode: "custom",
+  exportMode: "custom",
+  usModelKey: ARCHEOSISTEMI_US_MODEL_KEY,
+  modules: {
+    us: [
+      {
+        acronym: "US",
+        label: "Scheda Unita Stratigrafica (Archeosistemi)",
+        fields: ARCHEOSISTEMI_US_FIELDS,
+      },
+    ],
+    sas: [
+      {
+        acronym: "SAS",
+        label: "Saggio / Settore di Scavo",
+        fields: ARCHEODOC_BASE_SAS_FIELDS,
+      },
+    ],
+    ra: [
+      {
+        acronym: "RA",
+        label: "Reperto Archeologico",
+        fields: ARCHEODOC_BASE_RA_FIELDS,
+      },
+    ],
+  },
+  paragraphs: [
+    {
+      acronym: "US",
+      label: "Scheda Unita Stratigrafica (Archeosistemi)",
+      fields: ARCHEOSISTEMI_US_FIELDS,
+    },
+  ],
+};
+
 const PROJECT_SCHEMA_PRESETS: ProjectSchemaPreset[] = [
   {
     key: ARCHEODOC_CUSTOM_SCHEMA_KEY,
@@ -214,6 +267,17 @@ const PROJECT_SCHEMA_PRESETS: ProjectSchemaPreset[] = [
     defaultUsModelKey: BASE_US_MODEL_KEY,
     schemaKey: ARCHEODOC_CUSTOM_SCHEMA_KEY,
     schema: ARCHEODOC_CUSTOM_SCHEMA,
+  },
+  {
+    key: ARCHEOSISTEMI_US_SCHEMA_KEY,
+    label: "Schema AR/S Archeosistemi",
+    description: "Preset Archeosistemi con modello US dedicato e vocabolari operativi.",
+    locked: true,
+    documentationMode: "custom",
+    exportMode: "custom",
+    defaultUsModelKey: ARCHEOSISTEMI_US_MODEL_KEY,
+    schemaKey: ARCHEOSISTEMI_US_SCHEMA_KEY,
+    schema: ARCHEOSISTEMI_US_SCHEMA,
   },
   {
     key: ICCD_US_SCHEMA_KEY,

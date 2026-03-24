@@ -270,9 +270,11 @@ export function USPage() {
         const label = parts[0];
         const typeRaw = (parts[1] || "text").toLowerCase();
         const type: USModelField["type"] =
-          typeRaw === "textarea" || typeRaw === "date" || typeRaw === "select" ? typeRaw : "text";
+          typeRaw === "textarea" || typeRaw === "date" || typeRaw === "select" || typeRaw === "multiselect"
+            ? typeRaw
+            : "text";
         const options =
-          type === "select"
+          type === "select" || type === "multiselect"
             ? (parts[2] || "")
                 .split(",")
                 .map((opt) => opt.trim())
@@ -283,7 +285,7 @@ export function USPage() {
           throw new Error("Ogni riga deve avere almeno un'etichetta campo");
         }
 
-        if (type === "select" && (!options || options.length === 0)) {
+        if ((type === "select" || type === "multiselect") && (!options || options.length === 0)) {
           throw new Error(`Il campo '${label}' richiede almeno una opzione (separata da virgole)`);
         }
 

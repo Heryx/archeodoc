@@ -200,13 +200,13 @@ export function USModelDialog({
               <Textarea
                 rows={6}
                 placeholder={
-                  "Esempio:\nTipo argilla\nData campionamento|date\nMetodo|select|manuale,strumentale\nNote campione|textarea"
+                  "Esempio:\nTipo argilla\nData campionamento|date\nMetodo|select|manuale,strumentale\nComponenti|multiselect|ceramica,metalli\nNote campione|textarea"
                 }
                 value={customModelFieldsRaw}
                 onChange={(event) => setCustomModelFieldsRaw(event.target.value)}
               />
               <p className="text-xs text-muted-foreground mt-1">
-                Formato riga: Etichetta|tipo|opzioni. Tipi: text, textarea, date, select.
+                Formato riga: Etichetta|tipo|opzioni. Tipi: text, textarea, date, select, multiselect.
               </p>
             </div>
             <Button className="w-full" onClick={onCreateCustomModel} disabled={!customModelName.trim() || createCustomModelPending}>

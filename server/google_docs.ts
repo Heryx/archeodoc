@@ -53,6 +53,11 @@ export function mapSectionsToUS(sections: Record<string, string>): Record<string
     interpretazione: ["interpretazione"],
     quota:           ["quota", "quota altimetrica"],
     settore:         ["settore", "area"],
+    saggio:          ["saggio"],
+    quadrati:        ["quadrati", "quadrato"],
+    localita:        ["localita", "località"],
+    anno:            ["anno"],
+    prospetti:       ["prospetti", "prospetto"],
     coperto_da:      ["coperto_da", "coperto da", "stratigraficamente coperto"],
     copre:           ["copre", "copre stratigraficamente"],
     si_lega_a:       ["si_lega_a", "si lega a"],
@@ -60,6 +65,10 @@ export function mapSectionsToUS(sections: Record<string, string>): Record<string
     periodoFinale:   ["periodo finale", "periodo_finale", "datazione finale"],
     materialiRinvenuti: ["materiali", "materiali rinvenuti", "reperti"],
     campioni:        ["campioni", "campioni prelevati"],
+    epoca:           ["epoca"],
+    metodoScavo:     ["metodo scavo", "osservazioni metodo scavo"],
+    densitaMaterialeInorganici: ["densita materiale inorganici", "densita materiale inorganico"],
+    densitaMaterialeOrganici: ["densita materiale organici", "densita materiale organico"],
   };
 
   const result: Record<string, string> = {};
