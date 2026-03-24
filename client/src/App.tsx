@@ -80,7 +80,7 @@ function parsePanel(raw: string | null): SidePanel | null {
 }
 
 function AppShell() {
-  const [location, navigate] = useLocation();
+  const [location] = useLocation();
   const cleanLocation = extractPathFromLocation(location);
   const search = extractSearchFromLocation(location);
   const params = new URLSearchParams(search);
@@ -92,7 +92,8 @@ function AppShell() {
     const next = new URLSearchParams(search);
     next.delete("panel");
     const qs = next.toString();
-    navigate(`${cleanLocation}${qs ? `?${qs}` : "?panel="}`);
+    // Naviga dentro il hash per evitare che i query params finiscano prima del #
+    window.location.hash = `${cleanLocation}${qs ? `?${qs}` : ""}`;
   }
 
   const panelTitle =
