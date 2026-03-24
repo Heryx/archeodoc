@@ -1,14 +1,10 @@
-﻿import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "wouter";
+import { useLocation, useParams } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
-import { Card, CardContent } from "@/components/ui/card";
+import { extractSearchFromLocation } from "@/lib/location";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,36 +15,24 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
-import { Plus, Wand2, Download, AlertCircle, CheckCircle2, AlertTriangle, Clock, Pencil, Trash2, Settings2 } from "lucide-react";
+import { GitBranch, Package, Plus, Settings2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { cn } from "@/lib/utils";
-import { buildProjectUrl, getCurrentProjectId } from "@/lib/project";
+import { getCurrentProjectId } from "@/lib/project";
 import { BASE_US_MODEL_KEY, BUILTIN_US_MODELS, type USModelDefinition, type USModelField } from "@shared/us_models";
-import GoogleDocsImport from "@/components/GoogleDocsImport";
-
-const tipiUS = ["strato", "struttura", "interfaccia", "tomba", "riempimento", "buca", "altro"];
-
-type USForm = {
-  codiceUS: string;
-  tipo: string;
-  definizione: string;
-  descrizione: string;
-  interpretazione: string;
-  quota: string;
-  settore: string;
-  giornataId: string;
-  coperto_da: string;
-  copre: string;
-  si_lega_a: string;
-  uguale_a: string;
-  periodoIniziale: string;
-  periodoFinale: string;
-  materialiRinvenuti: string;
-  campioni: string;
-  schedaModelKey: string;
-  schedaData: Record<string, string>;
-};
+import type { FieldDefinition, SchemaDefinition } from "@shared/types/schema";
+import { getUsTopLevelThesaurusFromSchema } from "@shared/us_schema_thesaurus";
+import { USCard } from "@/components/us/USCard";
+import { USAllegatiImpact } from "@/components/us/USAllegati";
+import { USFormDialog } from "@/components/us/USFormDialog";
+import { USModelDialog } from "@/components/us/USModelDialog";
+import {
+  emptyUSForm,
+  mapUsToForm,
+  missingRequiredModelFields,
+  usPayload,
+  type USDeleteImpact,
+  type USForm,
+} from "@/components/us/types";
 
 type USModelsResponse = {
   models: USModelDefinition[];
@@ -61,440 +45,59 @@ type CantiereUSModelResponse = {
   availableModels: USModelDefinition[];
 };
 
-type USDeleteImpact = {
-  allegatiCount: number;
+type ProjectSchemaResponse = {
+  schema: SchemaDefinition;
 };
 
-const emptyUSForm: USForm = {
-  codiceUS: "",
-  tipo: "",
-  definizione: "",
-  descrizione: "",
-  interpretazione: "",
-  quota: "",
-  settore: "",
-  giornataId: "",
-  coperto_da: "",
-  copre: "",
-  si_lega_a: "",
-  uguale_a: "",
-  periodoIniziale: "",
-  periodoFinale: "",
-  materialiRinvenuti: "",
-  campioni: "",
-  schedaModelKey: BASE_US_MODEL_KEY,
-  schedaData: {},
-};
+function giornataFilterFromLocation(location: string): string {
+  const search = extractSearchFromLocation(location);
+  if (!search) return "all";
 
-function asNullable(value: string): string | null {
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  const giornataId = new URLSearchParams(search).get("giornataId");
+  if (!giornataId) return "all";
+  return /^\d+$/.test(giornataId) ? giornataId : "all";
 }
 
-function mapUsToForm(us: any): USForm {
-  let schedaData: Record<string, string> = {};
-  if (typeof us.schedaData === "string" && us.schedaData.trim()) {
-    try {
-      const parsed = JSON.parse(us.schedaData);
-      if (parsed && typeof parsed === "object") {
-        schedaData = Object.entries(parsed as Record<string, unknown>).reduce<Record<string, string>>((acc, [k, v]) => {
-          if (v == null) return acc;
-          acc[k] = String(v);
-          return acc;
-        }, {});
-      }
-    } catch {
-      schedaData = {};
-    }
-  }
-
-  return {
-    codiceUS: us.codiceUS || "",
-    tipo: us.tipo || "",
-    definizione: us.definizione || "",
-    descrizione: us.descrizione || "",
-    interpretazione: us.interpretazione || "",
-    quota: us.quota != null ? String(us.quota) : "",
-    settore: us.settore || "",
-    giornataId: us.giornataId != null ? String(us.giornataId) : "",
-    coperto_da: us.coperto_da || "",
-    copre: us.copre || "",
-    si_lega_a: us.si_lega_a || "",
-    uguale_a: us.uguale_a || "",
-    periodoIniziale: us.periodoIniziale || "",
-    periodoFinale: us.periodoFinale || "",
-    materialiRinvenuti: us.materialiRinvenuti || "",
-    campioni: us.campioni || "",
-    schedaModelKey: us.schedaModelKey || BASE_US_MODEL_KEY,
-    schedaData,
-  };
-}
-
-function usPayload(form: USForm) {
-  const schedaDataClean = Object.entries(form.schedaData || {}).reduce<Record<string, string>>((acc, [key, value]) => {
-    const trimmed = String(value || "").trim();
-    if (!trimmed) return acc;
-    acc[key] = trimmed;
-    return acc;
-  }, {});
-
-  return {
-    codiceUS: form.codiceUS.trim(),
-    tipo: asNullable(form.tipo),
-    definizione: asNullable(form.definizione),
-    descrizione: asNullable(form.descrizione),
-    interpretazione: asNullable(form.interpretazione),
-    quota: form.quota ? Number(form.quota) : null,
-    settore: asNullable(form.settore),
-    giornataId: form.giornataId ? Number(form.giornataId) : null,
-    coperto_da: asNullable(form.coperto_da),
-    copre: asNullable(form.copre),
-    si_lega_a: asNullable(form.si_lega_a),
-    uguale_a: asNullable(form.uguale_a),
-    periodoIniziale: asNullable(form.periodoIniziale),
-    periodoFinale: asNullable(form.periodoFinale),
-    materialiRinvenuti: asNullable(form.materialiRinvenuti),
-    campioni: asNullable(form.campioni),
-    schedaModelKey: form.schedaModelKey || BASE_US_MODEL_KEY,
-    schedaData: Object.keys(schedaDataClean).length > 0 ? JSON.stringify(schedaDataClean) : null,
-  };
-}
-
-function getFieldValue(form: USForm, field: USModelField): string {
-  return form.schedaData[field.key] || "";
-}
-
-function setFieldValue(
-  setForm: Dispatch<SetStateAction<USForm>>,
-  fieldKey: string,
-  value: string,
-) {
-  setForm((prev) => ({
-    ...prev,
-    schedaData: {
-      ...prev.schedaData,
-      [fieldKey]: value,
-    },
-  }));
-}
-
-function missingRequiredModelFields(form: USForm, model?: USModelDefinition): string[] {
-  if (!model) return [];
-  return model.fields
-    .filter((field) => field.required)
-    .filter((field) => !getFieldValue(form, field).trim())
-    .map((field) => field.label);
-}
-
-function QcIcon({ status }: { status?: string | null }) {
-  if (status === "ok") return <CheckCircle2 size={14} className="text-green-600" />;
-  if (status === "error") return <AlertCircle size={14} className="text-red-600" />;
-  if (status === "warning") return <AlertTriangle size={14} className="text-amber-500" />;
-  return <Clock size={14} className="text-muted-foreground" />;
-}
-
-function USCard({
-  us,
-  modelName,
-  onGenerate,
-  onEdit,
-  onDelete,
-  aiAvailable,
-}: {
-  us: any;
-  modelName?: string;
-  onGenerate: (id: number) => void;
-  onEdit: (us: any) => void;
-  onDelete: (us: any) => void;
-  aiAvailable?: boolean;
-}) {
-  const [showScheda, setShowScheda] = useState(false);
-  let qcIssues: any[] = [];
+function extractApiErrorDescription(error: unknown): string {
+  const raw = String((error as any)?.message || "");
   try {
-    qcIssues = JSON.parse(us.qcProblemi || "[]");
+    const body = JSON.parse(raw.replace(/^\d+:\s*/, ""));
+    const fieldErrors = body?.fieldErrors && typeof body.fieldErrors === "object"
+      ? Object.entries(body.fieldErrors as Record<string, string[]>)
+          .flatMap(([key, messages]) => (messages || []).map((message) => `${key}: ${message}`))
+      : [];
+    if (fieldErrors.length > 0) {
+      const short = fieldErrors.slice(0, 3).join(" | ");
+      return `${body.error || "Validazione non riuscita"} (${short}${fieldErrors.length > 3 ? "..." : ""})`;
+    }
+    return body.error || raw;
   } catch {
-    qcIssues = [];
+    return raw;
   }
-
-  return (
-    <Card
-      data-testid={`card-us-${us.id}`}
-      className={cn(
-        "border-l-4",
-        us.qcStatus === "error"
-          ? "border-l-red-500"
-          : us.qcStatus === "warning"
-            ? "border-l-amber-500"
-            : us.qcStatus === "ok"
-              ? "border-l-green-500"
-              : "border-l-border",
-      )}
-    >
-      <CardContent className="py-4 px-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1 flex-wrap">
-              <span className="font-mono font-semibold text-primary">{us.codiceUS}</span>
-              {us.tipo && (
-                <Badge variant="secondary" className="text-xs capitalize">
-                  {us.tipo}
-                </Badge>
-              )}
-              {modelName && (
-                <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
-                  {modelName}
-                </Badge>
-              )}
-              <QcIcon status={us.qcStatus} />
-              {us.giornataId && <span className="text-xs text-muted-foreground">Giornata #{us.giornataId}</span>}
-            </div>
-            {us.descrizione && <p className="text-sm text-muted-foreground line-clamp-2">{us.descrizione}</p>}
-            {us.quota != null && <p className="text-xs text-muted-foreground mt-1">Quota: {us.quota} m s.l.m.</p>}
-            {qcIssues.length > 0 && (
-              <div className="mt-2 space-y-0.5">
-                {qcIssues.slice(0, 3).map((issue: any, i: number) => (
-                  <div
-                    key={i}
-                    className={cn(
-                      "text-xs px-2 py-0.5 rounded",
-                      issue.livello === "error"
-                        ? "bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400"
-                        : issue.livello === "warning"
-                          ? "bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
-                          : "bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400",
-                    )}
-                  >
-                    {issue.messaggio}
-                  </div>
-                ))}
-                {qcIssues.length > 3 && <div className="text-xs text-muted-foreground px-2">+{qcIssues.length - 3} altri problemi</div>}
-              </div>
-            )}
-          </div>
-          <div className="flex flex-col gap-1.5 shrink-0">
-            <Button size="sm" variant="outline" className="gap-1 text-xs" onClick={() => onGenerate(us.id)} disabled={!aiAvailable} title={!aiAvailable ? "Configura GEMINI_API_KEY o ANTHROPIC_API_KEY nel file .env per usare l'AI" : undefined}>
-              <Wand2 size={12} /> Analizza AI
-            </Button>
-            <Button size="sm" variant="ghost" className="gap-1 text-xs" onClick={() => onEdit(us)}>
-              <Pencil size={12} /> Modifica
-            </Button>
-            <Button size="sm" variant="ghost" className="gap-1 text-xs text-red-600 hover:text-red-700" onClick={() => onDelete(us)}>
-              <Trash2 size={12} /> Elimina
-            </Button>
-            {us.schedaAiGenerata && (
-              <Button size="sm" variant="ghost" className="gap-1 text-xs" onClick={() => setShowScheda(!showScheda)}>
-                {showScheda ? "Nascondi" : "Vedi scheda"}
-              </Button>
-            )}
-          </div>
-        </div>
-        {showScheda && us.schedaAiGenerata && (
-          <div className="mt-4 pt-4 border-t border-border">
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-xs font-medium text-muted-foreground">Scheda AI generata</span>
-              <a href={buildProjectUrl(`/api/us/${us.id}/export-docx`)} download className="text-xs text-primary hover:underline">
-                <Download size={12} className="inline mr-1" />
-                Scarica .docx
-              </a>
-            </div>
-            <pre className="text-xs whitespace-pre-wrap font-mono bg-muted/50 rounded p-3 max-h-64 overflow-y-auto">{us.schedaAiGenerata}</pre>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
 }
 
-function USFormFields({
-  form,
-  setForm,
-  giornate,
-  activeModel,
-}: {
-  form: USForm;
-  setForm: Dispatch<SetStateAction<USForm>>;
-  giornate: any[];
-  activeModel?: USModelDefinition;
-}) {
-  return (
-    <div className="space-y-4 mt-2">
-      <div className="grid grid-cols-3 gap-3">
-        <div>
-          <Label>Codice US *</Label>
-          <Input
-            data-testid="input-codice-us"
-            placeholder="US 001 / T.001"
-            value={form.codiceUS}
-            onChange={(e) => setForm((f) => ({ ...f, codiceUS: e.target.value }))}
-          />
-        </div>
-        <div>
-          <Label>Tipo</Label>
-          <Select value={form.tipo} onValueChange={(v) => setForm((f) => ({ ...f, tipo: v }))}>
-            <SelectTrigger>
-              <SelectValue placeholder="Seleziona..." />
-            </SelectTrigger>
-            <SelectContent>
-              {tipiUS.map((t) => (
-                <SelectItem key={t} value={t} className="capitalize">
-                  {t}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div>
-          <Label>Quota (m s.l.m.)</Label>
-          <Input
-            type="number"
-            step="0.01"
-            placeholder="es. 12.45"
-            value={form.quota}
-            onChange={(e) => setForm((f) => ({ ...f, quota: e.target.value }))}
-          />
-        </div>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <Label>Settore</Label>
-          <Input value={form.settore} onChange={(e) => setForm((f) => ({ ...f, settore: e.target.value }))} />
-        </div>
-        <div>
-          <Label>Giornata</Label>
-          <Select value={form.giornataId} onValueChange={(value) => setForm((f) => ({ ...f, giornataId: value }))}>
-            <SelectTrigger>
-              <SelectValue placeholder="Collega a giornata..." />
-            </SelectTrigger>
-            <SelectContent>
-              {giornate.map((g: any) => (
-                <SelectItem key={g.id} value={String(g.id)}>
-                  {g.data}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-      <div>
-        <Label>Definizione</Label>
-        <Input
-          placeholder="es. strato di abbandono con materiale ceramico"
-          value={form.definizione}
-          onChange={(e) => setForm((f) => ({ ...f, definizione: e.target.value }))}
-        />
-      </div>
-      <div>
-        <Label>Descrizione</Label>
-        <Textarea
-          placeholder="Descrizione stratigrafica dettagliata..."
-          value={form.descrizione}
-          rows={4}
-          onChange={(e) => setForm((f) => ({ ...f, descrizione: e.target.value }))}
-        />
-      </div>
-      <div>
-        <Label>Interpretazione</Label>
-        <Textarea
-          placeholder="Interpretazione storico-archeologica..."
-          value={form.interpretazione}
-          rows={2}
-          onChange={(e) => setForm((f) => ({ ...f, interpretazione: e.target.value }))}
-        />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <Label>Coperto da (US, separate da virgola)</Label>
-          <Input value={form.coperto_da} onChange={(e) => setForm((f) => ({ ...f, coperto_da: e.target.value }))} />
-        </div>
-        <div>
-          <Label>Copre</Label>
-          <Input value={form.copre} onChange={(e) => setForm((f) => ({ ...f, copre: e.target.value }))} />
-        </div>
-        <div>
-          <Label>Si lega a</Label>
-          <Input value={form.si_lega_a} onChange={(e) => setForm((f) => ({ ...f, si_lega_a: e.target.value }))} />
-        </div>
-        <div>
-          <Label>Uguale a</Label>
-          <Input value={form.uguale_a} onChange={(e) => setForm((f) => ({ ...f, uguale_a: e.target.value }))} />
-        </div>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <Label>Periodo iniziale</Label>
-          <Input
-            value={form.periodoIniziale}
-            onChange={(e) => setForm((f) => ({ ...f, periodoIniziale: e.target.value }))}
-          />
-        </div>
-        <div>
-          <Label>Periodo finale</Label>
-          <Input value={form.periodoFinale} onChange={(e) => setForm((f) => ({ ...f, periodoFinale: e.target.value }))} />
-        </div>
-      </div>
-      <div>
-        <Label>Materiali rinvenuti</Label>
-        <Input
-          value={form.materialiRinvenuti}
-          onChange={(e) => setForm((f) => ({ ...f, materialiRinvenuti: e.target.value }))}
-        />
-      </div>
-      <div>
-        <Label>Campioni</Label>
-        <Input value={form.campioni} onChange={(e) => setForm((f) => ({ ...f, campioni: e.target.value }))} />
-      </div>
-
-      {activeModel && activeModel.fields.length > 0 && (
-        <div className="pt-2 border-t border-border">
-          <p className="text-sm font-medium mb-3">Campi modello: {activeModel.name}</p>
-          <div className="space-y-3">
-            {activeModel.fields.map((field) => {
-              const value = getFieldValue(form, field);
-              return (
-                <div key={field.key}>
-                  <Label>
-                    {field.label}
-                    {field.required ? " *" : ""}
-                  </Label>
-                  {field.type === "textarea" ? (
-                    <Textarea
-                      rows={3}
-                      value={value}
-                      onChange={(e) => setFieldValue(setForm, field.key, e.target.value)}
-                    />
-                  ) : field.type === "select" ? (
-                    <Select value={value} onValueChange={(next) => setFieldValue(setForm, field.key, next)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Seleziona..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(field.options || []).map((option) => (
-                          <SelectItem key={`${field.key}-${option}`} value={option}>
-                            {option}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <Input
-                      type={field.type === "date" ? "date" : "text"}
-                      value={value}
-                      onChange={(e) => setFieldValue(setForm, field.key, e.target.value)}
-                    />
-                  )}
-                  {field.help && <p className="text-xs text-muted-foreground mt-1">{field.help}</p>}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+const US_TOP_LEVEL_FORM_KEYS = new Set<string>([
+  "codiceUS",
+  "tipo",
+  "definizione",
+  "descrizione",
+  "interpretazione",
+  "quota",
+  "settore",
+  "coperto_da",
+  "copre",
+  "si_lega_a",
+  "uguale_a",
+  "periodoIniziale",
+  "periodoFinale",
+  "materialiRinvenuti",
+  "campioni",
+  "giornataId",
+]);
 
 export function USPage() {
   const { cid } = useParams<{ cid: string }>();
+  const [location, navigate] = useLocation();
   const activeProjectId = getCurrentProjectId();
   const qcClient = useQueryClient();
   const { toast } = useToast();
@@ -505,7 +108,7 @@ export function USPage() {
   const [createForm, setCreateForm] = useState<USForm>(emptyUSForm);
   const [editForm, setEditForm] = useState<USForm>(emptyUSForm);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [filterGiornata, setFilterGiornata] = useState<string>("all");
+  const [filterGiornata, setFilterGiornata] = useState<string>(() => giornataFilterFromLocation(location));
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
   const [deleteImpact, setDeleteImpact] = useState<USDeleteImpact | null>(null);
@@ -529,7 +132,6 @@ export function USPage() {
     },
     enabled: !!cid,
   });
-
   const {
     data: usModelsData,
     isLoading: isUsModelsLoading,
@@ -562,6 +164,42 @@ export function USPage() {
     staleTime: Infinity,
   });
   const aiAvailable = aiStatus?.available ?? false;
+
+  const { data: schemaData } = useQuery<ProjectSchemaResponse>({
+    queryKey: ["/api/projects", activeProjectId, "schema"],
+    queryFn: async () => (await apiRequest("GET", `/api/projects/${activeProjectId}/schema`)).json(),
+    enabled: !!activeProjectId,
+    staleTime: 0,
+    refetchOnMount: true,
+  });
+
+  const usThesaurus = useMemo(
+    () => getUsTopLevelThesaurusFromSchema(schemaData?.schema),
+    [schemaData?.schema],
+  );
+
+  const requiredTopLevelFields = useMemo(() => {
+    if (!schemaData?.schema) return [] as Array<{ key: string; label: string }>;
+    const paragraphs = schemaData.schema.modules?.us || schemaData.schema.paragraphs || [];
+    const byKey = new Map<string, string>();
+
+    for (const paragraph of paragraphs) {
+      for (const field of (paragraph.fields || []) as FieldDefinition[]) {
+        const key = String(field.key || "").trim();
+        if (!key || !field.required || !US_TOP_LEVEL_FORM_KEYS.has(key)) continue;
+        if (!byKey.has(key)) {
+          byKey.set(key, field.label || key);
+        }
+      }
+    }
+
+    return Array.from(byKey.entries()).map(([key, label]) => ({ key, label }));
+  }, [schemaData?.schema]);
+
+  useEffect(() => {
+    const next = giornataFilterFromLocation(location);
+    setFilterGiornata(next);
+  }, [location]);
 
   const availableModels = useMemo(
     () => cantiereModelData?.availableModels || usModelsData?.models || BUILTIN_US_MODELS,
@@ -713,7 +351,7 @@ export function USPage() {
 
   const createUS = useMutation({
     mutationFn: async (data: USForm) => {
-      const r = await apiRequest("POST", `/api/cantieri/${cid}/us`, usPayload(data));
+      const r = await apiRequest("POST", `/api/cantieri/${cid}/us`, usPayload(data, usThesaurus));
       return r.json();
     },
     onSuccess: () => {
@@ -722,21 +360,20 @@ export function USPage() {
       setOpenCreate(false);
       setCreateForm({
         ...emptyUSForm,
+        giornataId: filterGiornata !== "all" ? filterGiornata : "",
         schedaModelKey: activeModelKey,
       });
       toast({ title: "US creata" });
     },
     onError: (err: any) => {
-      const raw = err?.message || "";
-      let desc = "";
-      try { const body = JSON.parse(raw.replace(/^\d+: /, "")); desc = body.error || ""; } catch { desc = raw; }
+      const desc = extractApiErrorDescription(err);
       toast({ title: "Errore nella creazione", description: desc || undefined, variant: "destructive" });
     },
   });
 
   const updateUS = useMutation({
     mutationFn: async ({ id, data }: { id: number; data: USForm }) => {
-      const r = await apiRequest("PATCH", `/api/us/${id}`, usPayload(data));
+      const r = await apiRequest("PATCH", `/api/us/${id}`, usPayload(data, usThesaurus));
       return r.json();
     },
     onSuccess: () => {
@@ -747,9 +384,7 @@ export function USPage() {
       toast({ title: "US aggiornata" });
     },
     onError: (err: any) => {
-      const raw = err?.message || "";
-      let desc = "";
-      try { const body = JSON.parse(raw.replace(/^\d+: /, "")); desc = body.error || ""; } catch { desc = raw; }
+      const desc = extractApiErrorDescription(err);
       toast({ title: "Errore aggiornamento US", description: desc || undefined, variant: "destructive" });
     },
   });
@@ -816,8 +451,24 @@ export function USPage() {
   const currentDraftModel = availableModels.find((m) => m.key === modelDraftKey);
   const canDeleteDraftModel = !!currentDraftModel && currentDraftModel.source === "custom";
 
-  const createMissingRequired = missingRequiredModelFields(createForm, activeModel);
-  const editMissingRequired = missingRequiredModelFields(editForm, editModel);
+  const createMissingRequiredModel = missingRequiredModelFields(createForm, activeModel);
+  const editMissingRequiredModel = missingRequiredModelFields(editForm, editModel);
+  const createMissingRequiredTopLevel = requiredTopLevelFields
+    .filter(({ key }) => {
+      const value = (createForm as Record<string, unknown>)[key];
+      if (value == null) return true;
+      return String(value).trim() === "";
+    })
+    .map((item) => item.label);
+  const editMissingRequiredTopLevel = requiredTopLevelFields
+    .filter(({ key }) => {
+      const value = (editForm as Record<string, unknown>)[key];
+      if (value == null) return true;
+      return String(value).trim() === "";
+    })
+    .map((item) => item.label);
+  const createMissingRequired = Array.from(new Set([...createMissingRequiredTopLevel, ...createMissingRequiredModel]));
+  const editMissingRequired = Array.from(new Set([...editMissingRequiredTopLevel, ...editMissingRequiredModel]));
 
   const counts = { ok: 0, warning: 0, error: 0, pending: 0 };
   for (const us of usList) {
@@ -841,187 +492,30 @@ export function USPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Dialog open={openModelDialog} onOpenChange={setOpenModelDialog}>
-            <DialogTrigger asChild>
-              <Button variant="outline" className="gap-2">
-                <Settings2 size={15} /> Modello US
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>Modelli scheda US</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4 mt-2">
-                <div>
-                  <Label>Modello usato dal cantiere</Label>
-                  <Select value={modelDraftKey} onValueChange={onSelectCantiereModel}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Seleziona modello..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableModels.map((model) => (
-                        <SelectItem key={model.key} value={model.key}>
-                          {model.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    I nuovi record US useranno automaticamente questo modello.
-                  </p>
-                </div>
-
-                {(isUsModelsLoading || isCantiereModelLoading) && (
-                  <p className="text-xs text-muted-foreground">Caricamento modelli...</p>
-                )}
-
-                {!isUsModelsLoading && availableModels.length === 0 && (
-                  <p className="text-xs text-red-600">
-                    Nessun modello disponibile. Verifica il progetto attivo e riapri la pagina.
-                  </p>
-                )}
-
-                {(usModelsError || cantiereModelError) && (
-                  <div className="rounded-md border border-red-200 bg-red-50 p-2">
-                    <p className="text-xs text-red-700">
-                      Errore caricamento modelli:
-                      {" "}
-                      {(usModelsError as Error | undefined)?.message ||
-                        (cantiereModelError as Error | undefined)?.message ||
-                        "Errore sconosciuto"}
-                    </p>
-                    <p className="text-xs text-red-700 mt-1">
-                      Se il messaggio contiene "Unexpected token &lt;", riavvia il server con `avvia.bat` per caricare
-                      l'ultima build.
-                    </p>
-                  </div>
-                )}
-
-                {availableModels.length > 0 && (
-                  <div className="space-y-2">
-                    <p className="text-sm font-medium">Modelli disponibili</p>
-                    {availableModels.map((model) => {
-                      const selected = model.key === activeModelKey;
-                      return (
-                        <div
-                          key={model.key}
-                          className={cn(
-                            "rounded-md border p-3 flex items-start justify-between gap-3",
-                            selected ? "border-primary/60 bg-primary/5" : "border-border",
-                          )}
-                        >
-                          <div>
-                            <p className="text-sm font-medium">{model.name}</p>
-                            <p className="text-xs text-muted-foreground mt-1">
-                              Chiave: {model.key} · Fonte: {model.source} · Campi extra: {model.fields.length}
-                            </p>
-                          </div>
-                          <Button
-                            size="sm"
-                            variant={selected ? "secondary" : "outline"}
-                            disabled={setCantiereModel.isPending || selected}
-                            onClick={() => onSelectCantiereModel(model.key)}
-                          >
-                            {selected ? "Attivo" : "Usa questo"}
-                          </Button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {setCantiereModel.isPending && (
-                  <p className="text-xs text-muted-foreground">Applicazione modello in corso...</p>
-                )}
-                {setCantiereModel.isError && (
-                  <p className="text-xs text-red-600">
-                    Errore applicazione modello. Riprova selezionando di nuovo.
-                  </p>
-                )}
-
-                {currentDraftModel && (
-                  <div className="rounded-md border border-border p-3 bg-muted/20">
-                    <p className="text-sm font-medium">{currentDraftModel.name}</p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Fonte: {currentDraftModel.source} · Campi extra: {currentDraftModel.fields.length}
-                    </p>
-                    {currentDraftModel.fields.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        {currentDraftModel.fields.slice(0, 8).map((field) => (
-                          <Badge key={field.key} variant="outline" className="text-[10px]">
-                            {field.label}
-                          </Badge>
-                        ))}
-                        {currentDraftModel.fields.length > 8 && (
-                          <Badge variant="outline" className="text-[10px]">
-                            +{currentDraftModel.fields.length - 8}
-                          </Badge>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {canDeleteDraftModel && (
-                  <div>
-                    <Button
-                      variant="destructive"
-                      onClick={() => deleteCustomModel.mutate(modelDraftKey)}
-                      disabled={deleteCustomModel.isPending}
-                    >
-                      {deleteCustomModel.isPending ? "Eliminazione..." : "Elimina modello custom"}
-                    </Button>
-                  </div>
-                )}
-
-                <div className="pt-3 border-t border-border space-y-3">
-                  <p className="text-sm font-medium">Nuovo modello personalizzato</p>
-                  <div>
-                    <Label>Nome modello *</Label>
-                    <Input
-                      placeholder="es. US Cooperativa XYZ"
-                      value={customModelName}
-                      onChange={(e) => setCustomModelName(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <Label>Descrizione</Label>
-                    <Input
-                      placeholder="Uso interno progetto..."
-                      value={customModelDescription}
-                      onChange={(e) => setCustomModelDescription(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <Label>Campi custom (una etichetta per riga) *</Label>
-                    <Textarea
-                      rows={6}
-                      placeholder={
-                        "Esempio:\nTipo argilla\nData campionamento|date\nMetodo|select|manuale,strumentale\nNote campione|textarea"
-                      }
-                      value={customModelFieldsRaw}
-                      onChange={(e) => setCustomModelFieldsRaw(e.target.value)}
-                    />
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Formato riga: Etichetta|tipo|opzioni. Tipi: text, textarea, date, select.
-                    </p>
-                  </div>
-                  <Button
-                    className="w-full"
-                    onClick={() => createCustomModel.mutate()}
-                    disabled={!customModelName.trim() || createCustomModel.isPending}
-                  >
-                    {createCustomModel.isPending ? "Creazione..." : "Crea modello custom"}
-                  </Button>
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={() => navigate(`/cantiere/${cid}/materiali${filterGiornata !== "all" ? `?giornataId=${filterGiornata}` : ""}`)}
+          >
+            <Package size={15} /> Materiali
+          </Button>
+          <Button variant="outline" className="gap-2" onClick={() => navigate(`/cantiere/${cid}/matrix`)}>
+            <GitBranch size={15} /> Apri Matrix
+          </Button>
+          <Button variant="outline" className="gap-2" onClick={() => setOpenModelDialog(true)}>
+            <Settings2 size={15} /> Modello US
+          </Button>
           <div className="min-w-52">
-            <Select value={filterGiornata} onValueChange={setFilterGiornata}>
-              <SelectTrigger>
-                <SelectValue placeholder="Filtra per giornata" />
-              </SelectTrigger>
+              <Select
+                value={filterGiornata}
+                onValueChange={(value) => {
+                  setFilterGiornata(value);
+                  navigate(`/cantiere/${cid}/us${value !== "all" ? `?giornataId=${value}` : ""}`);
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Filtra per giornata" />
+                </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Tutte le giornate</SelectItem>
                 {giornate.map((g: any) => (
@@ -1032,80 +526,93 @@ export function USPage() {
               </SelectContent>
             </Select>
           </div>
-          <Dialog open={openCreate} onOpenChange={setOpenCreate}>
-            <DialogTrigger asChild>
-              <Button data-testid="button-nuova-us" className="gap-2">
-                <Plus size={16} /> Nuova US
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>Registra Unita Stratigrafica</DialogTitle>
-              </DialogHeader>
-              <GoogleDocsImport mode="us" onImport={(data) => {
-                if (data.mode === "structured") {
-                  setCreateForm(prev => ({ ...prev, ...data.mapped }));
-                } else {
-                  setCreateForm(prev => ({ ...prev, descrizione: data.text }));
-                  toast({ title: "Testo importato — clicca Analisi AI per compilare i campi" });
-                }
-              }} />
-              <USFormFields form={createForm} setForm={setCreateForm} giornate={giornate} activeModel={activeModel} />
-              {createMissingRequired.length > 0 && (
-                <p className="text-xs text-red-600">
-                  Campi obbligatori mancanti: {createMissingRequired.slice(0, 3).join(", ")}
-                  {createMissingRequired.length > 3 ? "..." : ""}
-                </p>
-              )}
-              <Button
-                className="w-full"
-                onClick={() => createUS.mutate({ ...createForm, schedaModelKey: activeModelKey })}
-                disabled={!createForm.codiceUS || createUS.isPending || createMissingRequired.length > 0}
-              >
-                {createUS.isPending ? "Salvataggio..." : "Registra US"}
-              </Button>
-            </DialogContent>
-          </Dialog>
+          <Button
+            data-testid="button-nuova-us"
+            className="gap-2"
+            onClick={() => {
+              setCreateForm((prev) => ({
+                ...prev,
+                giornataId: filterGiornata !== "all" ? filterGiornata : prev.giornataId,
+              }));
+              setOpenCreate(true);
+            }}
+          >
+            <Plus size={16} /> Nuova US
+          </Button>
         </div>
       </div>
 
-      <Dialog
+      <USModelDialog
+        open={openModelDialog}
+        onOpenChange={setOpenModelDialog}
+        modelDraftKey={modelDraftKey}
+        activeModelKey={activeModelKey}
+        availableModels={availableModels}
+        isUsModelsLoading={isUsModelsLoading}
+        isCantiereModelLoading={isCantiereModelLoading}
+        usModelsError={usModelsError}
+        cantiereModelError={cantiereModelError}
+        applyPending={setCantiereModel.isPending}
+        applyError={setCantiereModel.isError}
+        onSelectModel={onSelectCantiereModel}
+        currentDraftModel={currentDraftModel}
+        canDeleteDraftModel={canDeleteDraftModel}
+        deleteCustomModelPending={deleteCustomModel.isPending}
+        onDeleteDraftModel={() => deleteCustomModel.mutate(modelDraftKey)}
+        customModelName={customModelName}
+        setCustomModelName={setCustomModelName}
+        customModelDescription={customModelDescription}
+        setCustomModelDescription={setCustomModelDescription}
+        customModelFieldsRaw={customModelFieldsRaw}
+        setCustomModelFieldsRaw={setCustomModelFieldsRaw}
+        createCustomModelPending={createCustomModel.isPending}
+        onCreateCustomModel={() => createCustomModel.mutate()}
+      />
+
+      <USFormDialog
+        open={openCreate}
+        onOpenChange={setOpenCreate}
+        title="Registra Unita Stratigrafica"
+        form={createForm}
+        setForm={setCreateForm}
+        giornate={giornate}
+        activeModel={activeModel}
+        usThesaurus={usThesaurus}
+        missingRequired={createMissingRequired}
+        onSubmit={() => createUS.mutate({ ...createForm, schedaModelKey: activeModelKey })}
+        submitPending={createUS.isPending}
+        submitLabelIdle="Registra US"
+        submitLabelPending="Salvataggio..."
+        submitDisabled={!createForm.codiceUS || createUS.isPending || createMissingRequired.length > 0}
+        onImportedAiTextNotice={() => {
+          toast({ title: "Testo importato - clicca Analisi AI per compilare i campi" });
+        }}
+      />
+
+      <USFormDialog
         open={openEdit}
         onOpenChange={(value) => {
           setOpenEdit(value);
           if (!value) setEditingId(null);
         }}
-      >
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Modifica Unita Stratigrafica</DialogTitle>
-          </DialogHeader>
-          <GoogleDocsImport mode="us" onImport={(data) => {
-            if (data.mode === "structured") {
-              setEditForm(prev => ({ ...prev, ...data.mapped }));
-            } else {
-              setEditForm(prev => ({ ...prev, descrizione: data.text }));
-              toast({ title: "Testo importato — clicca Analisi AI per compilare i campi" });
-            }
-          }} />
-          <USFormFields form={editForm} setForm={setEditForm} giornate={giornate} activeModel={editModel} />
-          {editMissingRequired.length > 0 && (
-            <p className="text-xs text-red-600">
-              Campi obbligatori mancanti: {editMissingRequired.slice(0, 3).join(", ")}
-              {editMissingRequired.length > 3 ? "..." : ""}
-            </p>
-          )}
-          <Button
-            className="w-full"
-            onClick={() => {
-              if (editingId) updateUS.mutate({ id: editingId, data: editForm });
-            }}
-            disabled={!editForm.codiceUS || !editingId || updateUS.isPending || editMissingRequired.length > 0}
-          >
-            {updateUS.isPending ? "Aggiornamento..." : "Salva modifiche"}
-          </Button>
-        </DialogContent>
-      </Dialog>
+        title="Modifica Unita Stratigrafica"
+        form={editForm}
+        setForm={setEditForm}
+        giornate={giornate}
+        activeModel={editModel}
+        usThesaurus={usThesaurus}
+        missingRequired={editMissingRequired}
+        onSubmit={() => {
+          if (editingId) updateUS.mutate({ id: editingId, data: editForm });
+        }}
+        submitPending={updateUS.isPending}
+        submitLabelIdle="Salva modifiche"
+        submitLabelPending="Aggiornamento..."
+        submitDisabled={!editForm.codiceUS || !editingId || updateUS.isPending || editMissingRequired.length > 0}
+        onImportedAiTextNotice={() => {
+          toast({ title: "Testo importato - clicca Analisi AI per compilare i campi" });
+        }}
+      />
 
       <AlertDialog
         open={deleteDialogOpen}
@@ -1125,15 +632,7 @@ export function USPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
 
-          {isLoadingDeleteImpact ? (
-            <div className="text-sm text-muted-foreground">Calcolo impatto in corso...</div>
-          ) : deleteImpact ? (
-            <div className="text-sm space-y-1">
-              <p className="font-medium">Impatto:</p>
-              <p>- Allegati collegati: {deleteImpact.allegatiCount}</p>
-              <p className="text-red-600 mt-2">L'operazione non e reversibile.</p>
-            </div>
-          ) : null}
+          <USAllegatiImpact isLoading={isLoadingDeleteImpact} deleteImpact={deleteImpact} />
 
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleteUS.isPending}>Annulla</AlertDialogCancel>
@@ -1171,6 +670,11 @@ export function USPage() {
               onGenerate={(id) => generateScheda.mutate(id)}
               onEdit={openEditDialog}
               onDelete={openDeleteDialog}
+              onOpenMateriali={(selectedUs) => {
+                const params = new URLSearchParams({ usId: String(selectedUs.id) });
+                if (filterGiornata !== "all") params.set("giornataId", filterGiornata);
+                navigate(`/cantiere/${cid}/materiali?${params.toString()}`);
+              }}
               aiAvailable={aiAvailable}
             />
           ))}
@@ -1179,6 +683,13 @@ export function USPage() {
     </div>
   );
 }
+
+
+
+
+
+
+
 
 
 

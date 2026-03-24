@@ -117,6 +117,79 @@ function parseJsonResponse(raw: string): Record<string, unknown> {
   return JSON.parse(jsonMatch[0]);
 }
 
+export async function inferMissingFields(
+  usRawText: string,
+  presentFields: Record<string, unknown>,
+  missingFields: string[],
+): Promise<Record<string, string | null>> {
+  if (!Array.isArray(missingFields) || missingFields.length === 0) return {};
+  if (!AI_AVAILABLE) {
+    return Object.fromEntries(missingFields.map((field) => [field, null]));
+  }
+
+  const compactMissing = missingFields.filter((field) => typeof field === "string" && field.trim());
+  if (compactMissing.length === 0) return {};
+
+  let systemPrompt = "Sei un assistente specializzato in archeologia professionale.";
+  try {
+    systemPrompt = getSetting("system_prompt") || systemPrompt;
+  } catch {
+    // keep fallback prompt
+  }
+
+  const prompt = `Inferisci solo i campi mancanti di una scheda US.
+
+DATI GIA ESTRATTI:
+${JSON.stringify(presentFields, null, 2)}
+
+CAMPI MANCANTI:
+${JSON.stringify(compactMissing)}
+
+TESTO ORIGINALE US:
+\"\"\"
+${usRawText || "(vuoto)"}
+\"\"\"
+
+REGOLE:
+1. Restituisci solo i campi richiesti.
+2. Se un campo non e deducibile, metti valore null.
+3. Non inventare codici stratigrafici.
+4. Usa frasi concise.
+
+Rispondi SOLO con JSON:
+{
+  \"fields\": {
+    \"nome_campo\": \"valore o null\"
+  }
+}`;
+
+  try {
+    const raw = await callAI(prompt, 900, systemPrompt);
+    const parsed = parseJsonResponse(raw);
+    const fieldsCandidate =
+      parsed && typeof parsed.fields === "object" && parsed.fields !== null
+        ? (parsed.fields as Record<string, unknown>)
+        : {};
+
+    const out: Record<string, string | null> = {};
+    for (const field of compactMissing) {
+      const rawValue = fieldsCandidate[field];
+      if (rawValue == null) {
+        out[field] = null;
+        continue;
+      }
+      const asString = String(rawValue).trim();
+      out[field] = asString.length > 0 ? asString : null;
+    }
+    return out;
+  } catch (error) {
+    logger.warn("inferMissingFields fallita", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return Object.fromEntries(compactMissing.map((field) => [field, null]));
+  }
+}
+
 // ─── Analisi e formattazione testo US ────────────────────────────────────────
 export async function analizzaTestoUS(
   us: UnitaStratigrafica,

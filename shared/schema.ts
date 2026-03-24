@@ -15,6 +15,10 @@ export const cantieri = sqliteTable("cantieri", {
   responsabile: text("responsabile"),
   note: text("note"),
   usModelKey: text("us_model_key").default("base-us"),
+  googleFolderId: text("google_folder_id"),
+  googleDocId: text("google_doc_id"),
+  lastSyncAt: text("last_sync_at"),
+  lastSyncReport: text("last_sync_report"),
   createdAt: text("created_at").notNull(),
 });
 

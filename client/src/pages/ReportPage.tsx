@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
@@ -9,8 +9,14 @@ import { Wand2, Download, ChevronDown, ChevronUp, Loader2, FileText, KeyRound } 
 import { useToast } from "@/hooks/use-toast";
 import { buildProjectUrl, getCurrentProjectId, getProjectHeader } from "@/lib/project";
 
-export function ReportPage() {
-  const { cid } = useParams<{ cid: string }>();
+type ReportPageProps = {
+  cidOverride?: string;
+  embedded?: boolean;
+};
+
+export function ReportPage({ cidOverride, embedded = false }: ReportPageProps = {}) {
+  const params = useParams<{ cid: string }>();
+  const cid = cidOverride || params.cid;
   const activeProjectId = getCurrentProjectId();
   const { toast } = useToast();
   const qcClient = useQueryClient();
@@ -61,8 +67,18 @@ export function ReportPage() {
     }
   };
 
+  const wrapperClass = embedded ? "p-4 max-w-4xl mx-auto" : "p-8 max-w-4xl mx-auto";
+
+  if (!cid) {
+    return (
+      <div className={wrapperClass}>
+        <p className="text-sm text-muted-foreground">Seleziona prima un cantiere per usare Report AI.</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="p-8 max-w-4xl mx-auto">
+    <div className={wrapperClass}>
       <div className="mb-6">
         <h1 className="text-2xl font-bold">Report AI</h1>
         <p className="text-muted-foreground mt-1">

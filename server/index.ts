@@ -7,6 +7,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { seedDefaultSettings } from "./ai_settings";
+import { startDailyBackupJob } from "./backups";
 import { logger } from "./logger";
 
 const app = express();
@@ -69,6 +70,7 @@ app.use((req, res, next) => {
   await registerRoutes(httpServer, app);
 
   seedDefaultSettings();
+  startDailyBackupJob();
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

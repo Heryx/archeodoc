@@ -19,3 +19,4 @@ logs/
 # File temporanei
 tmp_*.txt
 tmp_*.json
+tmp_iccd_us_extracted.txt

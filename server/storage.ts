@@ -77,6 +77,10 @@ function migrate(sqlite: Database.Database) {
       responsabile TEXT,
       note TEXT,
       us_model_key TEXT DEFAULT 'base-us',
+      google_folder_id TEXT,
+      google_doc_id TEXT,
+      last_sync_at TEXT,
+      last_sync_report TEXT,
       created_at TEXT NOT NULL
     );
 
@@ -219,6 +223,10 @@ function migrate(sqlite: Database.Database) {
   `);
 
   ensureColumn(sqlite, "cantieri", "us_model_key", "us_model_key TEXT DEFAULT 'base-us'");
+  ensureColumn(sqlite, "cantieri", "google_folder_id", "google_folder_id TEXT");
+  ensureColumn(sqlite, "cantieri", "google_doc_id", "google_doc_id TEXT");
+  ensureColumn(sqlite, "cantieri", "last_sync_at", "last_sync_at TEXT");
+  ensureColumn(sqlite, "cantieri", "last_sync_report", "last_sync_report TEXT");
   ensureColumn(sqlite, "unita_stratigrafiche", "scheda_model_key", "scheda_model_key TEXT DEFAULT 'base-us'");
   ensureColumn(sqlite, "unita_stratigrafiche", "scheda_data", "scheda_data TEXT");
   ensureColumn(sqlite, "sas_records", "data", "data TEXT");
@@ -272,6 +280,7 @@ export interface IStorage {
   getQcLogs(cantiereId: number, giornataId?: number): QcLog[];
   createQcLog(data: InsertQcLog): QcLog;
   deleteQcLogsByGiornata(giornataId: number): void;
+  deleteQcLogsByUS(usId: number): void;
   dismissQcLog(id: number): void;
   undismissQcLog(id: number): void;
 }
@@ -313,16 +322,15 @@ class SQLiteStorage implements IStorage {
     const existing = this.getCantiere(id);
     if (!existing) return false;
 
-    const tx = this.sqlite.transaction(() => {
-      this.db.delete(qcLogs).where(eq(qcLogs.cantiereId, id)).run();
-      this.db.delete(allegati).where(eq(allegati.cantiereId, id)).run();
-      this.db.delete(raRecords).where(eq(raRecords.cantiereId, id)).run();
-      this.db.delete(sasRecords).where(eq(sasRecords.cantiereId, id)).run();
-      this.db.delete(unitaStratigrafiche).where(eq(unitaStratigrafiche.cantiereId, id)).run();
-      this.db.delete(giornate).where(eq(giornate.cantiereId, id)).run();
-      this.db.delete(cantieri).where(eq(cantieri.id, id)).run();
+    this.db.transaction((tx) => {
+      tx.delete(qcLogs).where(eq(qcLogs.cantiereId, id)).run();
+      tx.delete(allegati).where(eq(allegati.cantiereId, id)).run();
+      tx.delete(raRecords).where(eq(raRecords.cantiereId, id)).run();
+      tx.delete(sasRecords).where(eq(sasRecords.cantiereId, id)).run();
+      tx.delete(unitaStratigrafiche).where(eq(unitaStratigrafiche.cantiereId, id)).run();
+      tx.delete(giornate).where(eq(giornate.cantiereId, id)).run();
+      tx.delete(cantieri).where(eq(cantieri.id, id)).run();
     });
-    tx();
     return true;
   }
 
@@ -347,13 +355,12 @@ class SQLiteStorage implements IStorage {
     const existing = this.getGiornata(id);
     if (!existing) return false;
 
-    const tx = this.sqlite.transaction(() => {
-      this.db.delete(qcLogs).where(eq(qcLogs.giornataId, id)).run();
-      this.db.delete(allegati).where(eq(allegati.giornataId, id)).run();
-      this.db.update(unitaStratigrafiche).set({ giornataId: null }).where(eq(unitaStratigrafiche.giornataId, id)).run();
-      this.db.delete(giornate).where(eq(giornate.id, id)).run();
+    this.db.transaction((tx) => {
+      tx.delete(qcLogs).where(eq(qcLogs.giornataId, id)).run();
+      tx.delete(allegati).where(eq(allegati.giornataId, id)).run();
+      tx.update(unitaStratigrafiche).set({ giornataId: null }).where(eq(unitaStratigrafiche.giornataId, id)).run();
+      tx.delete(giornate).where(eq(giornate.id, id)).run();
     });
-    tx();
     return true;
   }
 
@@ -386,12 +393,11 @@ class SQLiteStorage implements IStorage {
     const existing = this.getUS(id);
     if (!existing) return false;
 
-    const tx = this.sqlite.transaction(() => {
-      this.db.delete(allegati).where(eq(allegati.usId, id)).run();
-      this.db.update(raRecords).set({ usId: null }).where(eq(raRecords.usId, id)).run();
-      this.db.delete(unitaStratigrafiche).where(eq(unitaStratigrafiche.id, id)).run();
+    this.db.transaction((tx) => {
+      tx.delete(allegati).where(eq(allegati.usId, id)).run();
+      tx.update(raRecords).set({ usId: null }).where(eq(raRecords.usId, id)).run();
+      tx.delete(unitaStratigrafiche).where(eq(unitaStratigrafiche.id, id)).run();
     });
-    tx();
     return true;
   }
 
@@ -453,7 +459,11 @@ class SQLiteStorage implements IStorage {
   // Allegati
   getAllegati(cantiereId: number, giornataId?: number, usId?: number) {
     if (usId !== undefined) {
-      return this.db.select().from(allegati).where(eq(allegati.usId, usId)).all();
+      return this.db
+        .select()
+        .from(allegati)
+        .where(and(eq(allegati.cantiereId, cantiereId), eq(allegati.usId, usId)))
+        .all();
     }
 
     if (giornataId !== undefined) {
@@ -499,6 +509,10 @@ class SQLiteStorage implements IStorage {
 
   deleteQcLogsByGiornata(giornataId: number) {
     this.db.delete(qcLogs).where(eq(qcLogs.giornataId, giornataId)).run();
+  }
+
+  deleteQcLogsByUS(usId: number) {
+    this.db.delete(qcLogs).where(eq(qcLogs.usId, usId)).run();
   }
 
   dismissQcLog(id: number) {

@@ -4,6 +4,7 @@ import {
   ICCD_US_2021_MODEL_KEY,
   type USModelFieldType,
 } from "./us_models";
+import { US_TIPO_THESAURUS, usDefinizioneSuggestions } from "./us_thesaurus";
 
 export type DocumentationMode = "iccd" | "custom";
 export type DocumentationExportMode = "iccd_strict" | "iccd_extended" | "custom";
@@ -64,8 +65,8 @@ export const ICCD_US_SCHEMA_KEY = "iccd-us-2021-v1";
 
 const ARCHEODOC_BASE_US_FIELDS: DocumentationFieldDefinition[] = [
   { key: "codiceUS", code: "US_CD", label: "Codice US", type: "text", required: true },
-  { key: "tipo", code: "US_TP", label: "Tipo", type: "text" },
-  { key: "definizione", code: "US_DF", label: "Definizione", type: "textarea" },
+  { key: "tipo", code: "US_TP", label: "Tipo", type: "text", vocabulary: [...US_TIPO_THESAURUS] },
+  { key: "definizione", code: "US_DF", label: "Definizione", type: "textarea", vocabulary: usDefinizioneSuggestions() },
   { key: "descrizione", code: "US_DS", label: "Descrizione", type: "textarea", required: true },
   { key: "interpretazione", code: "US_IN", label: "Interpretazione", type: "textarea" },
   { key: "quota", code: "US_QT", label: "Quota", type: "number" },
