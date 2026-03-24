@@ -1,3 +1,5 @@
+import { useHashLocation } from "wouter/use-hash-location";
+
 function queryFromRaw(value: string): string {
   const index = value.indexOf("?");
   if (index < 0) return "";
@@ -76,4 +78,13 @@ export function extractPathFromLocation(location: string): string {
   if (fromRawHash) return normalizePath(fromRawHash);
 
   return normalizePath(window.location.pathname || "/");
+}
+
+// Hash router hook that exposes only the path to wouter route-matching.
+// Query params in hash (e.g. #/cantiere/1/giornata/3?panel=qc) stay available
+// through extractSearchFromLocation(), but do not pollute route params like :gid.
+export function useHashPathLocation() {
+  const [rawLocation, navigate] = useHashLocation();
+  const cleanPath = extractPathFromLocation(rawLocation);
+  return [cleanPath, navigate] as [string, (path: string, ...args: any[]) => any];
 }

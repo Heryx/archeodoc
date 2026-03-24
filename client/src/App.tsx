@@ -1,9 +1,8 @@
 import { Suspense, lazy } from "react";
 import { Router, Route, Switch, useLocation } from "wouter";
-import { useHashLocation } from "wouter/use-hash-location";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
-import { extractPathFromLocation, extractSearchFromLocation } from "@/lib/location";
+import { extractPathFromLocation, extractSearchFromLocation, useHashPathLocation } from "@/lib/location";
 import { Toaster } from "@/components/ui/toaster";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { Sidebar } from "@/components/Sidebar";
@@ -176,7 +175,7 @@ function AppShell() {
 
 function AppLayout() {
   return (
-    <Router hook={useHashLocation}>
+    <Router hook={useHashPathLocation}>
       <AppShell />
     </Router>
   );
