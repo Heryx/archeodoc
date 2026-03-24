@@ -50,7 +50,13 @@ function fieldToZodType(field: FieldDefinition): ZodTypeAny {
   }
 
   if (required) return base;
-  return base.optional();
+
+  // Optional fields often travel as null from existing payload builders.
+  // Normalize null -> undefined so validation treats them as "not provided".
+  return z.preprocess(
+    (value) => (value === null ? undefined : value),
+    base.optional(),
+  );
 }
 
 export function buildEntityZodSchema(

@@ -28,6 +28,10 @@ type USFormDialogProps = {
   submitLabelIdle: string;
   submitLabelPending: string;
   submitDisabled: boolean;
+  onSaveDraft: () => void;
+  draftLabelIdle: string;
+  draftLabelPending: string;
+  draftDisabled: boolean;
   onImportedAiTextNotice: () => void;
 };
 
@@ -46,6 +50,10 @@ export function USFormDialog({
   submitLabelIdle,
   submitLabelPending,
   submitDisabled,
+  onSaveDraft,
+  draftLabelIdle,
+  draftLabelPending,
+  draftDisabled,
   onImportedAiTextNotice,
 }: USFormDialogProps) {
   function handleImport(data: GoogleImportPayload) {
@@ -81,14 +89,24 @@ export function USFormDialog({
         </div>
 
         <div className="border-t border-border bg-background px-4 py-3 sm:px-6">
-          {missingRequired.length > 0 && (
-            <p className="mb-2 text-xs text-red-600">
+          {missingRequired.length > 0 ? (
+            <p className="mb-2 text-xs text-amber-700">
               Campi obbligatori mancanti: {missingRequired.slice(0, 3).join(", ")}
-              {missingRequired.length > 3 ? "..." : ""}
+              {missingRequired.length > 3 ? "..." : ""}. Puoi comunque salvare in bozza.
             </p>
+          ) : (
+            <p className="mb-2 text-xs text-muted-foreground">Scheda completa: puoi registrarla come definitiva.</p>
           )}
 
-          <div className="flex justify-end">
+          <div className="flex flex-col justify-end gap-2 sm:flex-row">
+            <Button
+              variant="outline"
+              className="w-full sm:w-auto sm:min-w-48"
+              onClick={onSaveDraft}
+              disabled={draftDisabled}
+            >
+              {submitPending ? draftLabelPending : draftLabelIdle}
+            </Button>
             <Button className="w-full sm:w-auto sm:min-w-56" onClick={onSubmit} disabled={submitDisabled}>
               {submitPending ? submitLabelPending : submitLabelIdle}
             </Button>

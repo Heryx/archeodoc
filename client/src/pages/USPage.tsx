@@ -49,6 +49,9 @@ type ProjectSchemaResponse = {
   schema: SchemaDefinition;
 };
 
+type USSaveMode = "draft" | "final";
+const AUTO_GIORNATA_DATE_KEYS = ["dataCompilazione", "dataRilevamentoCampo", "giorno", "dataScheda"] as const;
+
 function giornataFilterFromLocation(location: string): string {
   const search = extractSearchFromLocation(location);
   if (!search) return "all";
@@ -56,6 +59,35 @@ function giornataFilterFromLocation(location: string): string {
   const giornataId = new URLSearchParams(search).get("giornataId");
   if (!giornataId) return "all";
   return /^\d+$/.test(giornataId) ? giornataId : "all";
+}
+
+function isFieldFilled(value: unknown): boolean {
+  if (value == null) return false;
+  return String(value).trim().length > 0;
+}
+
+function applyGiornataDateDefaults(form: USForm, giornataDate: string, model?: USModelDefinition): USForm {
+  if (!giornataDate) return form;
+
+  const modelFields = model?.fields || [];
+  const canAutoFill = (key: string) =>
+    modelFields.some((field) => field.key === key && (field.type === "date" || key === "giorno"));
+  const targetKeys = AUTO_GIORNATA_DATE_KEYS.filter((key) => canAutoFill(key));
+
+  if (targetKeys.length === 0) return form;
+
+  let changed = false;
+  const nextSchedaData = { ...form.schedaData };
+
+  for (const key of targetKeys) {
+    if (!isFieldFilled(nextSchedaData[key])) {
+      nextSchedaData[key] = giornataDate;
+      changed = true;
+    }
+  }
+
+  if (!changed) return form;
+  return { ...form, schedaData: nextSchedaData };
 }
 
 function extractApiErrorDescription(error: unknown): string {
@@ -236,6 +268,30 @@ export function USPage() {
     }
   }, [openModelDialog, refetchUsModels, refetchCantiereModel, cid]);
 
+  useEffect(() => {
+    if (!openCreate || !createForm.giornataId) return;
+    const giornata = giornate.find((g: any) => String(g.id) === createForm.giornataId);
+    const giornataDate = typeof giornata?.data === "string" ? giornata.data.trim() : "";
+    if (!giornataDate) return;
+
+    setCreateForm((prev) => {
+      if (prev.giornataId !== createForm.giornataId) return prev;
+      return applyGiornataDateDefaults(prev, giornataDate, activeModel);
+    });
+  }, [openCreate, createForm.giornataId, giornate, activeModel]);
+
+  useEffect(() => {
+    if (!openEdit || !editForm.giornataId) return;
+    const giornata = giornate.find((g: any) => String(g.id) === editForm.giornataId);
+    const giornataDate = typeof giornata?.data === "string" ? giornata.data.trim() : "";
+    if (!giornataDate) return;
+
+    setEditForm((prev) => {
+      if (prev.giornataId !== editForm.giornataId) return prev;
+      return applyGiornataDateDefaults(prev, giornataDate, editModel);
+    });
+  }, [openEdit, editForm.giornataId, giornate, editModel]);
+
   const setCantiereModel = useMutation({
     mutationFn: async (modelKey: string) => {
       const response = await apiRequest("POST", `/api/cantieri/${cid}/us-model`, { modelKey });
@@ -352,11 +408,14 @@ export function USPage() {
   };
 
   const createUS = useMutation({
-    mutationFn: async (data: USForm) => {
-      const r = await apiRequest("POST", `/api/cantieri/${cid}/us`, usPayload(data, usThesaurus));
+    mutationFn: async ({ data, saveMode }: { data: USForm; saveMode: USSaveMode }) => {
+      const r = await apiRequest("POST", `/api/cantieri/${cid}/us`, {
+        ...usPayload(data, usThesaurus),
+        saveMode,
+      });
       return r.json();
     },
-    onSuccess: () => {
+    onSuccess: (_result, variables) => {
       qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
       qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", filterGiornata, activeProjectId] });
       setOpenCreate(false);
@@ -365,7 +424,7 @@ export function USPage() {
         giornataId: filterGiornata !== "all" ? filterGiornata : "",
         schedaModelKey: activeModelKey,
       });
-      toast({ title: "US creata" });
+      toast({ title: variables.saveMode === "draft" ? "US salvata in bozza" : "US registrata come completa" });
     },
     onError: (err: any) => {
       const desc = extractApiErrorDescription(err);
@@ -374,16 +433,19 @@ export function USPage() {
   });
 
   const updateUS = useMutation({
-    mutationFn: async ({ id, data }: { id: number; data: USForm }) => {
-      const r = await apiRequest("PATCH", `/api/us/${id}`, usPayload(data, usThesaurus));
+    mutationFn: async ({ id, data, saveMode }: { id: number; data: USForm; saveMode: USSaveMode }) => {
+      const r = await apiRequest("PATCH", `/api/us/${id}`, {
+        ...usPayload(data, usThesaurus),
+        saveMode,
+      });
       return r.json();
     },
-    onSuccess: () => {
+    onSuccess: (_result, variables) => {
       qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
       qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", filterGiornata, activeProjectId] });
       setOpenEdit(false);
       setEditingId(null);
-      toast({ title: "US aggiornata" });
+      toast({ title: variables.saveMode === "draft" ? "Bozza US aggiornata" : "US aggiornata come completa" });
     },
     onError: (err: any) => {
       const desc = extractApiErrorDescription(err);
@@ -471,6 +533,26 @@ export function USPage() {
     .map((item) => item.label);
   const createMissingRequired = Array.from(new Set([...createMissingRequiredTopLevel, ...createMissingRequiredModel]));
   const editMissingRequired = Array.from(new Set([...editMissingRequiredTopLevel, ...editMissingRequiredModel]));
+
+  const modelByKey = useMemo(
+    () => new Map(availableModels.map((model) => [model.key, model])),
+    [availableModels],
+  );
+
+  const completionStatusByUsId = useMemo(() => {
+    const status = new Map<number, "bozza" | "completa">();
+    for (const us of usList) {
+      const form = mapUsToForm(us);
+      const modelForUs = modelByKey.get(form.schedaModelKey || activeModelKey) || activeModel;
+      const missingTopLevelCount = requiredTopLevelFields.filter(({ key }) => {
+        const value = (form as Record<string, unknown>)[key];
+        return !isFieldFilled(value);
+      }).length;
+      const missingModelCount = missingRequiredModelFields(form, modelForUs).length;
+      status.set(us.id, missingTopLevelCount + missingModelCount === 0 ? "completa" : "bozza");
+    }
+    return status;
+  }, [usList, modelByKey, activeModelKey, activeModel, requiredTopLevelFields]);
 
   const counts = { ok: 0, warning: 0, error: 0, pending: 0 };
   for (const us of usList) {
@@ -581,11 +663,15 @@ export function USPage() {
         activeModel={activeModel}
         usThesaurus={usThesaurus}
         missingRequired={createMissingRequired}
-        onSubmit={() => createUS.mutate({ ...createForm, schedaModelKey: activeModelKey })}
+        onSubmit={() => createUS.mutate({ data: { ...createForm, schedaModelKey: activeModelKey }, saveMode: "final" })}
         submitPending={createUS.isPending}
-        submitLabelIdle="Registra US"
+        submitLabelIdle="Registra US completa"
         submitLabelPending="Salvataggio..."
         submitDisabled={!createForm.codiceUS || createUS.isPending || createMissingRequired.length > 0}
+        onSaveDraft={() => createUS.mutate({ data: { ...createForm, schedaModelKey: activeModelKey }, saveMode: "draft" })}
+        draftLabelIdle="Salva bozza"
+        draftLabelPending="Salvataggio bozza..."
+        draftDisabled={!createForm.codiceUS || createUS.isPending}
         onImportedAiTextNotice={() => {
           toast({ title: "Testo importato - clicca Analisi AI per compilare i campi" });
         }}
@@ -605,12 +691,18 @@ export function USPage() {
         usThesaurus={usThesaurus}
         missingRequired={editMissingRequired}
         onSubmit={() => {
-          if (editingId) updateUS.mutate({ id: editingId, data: editForm });
+          if (editingId) updateUS.mutate({ id: editingId, data: editForm, saveMode: "final" });
         }}
         submitPending={updateUS.isPending}
-        submitLabelIdle="Salva modifiche"
+        submitLabelIdle="Salva come completa"
         submitLabelPending="Aggiornamento..."
         submitDisabled={!editForm.codiceUS || !editingId || updateUS.isPending || editMissingRequired.length > 0}
+        onSaveDraft={() => {
+          if (editingId) updateUS.mutate({ id: editingId, data: editForm, saveMode: "draft" });
+        }}
+        draftLabelIdle="Salva bozza"
+        draftLabelPending="Aggiornamento bozza..."
+        draftDisabled={!editForm.codiceUS || !editingId || updateUS.isPending}
         onImportedAiTextNotice={() => {
           toast({ title: "Testo importato - clicca Analisi AI per compilare i campi" });
         }}
@@ -669,6 +761,7 @@ export function USPage() {
               key={us.id}
               us={us}
               modelName={modelNameByKey[us.schedaModelKey || activeModelKey]}
+              completionStatus={completionStatusByUsId.get(us.id) || "bozza"}
               onGenerate={(id) => generateScheda.mutate(id)}
               onEdit={openEditDialog}
               onDelete={openDeleteDialog}

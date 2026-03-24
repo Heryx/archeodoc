@@ -1,7 +1,7 @@
 import {
   Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
   WidthType, BorderStyle, AlignmentType, ShadingType, convertInchesToTwip,
-  VerticalAlign,
+  VerticalAlignTable,
 } from "docx";
 import type { UnitaStratigrafica, Giornata, Cantiere } from "@shared/schema";
 
@@ -65,7 +65,7 @@ function cell(
     rowSpan?:  number;
     bg?:       string;
     borders?:  "solid" | "light" | "none";
-    vAlign?:   (typeof VerticalAlign)[keyof typeof VerticalAlign];
+    vAlign?:   (typeof VerticalAlignTable)[keyof typeof VerticalAlignTable];
   } = {}
 ): TableCell {
   const brd = opts.borders === "light" ? bLight()
@@ -76,7 +76,7 @@ function cell(
     borders:       brd,
     columnSpan:    opts.colSpan,
     rowSpan:       opts.rowSpan,
-    verticalAlign: opts.vAlign || VerticalAlign.TOP,
+    verticalAlign: opts.vAlign || VerticalAlignTable.TOP,
     shading:       opts.bg ? { type: ShadingType.SOLID, color: opts.bg, fill: opts.bg } : undefined,
     width:         { size: 100, type: WidthType.PERCENTAGE },
     margins:       { top: 60, bottom: 60, left: 80, right: 80 },

@@ -22,6 +22,7 @@ import {
 } from "../geopackage_import";
 
 type TransferMode = "copy" | "move";
+type USSaveMode = "draft" | "final";
 
 function parseGeoPackageFieldMap(raw: unknown): GeoPackageFieldMap | undefined {
   if (!raw) return undefined;
@@ -55,6 +56,14 @@ function parseBooleanLike(value: unknown): boolean {
   if (typeof value !== "string") return false;
   const normalized = value.trim().toLowerCase();
   return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+function parseUSSaveMode(value: unknown): USSaveMode {
+  return value === "draft" ? "draft" : "final";
+}
+
+function isNonEmptyText(value: unknown): boolean {
+  return String(value ?? "").trim().length > 0;
 }
 
 type FieldworkHelpers = {
@@ -426,8 +435,15 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
       const cantiere = ctx.storage.getCantiere(cid);
       if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
 
+      const payload =
+        req.body && typeof req.body === "object"
+          ? { ...(req.body as Record<string, unknown>) }
+          : ({} as Record<string, unknown>);
+      const saveMode = parseUSSaveMode(payload.saveMode);
+      delete payload.saveMode;
+
       const requestedModelKey =
-        typeof req.body?.schedaModelKey === "string" ? req.body.schedaModelKey.trim() : "";
+        typeof payload?.schedaModelKey === "string" ? payload.schedaModelKey.trim() : "";
       const fallbackKey = cantiere.usModelKey || BASE_US_MODEL_KEY;
       const modelKey = requestedModelKey || fallbackKey;
       const modelExists = listUSModels(ctx.project).some((m) => m.key === modelKey);
@@ -437,34 +453,54 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
 
       const projectSchema = getProjectSchemaDefinition(ctx.project.id);
       const usThesaurus = getUsTopLevelThesaurusFromSchema(projectSchema);
-      const schedaDataRecord = parseDataRecord(req.body?.schedaData);
-      const usBaseInput = pickUSBaseFromPayload(req.body || {}, {});
+      const schedaDataRecord = parseDataRecord(payload?.schedaData);
+      const usBaseInput = pickUSBaseFromPayload(payload, {});
       usBaseInput.tipo = normalizeUsTipoWithVocabulary(usBaseInput.tipo, usThesaurus.tipo);
       usBaseInput.definizione = normalizeUsDefinizioneWithVocabulary(
         usBaseInput.definizione,
         usBaseInput.tipo,
         usThesaurus.definizione,
       );
-      const usValidationInput = toUSValidationInput(usBaseInput, schedaDataRecord);
-      // Usa passthrough per consentire i campi extra del modello US (es. ICCD)
-      const usValidator = buildEntityZodSchema(projectSchema, "us", { allowUnknown: true });
-      const parsed = usValidator.safeParse(usValidationInput);
-      if (!parsed.success) {
+      if (saveMode === "final") {
+        const usValidationInput = toUSValidationInput(usBaseInput, schedaDataRecord);
+        // Usa passthrough per consentire i campi extra del modello US (es. ICCD)
+        const usValidator = buildEntityZodSchema(projectSchema, "us", { allowUnknown: true });
+        const parsed = usValidator.safeParse(usValidationInput);
+        if (!parsed.success) {
+          return res.status(422).json({
+            error: "Validazione schema US fallita",
+            fieldErrors: validationErrors(parsed.error),
+          });
+        }
+      } else if (!isNonEmptyText(usBaseInput.codiceUS)) {
         return res.status(422).json({
           error: "Validazione schema US fallita",
-          fieldErrors: validationErrors(parsed.error),
+          fieldErrors: {
+            codiceUS: ["Codice US obbligatorio per il salvataggio in bozza"],
+          },
         });
       }
 
       const filteredSchedaData = stripTopLevelKeysFromSchedaData(schedaDataRecord);
       const normalizedTopLevel = { ...usBaseInput };
+      const codiceUS = String(normalizedTopLevel.codiceUS ?? "").trim();
+      if (!codiceUS) {
+        return res.status(422).json({
+          error: "Validazione schema US fallita",
+          fieldErrors: {
+            codiceUS: ["Codice US obbligatorio"],
+          },
+        });
+      }
+
       const us = ctx.storage.createUS({
-        ...req.body,
+        ...(payload as Record<string, unknown>),
         ...normalizedTopLevel,
+        codiceUS,
         cantiereId: cid,
         schedaModelKey: modelKey,
         schedaData: serializeDataRecord(filteredSchedaData),
-      });
+      } as any);
       res.json(us);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -477,6 +513,8 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
     if (!existing) return res.status(404).json({ error: "US non trovata" });
 
     const payload: Record<string, unknown> = { ...req.body };
+    const saveMode = parseUSSaveMode(payload.saveMode);
+    delete payload.saveMode;
     if (typeof payload.schedaModelKey === "string" && payload.schedaModelKey.trim()) {
       const modelExists = listUSModels(ctx.project).some((m) => m.key === payload.schedaModelKey);
       if (!modelExists) {
@@ -500,16 +538,26 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
       nextUSBase.tipo,
       usThesaurus.definizione,
     );
-    // Usa passthrough (allowUnknown: true) per le US: i campi extra del modello
-    // (es. ICCD) vengono già separati da stripTopLevelKeysFromSchedaData e salvati
-    // in schedaData. La validazione strict bloccherebbe i campi ICCD non presenti
-    // nello schema base del progetto.
-    const usValidator = buildEntityZodSchema(projectSchema, "us", { allowUnknown: true });
-    const parsed = usValidator.safeParse(toUSValidationInput(nextUSBase, nextSchedaData));
-    if (!parsed.success) {
+
+    if (saveMode === "final") {
+      // Usa passthrough (allowUnknown: true) per le US: i campi extra del modello
+      // (es. ICCD) vengono già separati da stripTopLevelKeysFromSchedaData e salvati
+      // in schedaData. La validazione strict bloccherebbe i campi ICCD non presenti
+      // nello schema base del progetto.
+      const usValidator = buildEntityZodSchema(projectSchema, "us", { allowUnknown: true });
+      const parsed = usValidator.safeParse(toUSValidationInput(nextUSBase, nextSchedaData));
+      if (!parsed.success) {
+        return res.status(422).json({
+          error: "Validazione schema US fallita",
+          fieldErrors: validationErrors(parsed.error),
+        });
+      }
+    } else if (!isNonEmptyText(nextUSBase.codiceUS)) {
       return res.status(422).json({
         error: "Validazione schema US fallita",
-        fieldErrors: validationErrors(parsed.error),
+        fieldErrors: {
+          codiceUS: ["Codice US obbligatorio per il salvataggio in bozza"],
+        },
       });
     }
 

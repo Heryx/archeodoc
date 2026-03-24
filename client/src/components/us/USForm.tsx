@@ -172,6 +172,9 @@ export function USFormFields({ form, setForm, giornate, usThesaurus, activeModel
                 ))}
               </SelectContent>
             </Select>
+            <p className="mt-1 text-xs text-muted-foreground">
+              La data scheda (es. data compilazione/giorno) viene proposta automaticamente dalla giornata selezionata.
+            </p>
           </div>
         </div>
       </section>

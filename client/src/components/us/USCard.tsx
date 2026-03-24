@@ -15,6 +15,7 @@ function QcIcon({ status }: { status?: string | null }) {
 type USCardProps = {
   us: any;
   modelName?: string;
+  completionStatus?: "bozza" | "completa";
   onGenerate: (id: number) => void;
   onEdit: (us: any) => void;
   onDelete: (us: any) => void;
@@ -22,7 +23,16 @@ type USCardProps = {
   aiAvailable?: boolean;
 };
 
-export function USCard({ us, modelName, onGenerate, onEdit, onDelete, onOpenMateriali, aiAvailable }: USCardProps) {
+export function USCard({
+  us,
+  modelName,
+  completionStatus = "bozza",
+  onGenerate,
+  onEdit,
+  onDelete,
+  onOpenMateriali,
+  aiAvailable,
+}: USCardProps) {
   let qcIssues: any[] = [];
   try {
     qcIssues = JSON.parse(us.qcProblemi || "[]");
@@ -59,6 +69,12 @@ export function USCard({ us, modelName, onGenerate, onEdit, onDelete, onOpenMate
                   {modelName}
                 </Badge>
               )}
+              <Badge
+                variant={completionStatus === "completa" ? "default" : "secondary"}
+                className="text-[10px] uppercase tracking-wide"
+              >
+                {completionStatus === "completa" ? "Completa" : "Bozza"}
+              </Badge>
               <QcIcon status={us.qcStatus} />
               {us.giornataId && <span className="text-xs text-muted-foreground">Giornata #{us.giornataId}</span>}
             </div>
