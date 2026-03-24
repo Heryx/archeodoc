@@ -118,6 +118,64 @@ function migrate(sqlite: Database.Database) {
       periodo_finale TEXT,
       materiali_rinvenuti TEXT,
       campioni TEXT,
+      n_catalogo_generale TEXT,
+      n_catalogo_internazionale TEXT,
+      localita TEXT,
+      anno TEXT,
+      area TEXT,
+      piante TEXT,
+      sezioni TEXT,
+      prospetti TEXT,
+      criteri_distinzione TEXT,
+      modo_formazione TEXT,
+      modo_formazione_origine TEXT,
+      comp_materiale_costruzione INTEGER DEFAULT 0,
+      comp_ceramica INTEGER DEFAULT 0,
+      comp_metalli INTEGER DEFAULT 0,
+      comp_vetro INTEGER DEFAULT 0,
+      comp_ciottoli INTEGER DEFAULT 0,
+      comp_ghiaia INTEGER DEFAULT 0,
+      comp_altro_inorganico TEXT,
+      densita_inorganici TEXT,
+      comp_fauna INTEGER DEFAULT 0,
+      comp_osso INTEGER DEFAULT 0,
+      comp_corno INTEGER DEFAULT 0,
+      comp_semi INTEGER DEFAULT 0,
+      comp_frutti INTEGER DEFAULT 0,
+      comp_carboni INTEGER DEFAULT 0,
+      comp_legno INTEGER DEFAULT 0,
+      comp_tessuti INTEGER DEFAULT 0,
+      comp_altro_organico TEXT,
+      densita_organici TEXT,
+      consistenza TEXT,
+      colore TEXT,
+      misure TEXT,
+      stato_conservazione TEXT,
+      danneggiato_da TEXT,
+      gli_si_appoggia TEXT,
+      si_appoggia TEXT,
+      tagliato_da TEXT,
+      taglia TEXT,
+      riempito_da TEXT,
+      riempie TEXT,
+      sequenza_fisica TEXT,
+      scavata_integralmente INTEGER DEFAULT 0,
+      scavata_parzialmente INTEGER DEFAULT 0,
+      corrisponde_altra_unita TEXT,
+      asportata_con_altri_strati INTEGER DEFAULT 0,
+      altro_scavo TEXT,
+      elementi_datanti TEXT,
+      elementi_datanti_fonte TEXT,
+      epoca TEXT,
+      datazione TEXT,
+      periodo_fase TEXT,
+      dati_quantitativi_reperti TEXT,
+      campionature_n TEXT,
+      flottazione_tipo TEXT,
+      setacciatura_tipo TEXT,
+      affidabilita_stratigrafica TEXT,
+      responsabile_sabap TEXT,
+      responsabile_archeosistemi TEXT,
       ha_foto INTEGER DEFAULT 0,
       ha_disegno INTEGER DEFAULT 0,
       ha_gps INTEGER DEFAULT 0,
@@ -229,6 +287,64 @@ function migrate(sqlite: Database.Database) {
   ensureColumn(sqlite, "cantieri", "last_sync_report", "last_sync_report TEXT");
   ensureColumn(sqlite, "unita_stratigrafiche", "scheda_model_key", "scheda_model_key TEXT DEFAULT 'base-us'");
   ensureColumn(sqlite, "unita_stratigrafiche", "scheda_data", "scheda_data TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "n_catalogo_generale", "n_catalogo_generale TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "n_catalogo_internazionale", "n_catalogo_internazionale TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "localita", "localita TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "anno", "anno TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "area", "area TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "piante", "piante TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "sezioni", "sezioni TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "prospetti", "prospetti TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "criteri_distinzione", "criteri_distinzione TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "modo_formazione", "modo_formazione TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "modo_formazione_origine", "modo_formazione_origine TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "comp_materiale_costruzione", "comp_materiale_costruzione INTEGER DEFAULT 0");
+  ensureColumn(sqlite, "unita_stratigrafiche", "comp_ceramica", "comp_ceramica INTEGER DEFAULT 0");
+  ensureColumn(sqlite, "unita_stratigrafiche", "comp_metalli", "comp_metalli INTEGER DEFAULT 0");
+  ensureColumn(sqlite, "unita_stratigrafiche", "comp_vetro", "comp_vetro INTEGER DEFAULT 0");
+  ensureColumn(sqlite, "unita_stratigrafiche", "comp_ciottoli", "comp_ciottoli INTEGER DEFAULT 0");
+  ensureColumn(sqlite, "unita_stratigrafiche", "comp_ghiaia", "comp_ghiaia INTEGER DEFAULT 0");
+  ensureColumn(sqlite, "unita_stratigrafiche", "comp_altro_inorganico", "comp_altro_inorganico TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "densita_inorganici", "densita_inorganici TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "comp_fauna", "comp_fauna INTEGER DEFAULT 0");
+  ensureColumn(sqlite, "unita_stratigrafiche", "comp_osso", "comp_osso INTEGER DEFAULT 0");
+  ensureColumn(sqlite, "unita_stratigrafiche", "comp_corno", "comp_corno INTEGER DEFAULT 0");
+  ensureColumn(sqlite, "unita_stratigrafiche", "comp_semi", "comp_semi INTEGER DEFAULT 0");
+  ensureColumn(sqlite, "unita_stratigrafiche", "comp_frutti", "comp_frutti INTEGER DEFAULT 0");
+  ensureColumn(sqlite, "unita_stratigrafiche", "comp_carboni", "comp_carboni INTEGER DEFAULT 0");
+  ensureColumn(sqlite, "unita_stratigrafiche", "comp_legno", "comp_legno INTEGER DEFAULT 0");
+  ensureColumn(sqlite, "unita_stratigrafiche", "comp_tessuti", "comp_tessuti INTEGER DEFAULT 0");
+  ensureColumn(sqlite, "unita_stratigrafiche", "comp_altro_organico", "comp_altro_organico TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "densita_organici", "densita_organici TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "consistenza", "consistenza TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "colore", "colore TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "misure", "misure TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "stato_conservazione", "stato_conservazione TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "danneggiato_da", "danneggiato_da TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "gli_si_appoggia", "gli_si_appoggia TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "si_appoggia", "si_appoggia TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "tagliato_da", "tagliato_da TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "taglia", "taglia TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "riempito_da", "riempito_da TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "riempie", "riempie TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "sequenza_fisica", "sequenza_fisica TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "scavata_integralmente", "scavata_integralmente INTEGER DEFAULT 0");
+  ensureColumn(sqlite, "unita_stratigrafiche", "scavata_parzialmente", "scavata_parzialmente INTEGER DEFAULT 0");
+  ensureColumn(sqlite, "unita_stratigrafiche", "corrisponde_altra_unita", "corrisponde_altra_unita TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "asportata_con_altri_strati", "asportata_con_altri_strati INTEGER DEFAULT 0");
+  ensureColumn(sqlite, "unita_stratigrafiche", "altro_scavo", "altro_scavo TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "elementi_datanti", "elementi_datanti TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "elementi_datanti_fonte", "elementi_datanti_fonte TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "epoca", "epoca TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "datazione", "datazione TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "periodo_fase", "periodo_fase TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "dati_quantitativi_reperti", "dati_quantitativi_reperti TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "campionature_n", "campionature_n TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "flottazione_tipo", "flottazione_tipo TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "setacciatura_tipo", "setacciatura_tipo TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "affidabilita_stratigrafica", "affidabilita_stratigrafica TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "responsabile_sabap", "responsabile_sabap TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "responsabile_archeosistemi", "responsabile_archeosistemi TEXT");
   ensureColumn(sqlite, "sas_records", "data", "data TEXT");
   ensureColumn(sqlite, "ra_records", "data", "data TEXT");
   ensureColumn(sqlite, "qc_logs", "dismissed", "dismissed INTEGER DEFAULT 0");

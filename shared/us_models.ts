@@ -71,7 +71,7 @@ export const ICCD_US_2021_MODEL: USModelDefinition = {
       locked: true,
     },
     { key: "localitaRiferimento", label: "Localita", type: "text", locked: true },
-    { key: "areaEdificioStruttura", label: "Area", type: "text", locked: true },
+    { key: "area", label: "Area", type: "text", locked: true },
     { key: "saggio", label: "Saggio", type: "text", locked: true },
     {
       key: "ambienteUnitaFunzionale",
@@ -302,14 +302,14 @@ export const ICCD_US_2021_MODEL: USModelDefinition = {
     },
 
     {
-      key: "statoConservazioneValutazione",
+      key: "statoConservazione",
       label: "Stato di conservazione - valutazione",
       type: "select",
       locked: true,
       options: ["Ottimo", "Buono", "Discreto", "Mediocre", "Cattivo", "Pessimo"],
     },
     {
-      key: "statoConservazioneModificazioni",
+      key: "danneggiatoDa",
       label: "Stato di conservazione - modificazioni",
       type: "textarea",
       locked: true,
@@ -360,14 +360,14 @@ export const ICCD_US_2021_MODEL: USModelDefinition = {
       help: "Usa una sintesi e rimanda alle schede materiali per il dettaglio analitico.",
     },
     {
-      key: "campionature",
+      key: "campionatureN",
       label: "Campionature",
       type: "textarea",
       locked: true,
       help: "Tipo campione e sigla.",
     },
     {
-      key: "flottazione",
+      key: "flottazioneTipo",
       label: "Flottazione",
       type: "select",
       locked: true,
@@ -375,7 +375,7 @@ export const ICCD_US_2021_MODEL: USModelDefinition = {
     },
     { key: "flottazioneSecchi", label: "Flottazione - n. secchi", type: "text", locked: true },
     {
-      key: "setacciatura",
+      key: "setacciaturaTipo",
       label: "Setacciatura",
       type: "select",
       locked: true,
@@ -428,12 +428,12 @@ export const ARCHEOSISTEMI_US_MODEL: USModelDefinition = {
   description: "Scheda US Archeosistemi con campi specifici del modello AR/S.",
   fields: [
     { key: "enteCompilatore", label: "Ente compilatore", type: "text", required: true, locked: true },
-    { key: "nCatalogoGeneraleArcheosistemi", label: "N. catalogo generale", type: "text", locked: true },
-    { key: "nCatalogoInternazionaleArcheosistemi", label: "N. catalogo internazionale", type: "text", locked: true },
+    { key: "nCatalogoGenerale", label: "N. catalogo generale", type: "text", locked: true },
+    { key: "nCatalogoInternazionale", label: "N. catalogo internazionale", type: "text", locked: true },
     { key: "soprintendenza", label: "Soprintendenza", type: "text", locked: true },
     { key: "localita", label: "Localita", type: "text", locked: true },
     { key: "anno", label: "Anno", type: "text", locked: true },
-    { key: "areaEdificioStruttura", label: "Area", type: "text", locked: true },
+    { key: "area", label: "Area", type: "text", locked: true },
     { key: "saggio", label: "Saggio", type: "text", locked: true },
     { key: "settori", label: "Settore/i", type: "text", locked: true },
     { key: "quadrati", label: "Quadrati/i", type: "text", locked: true },
@@ -482,7 +482,7 @@ export const ARCHEOSISTEMI_US_MODEL: USModelDefinition = {
     },
     { key: "componentiInorganiciAltro", label: "Componenti inorganici - altro", type: "text", locked: true },
     {
-      key: "densitaMaterialeInorganici",
+      key: "densitaInorganici",
       label: "Densita materiale inorganici",
       type: "select",
       locked: true,
@@ -494,11 +494,11 @@ export const ARCHEOSISTEMI_US_MODEL: USModelDefinition = {
       label: "Componenti organici",
       type: "multiselect",
       locked: true,
-      options: ["Osso", "Corno", "Semi", "Frutti", "Carboni", "Legno", "Tessuti", "Altro"],
+      options: ["Reperti faunistici", "Osso", "Corno", "Semi", "Frutti", "Carboni", "Legno", "Tessuti", "Altro"],
     },
     { key: "componentiOrganiciAltro", label: "Componenti organici - altro", type: "text", locked: true },
     {
-      key: "densitaMaterialeOrganici",
+      key: "densitaOrganici",
       label: "Densita materiale organici",
       type: "select",
       locked: true,
@@ -509,13 +509,13 @@ export const ARCHEOSISTEMI_US_MODEL: USModelDefinition = {
     { key: "colore", label: "Colore", type: "text", locked: true },
     { key: "misure", label: "Misure", type: "text", locked: true },
     {
-      key: "statoConservazioneValutazione",
+      key: "statoConservazione",
       label: "Stato di conservazione",
       type: "select",
       locked: true,
       options: ["Intatto", "Buono", "Discreto", "Mediocre", "Pessimo"],
     },
-    { key: "statoConservazioneModificazioni", label: "L'unita e stata danneggiata da", type: "text", locked: true },
+    { key: "danneggiatoDa", label: "L'unita e stata danneggiata da", type: "text", locked: true },
     { key: "descrizioneEstesaArcheosistemi", label: "Descrizione estesa", type: "textarea", locked: true },
 
     {
@@ -545,9 +545,9 @@ export const ARCHEOSISTEMI_US_MODEL: USModelDefinition = {
     { key: "periodoFase", label: "Periodo o fase", type: "text", locked: true },
     { key: "epoca", label: "Epoca", type: "text", locked: true },
     { key: "datiQuantitativiReperti", label: "Dati quantitativi dei reperti", type: "textarea", locked: true },
-    { key: "campionature", label: "Campionature", type: "textarea", locked: true },
+    { key: "campionatureN", label: "Campionature", type: "textarea", locked: true },
     {
-      key: "flottazione",
+      key: "flottazioneTipo",
       label: "Flottazione",
       type: "select",
       locked: true,
@@ -555,7 +555,7 @@ export const ARCHEOSISTEMI_US_MODEL: USModelDefinition = {
     },
     { key: "flottazioneSecchi", label: "Flottazione - n.", type: "text", locked: true },
     {
-      key: "setacciatura",
+      key: "setacciaturaTipo",
       label: "Setacciatura",
       type: "select",
       locked: true,
@@ -570,7 +570,7 @@ export const ARCHEOSISTEMI_US_MODEL: USModelDefinition = {
       locked: true,
       options: ["Nessuna", "Modesta", "Buona"],
     },
-    { key: "responsabileSABAPUMB", label: "Responsabile SABAP-UMB", type: "text", locked: true },
+    { key: "responsabileSabap", label: "Responsabile SABAP-UMB", type: "text", locked: true },
     { key: "responsabileArcheosistemi", label: "Responsabile Archeosistemi", type: "text", locked: true },
     { key: "dataCompilazione", label: "Data compilazione", type: "date", locked: true },
   ],
@@ -584,4 +584,5 @@ export function isBuiltinUSModelKey(modelKey: string): boolean {
 export function getBuiltinUSModel(modelKey: string): USModelDefinition | undefined {
   return BUILTIN_US_MODELS.find((model) => model.key === modelKey);
 }
+
 

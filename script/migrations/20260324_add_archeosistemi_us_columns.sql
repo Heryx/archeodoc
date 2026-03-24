@@ -1,0 +1,63 @@
+-- ArcheoDoc - Migrazione campi strutturati scheda US Archeosistemi
+-- Data: 2026-03-24
+-- NOTE: SQLite non supporta ADD COLUMN IF NOT EXISTS su tutte le versioni.
+-- Eseguire questo script una sola volta su database non ancora migrati.
+
+ALTER TABLE unita_stratigrafiche ADD COLUMN n_catalogo_generale TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN n_catalogo_internazionale TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN localita TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN anno TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN area TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN piante TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN sezioni TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN prospetti TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN criteri_distinzione TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN modo_formazione TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN modo_formazione_origine TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN comp_materiale_costruzione INTEGER DEFAULT 0;
+ALTER TABLE unita_stratigrafiche ADD COLUMN comp_ceramica INTEGER DEFAULT 0;
+ALTER TABLE unita_stratigrafiche ADD COLUMN comp_metalli INTEGER DEFAULT 0;
+ALTER TABLE unita_stratigrafiche ADD COLUMN comp_vetro INTEGER DEFAULT 0;
+ALTER TABLE unita_stratigrafiche ADD COLUMN comp_ciottoli INTEGER DEFAULT 0;
+ALTER TABLE unita_stratigrafiche ADD COLUMN comp_ghiaia INTEGER DEFAULT 0;
+ALTER TABLE unita_stratigrafiche ADD COLUMN comp_altro_inorganico TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN densita_inorganici TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN comp_fauna INTEGER DEFAULT 0;
+ALTER TABLE unita_stratigrafiche ADD COLUMN comp_osso INTEGER DEFAULT 0;
+ALTER TABLE unita_stratigrafiche ADD COLUMN comp_corno INTEGER DEFAULT 0;
+ALTER TABLE unita_stratigrafiche ADD COLUMN comp_semi INTEGER DEFAULT 0;
+ALTER TABLE unita_stratigrafiche ADD COLUMN comp_frutti INTEGER DEFAULT 0;
+ALTER TABLE unita_stratigrafiche ADD COLUMN comp_carboni INTEGER DEFAULT 0;
+ALTER TABLE unita_stratigrafiche ADD COLUMN comp_legno INTEGER DEFAULT 0;
+ALTER TABLE unita_stratigrafiche ADD COLUMN comp_tessuti INTEGER DEFAULT 0;
+ALTER TABLE unita_stratigrafiche ADD COLUMN comp_altro_organico TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN densita_organici TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN consistenza TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN colore TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN misure TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN stato_conservazione TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN danneggiato_da TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN gli_si_appoggia TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN si_appoggia TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN tagliato_da TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN taglia TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN riempito_da TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN riempie TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN sequenza_fisica TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN scavata_integralmente INTEGER DEFAULT 0;
+ALTER TABLE unita_stratigrafiche ADD COLUMN scavata_parzialmente INTEGER DEFAULT 0;
+ALTER TABLE unita_stratigrafiche ADD COLUMN corrisponde_altra_unita TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN asportata_con_altri_strati INTEGER DEFAULT 0;
+ALTER TABLE unita_stratigrafiche ADD COLUMN altro_scavo TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN elementi_datanti TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN elementi_datanti_fonte TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN epoca TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN datazione TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN periodo_fase TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN dati_quantitativi_reperti TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN campionature_n TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN flottazione_tipo TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN setacciatura_tipo TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN affidabilita_stratigrafica TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN responsabile_sabap TEXT;
+ALTER TABLE unita_stratigrafiche ADD COLUMN responsabile_archeosistemi TEXT;
