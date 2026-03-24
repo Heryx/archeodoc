@@ -1,11 +1,12 @@
 import { useEffect } from "react";
 import { Link, useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTheme } from "./ThemeProvider";
 import { cn } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
 import { extractPathFromLocation, extractSearchFromLocation } from "@/lib/location";
 import { getCurrentProjectId, setCurrentProjectId } from "@/lib/project";
+import { useToast } from "@/hooks/use-toast";
 import {
   type LucideIcon,
   Layers,
@@ -23,6 +24,8 @@ import {
   Package,
   BookOpenText,
   Map as MapIcon,
+  RefreshCw,
+  Download,
 } from "lucide-react";
 
 type NavItem = {
@@ -30,6 +33,34 @@ type NavItem = {
   icon: LucideIcon;
   label: string;
   isActive: (path: string) => boolean;
+};
+
+type UpdateCheckResponse = {
+  checkedAt: string;
+  gitAvailable: boolean;
+  isRepo: boolean;
+  hasUpdates: boolean;
+  branch: string | null;
+  behind: number;
+  ahead: number;
+  currentCommit: string | null;
+  remoteCommit: string | null;
+  remoteUrl: string | null;
+  fetchError: string | null;
+  message: string | null;
+};
+
+type UpdateApplyResponse = {
+  ok: boolean;
+  branch: string;
+  pulled: boolean;
+  beforeBehind: number;
+  afterBehind: number;
+  updatedCommits: number;
+  message: string;
+  restartRecommended: boolean;
+  currentCommit: string | null;
+  remoteCommit: string | null;
 };
 
 function parseNumericParam(value: string | null): string | null {
@@ -55,6 +86,7 @@ export function Sidebar() {
   const [location] = useLocation();
   const cleanLocation = extractPathFromLocation(location);
   const { theme, toggle } = useTheme();
+  const { toast } = useToast();
   const activeProjectId = getCurrentProjectId();
 
   const cantiereMatch = cleanLocation.match(/^\/cantiere\/(\d+)(?:\/giornata\/(\d+))?/);
@@ -92,6 +124,88 @@ export function Sidebar() {
     refetchOnMount: true,
   });
 
+  const checkUpdates = useMutation({
+    mutationFn: async () => (await apiRequest("GET", "/api/app/updates/check")).json() as Promise<UpdateCheckResponse>,
+    onSuccess: (data) => {
+      if (!data.gitAvailable) {
+        toast({
+          title: "Git non disponibile",
+          description: data.message || "Impossibile verificare aggiornamenti GitHub da questa installazione.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (!data.isRepo) {
+        toast({
+          title: "Controllo non disponibile",
+          description: data.message || "Questa installazione non e collegata a un repository Git.",
+        });
+        return;
+      }
+      if (data.fetchError) {
+        toast({
+          title: "Controllo aggiornamenti fallito",
+          description: data.fetchError,
+          variant: "destructive",
+        });
+        return;
+      }
+      if (data.hasUpdates) {
+        toast({
+          title: "Aggiornamenti disponibili",
+          description: `${data.behind} commit disponibili su ${data.branch || "main"}.`,
+        });
+      } else {
+        toast({
+          title: "App aggiornata",
+          description: `Nessun aggiornamento disponibile su ${data.branch || "main"}.`,
+        });
+      }
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Errore controllo aggiornamenti",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const applyUpdates = useMutation({
+    mutationFn: async () => (await apiRequest("POST", "/api/app/updates/apply", {})).json() as Promise<UpdateApplyResponse>,
+    onSuccess: (data) => {
+      if (!data.ok) {
+        toast({
+          title: "Aggiornamento non completato",
+          description: data.message,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (data.pulled) {
+        toast({
+          title: "Aggiornamento applicato",
+          description: `${data.updatedCommits} commit scaricati. Riavvia l'app per applicare tutte le modifiche.`,
+        });
+      } else {
+        toast({
+          title: "Nessun aggiornamento da applicare",
+          description: data.message,
+        });
+      }
+
+      checkUpdates.mutate();
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Errore aggiornamento",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   useEffect(() => {
     const serverProjectId = projectsData?.currentProjectId;
     if (serverProjectId && serverProjectId !== activeProjectId) {
@@ -102,6 +216,15 @@ export function Sidebar() {
   const cantiereCorrente = cid ? cantieri.find((c: any) => String(c.id) === cid) : null;
   const selectedProjectId = activeProjectId || projectsData?.currentProjectId;
   const currentProject = projectsData?.projects?.find((p: any) => p.id === selectedProjectId);
+  const hasGitUpdates = checkUpdates.data?.hasUpdates === true;
+  const updateButtonTitle = checkUpdates.isPending
+    ? "Controllo aggiornamenti in corso..."
+    : hasGitUpdates
+      ? `Aggiornamenti disponibili (${checkUpdates.data?.behind || 0})`
+      : "Controlla aggiornamenti GitHub";
+  const applyButtonTitle = applyUpdates.isPending
+    ? "Aggiornamento in corso..."
+    : "Aggiorna ora (git pull --ff-only)";
 
   const compilazioneItems: NavItem[] = cid
     ? [
@@ -313,6 +436,38 @@ export function Sidebar() {
       <div className="px-3 pb-4 mt-auto border-t border-border pt-3 flex items-center justify-between">
         <span className="text-xs text-muted-foreground">v1.0</span>
         <div className="flex items-center gap-1">
+          <button
+            onClick={() => checkUpdates.mutate()}
+            disabled={checkUpdates.isPending}
+            data-testid="button-check-updates"
+            className={cn(
+              "p-1.5 rounded-md transition-colors",
+              hasGitUpdates
+                ? "bg-amber-500/10 text-amber-600 hover:bg-amber-500/20"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              checkUpdates.isPending && "opacity-80",
+            )}
+            aria-label="Controlla aggiornamenti"
+            title={updateButtonTitle}
+          >
+            <RefreshCw size={15} className={cn(checkUpdates.isPending && "animate-spin")} />
+          </button>
+          <button
+            onClick={() => applyUpdates.mutate()}
+            disabled={applyUpdates.isPending || !hasGitUpdates}
+            data-testid="button-apply-updates"
+            className={cn(
+              "p-1.5 rounded-md transition-colors",
+              hasGitUpdates
+                ? "text-emerald-700 hover:bg-emerald-500/15"
+                : "text-muted-foreground/60",
+              (applyUpdates.isPending || !hasGitUpdates) && "opacity-70",
+            )}
+            aria-label="Aggiorna ora"
+            title={applyButtonTitle}
+          >
+            <Download size={15} className={cn(applyUpdates.isPending && "animate-pulse")} />
+          </button>
           <a
             href={panelHrefFull("settings")}
             className={cn(

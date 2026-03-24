@@ -24,29 +24,6 @@ echo  Node.js trovato:
 node --version
 echo.
 
-REM Se e' un clone Git, prova ad aggiornare automaticamente in fast-forward
-where git >nul 2>&1
-if not errorlevel 1 if exist ".git" (
-    echo  Verifica aggiornamenti da GitHub...
-    git fetch origin main --quiet 2>nul
-    if errorlevel 1 (
-        echo   Impossibile verificare aggiornamenti remoti ^(continuo con versione locale^).
-    ) else (
-        set "UPDATES=0"
-        for /f %%U in ('git rev-list --count HEAD..origin/main 2^>nul') do set "UPDATES=%%U"
-        if not "!UPDATES!"=="0" (
-            echo   Trovati !UPDATES! aggiornamenti, applico git pull...
-            git pull --ff-only origin main
-            if errorlevel 1 (
-                echo   ATTENZIONE: git pull non riuscito ^(continuo con versione locale^).
-            )
-        ) else (
-            echo   Nessun aggiornamento disponibile.
-        )
-    )
-    echo.
-)
-
 REM Installa/aggiorna le dipendenze
 echo  Verifica dipendenze...
 call npm install

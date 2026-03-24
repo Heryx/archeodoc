@@ -1,10 +1,56 @@
 import type { Express } from "express";
+import { spawnSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import type { WithProject } from "./types";
 import { AI_AVAILABLE, AI_PROVIDER, reloadAIProvider } from "../ai";
 import { getAllSettings, setSetting, resetToDefault } from "../ai_settings";
-import { getLogPath } from "../logger";
+import { getLogPath, logger } from "../logger";
+
+type GitCommandResult = {
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+  message?: string;
+};
+
+function runGitCommand(args: string[], cwd: string): GitCommandResult {
+  try {
+    const result = spawnSync("git", args, {
+      cwd,
+      encoding: "utf-8",
+      windowsHide: true,
+      timeout: 15000,
+    });
+    const stdout = String(result.stdout || "").trim();
+    const stderr = String(result.stderr || "").trim();
+
+    if (result.error) {
+      return {
+        ok: false,
+        stdout,
+        stderr,
+        message: result.error.message || "Errore esecuzione comando git",
+      };
+    }
+    if (result.status !== 0) {
+      return {
+        ok: false,
+        stdout,
+        stderr,
+        message: stderr || `Comando git fallito (${args.join(" ")})`,
+      };
+    }
+    return { ok: true, stdout, stderr };
+  } catch (error) {
+    return {
+      ok: false,
+      stdout: "",
+      stderr: "",
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
 
 export function registerSettingsRoutes(app: Express, withProject: WithProject) {
   // ─── Impostazioni AI: lettura chiavi dal .env ─────────────────────────────
@@ -98,6 +144,177 @@ export function registerSettingsRoutes(app: Express, withProject: WithProject) {
   // AI status — verifica quale provider AI è configurato
   app.get("/api/ai/status", (_req, res) => {
     res.json({ available: AI_AVAILABLE, provider: AI_PROVIDER });
+  });
+
+  // Controllo aggiornamenti applicazione (on-demand dalla UI)
+  app.get("/api/app/updates/check", (_req, res) => {
+    const checkedAt = new Date().toISOString();
+    const cwd = process.cwd();
+
+    const gitVersion = runGitCommand(["--version"], cwd);
+    if (!gitVersion.ok) {
+      return res.json({
+        checkedAt,
+        gitAvailable: false,
+        isRepo: false,
+        hasUpdates: false,
+        branch: null,
+        behind: 0,
+        ahead: 0,
+        currentCommit: null,
+        remoteCommit: null,
+        remoteUrl: null,
+        fetchError: null,
+        message: "Git non disponibile in questo ambiente.",
+      });
+    }
+
+    const repoCheck = runGitCommand(["rev-parse", "--is-inside-work-tree"], cwd);
+    if (!repoCheck.ok || repoCheck.stdout !== "true") {
+      return res.json({
+        checkedAt,
+        gitAvailable: true,
+        isRepo: false,
+        hasUpdates: false,
+        branch: null,
+        behind: 0,
+        ahead: 0,
+        currentCommit: null,
+        remoteCommit: null,
+        remoteUrl: null,
+        fetchError: null,
+        message: "Installazione locale non collegata a un repository Git.",
+      });
+    }
+
+    const branchResult = runGitCommand(["rev-parse", "--abbrev-ref", "HEAD"], cwd);
+    const branch = branchResult.ok && branchResult.stdout ? branchResult.stdout : "main";
+
+    const remoteUrlResult = runGitCommand(["config", "--get", "remote.origin.url"], cwd);
+    const remoteUrl = remoteUrlResult.ok && remoteUrlResult.stdout ? remoteUrlResult.stdout : null;
+
+    const fetchResult = runGitCommand(["fetch", "origin", branch, "--quiet"], cwd);
+    const fetchError = fetchResult.ok ? null : fetchResult.message || "Fetch origin fallita";
+    if (fetchError) {
+      logger.warn("Controllo aggiornamenti GitHub: fetch fallita", { branch, message: fetchError });
+    }
+
+    const behindResult = runGitCommand(["rev-list", "--count", `HEAD..origin/${branch}`], cwd);
+    const aheadResult = runGitCommand(["rev-list", "--count", `origin/${branch}..HEAD`], cwd);
+    const currentCommitResult = runGitCommand(["rev-parse", "HEAD"], cwd);
+    const remoteCommitResult = runGitCommand(["rev-parse", `origin/${branch}`], cwd);
+
+    const behindRaw = Number.parseInt(behindResult.stdout || "0", 10);
+    const aheadRaw = Number.parseInt(aheadResult.stdout || "0", 10);
+    const behind = Number.isFinite(behindRaw) ? behindRaw : 0;
+    const ahead = Number.isFinite(aheadRaw) ? aheadRaw : 0;
+    const hasUpdates = behind > 0;
+
+    return res.json({
+      checkedAt,
+      gitAvailable: true,
+      isRepo: true,
+      hasUpdates,
+      branch,
+      behind,
+      ahead,
+      currentCommit: currentCommitResult.ok && currentCommitResult.stdout ? currentCommitResult.stdout : null,
+      remoteCommit: remoteCommitResult.ok && remoteCommitResult.stdout ? remoteCommitResult.stdout : null,
+      remoteUrl,
+      fetchError,
+      message: fetchError ? "Impossibile aggiornare i riferimenti remoti." : null,
+    });
+  });
+
+  app.post("/api/app/updates/apply", (_req, res) => {
+    const cwd = process.cwd();
+
+    const gitVersion = runGitCommand(["--version"], cwd);
+    if (!gitVersion.ok) {
+      return res.status(400).json({
+        ok: false,
+        message: "Git non disponibile in questo ambiente.",
+      });
+    }
+
+    const repoCheck = runGitCommand(["rev-parse", "--is-inside-work-tree"], cwd);
+    if (!repoCheck.ok || repoCheck.stdout !== "true") {
+      return res.status(400).json({
+        ok: false,
+        message: "Installazione locale non collegata a un repository Git.",
+      });
+    }
+
+    const branchResult = runGitCommand(["rev-parse", "--abbrev-ref", "HEAD"], cwd);
+    const branch = branchResult.ok && branchResult.stdout ? branchResult.stdout : "main";
+
+    const fetchResult = runGitCommand(["fetch", "origin", branch, "--quiet"], cwd);
+    if (!fetchResult.ok) {
+      const message = fetchResult.message || "Fetch origin fallita";
+      logger.warn("Aggiorna ora: fetch fallita", { branch, message });
+      return res.status(500).json({
+        ok: false,
+        message,
+      });
+    }
+
+    const beforeBehindResult = runGitCommand(["rev-list", "--count", `HEAD..origin/${branch}`], cwd);
+    const beforeBehindRaw = Number.parseInt(beforeBehindResult.stdout || "0", 10);
+    const beforeBehind = Number.isFinite(beforeBehindRaw) ? beforeBehindRaw : 0;
+
+    if (beforeBehind <= 0) {
+      const currentCommit = runGitCommand(["rev-parse", "HEAD"], cwd);
+      const remoteCommit = runGitCommand(["rev-parse", `origin/${branch}`], cwd);
+      return res.json({
+        ok: true,
+        branch,
+        pulled: false,
+        beforeBehind: 0,
+        afterBehind: 0,
+        updatedCommits: 0,
+        message: "Nessun aggiornamento disponibile.",
+        restartRecommended: false,
+        currentCommit: currentCommit.ok && currentCommit.stdout ? currentCommit.stdout : null,
+        remoteCommit: remoteCommit.ok && remoteCommit.stdout ? remoteCommit.stdout : null,
+      });
+    }
+
+    const pullResult = runGitCommand(["pull", "--ff-only", "origin", branch], cwd);
+    if (!pullResult.ok) {
+      const message = pullResult.message || "git pull fallito";
+      logger.error("Aggiorna ora: pull fallita", { branch, message });
+      return res.status(500).json({
+        ok: false,
+        message,
+      });
+    }
+
+    const afterBehindResult = runGitCommand(["rev-list", "--count", `HEAD..origin/${branch}`], cwd);
+    const afterBehindRaw = Number.parseInt(afterBehindResult.stdout || "0", 10);
+    const afterBehind = Number.isFinite(afterBehindRaw) ? afterBehindRaw : 0;
+    const updatedCommits = Math.max(0, beforeBehind - afterBehind);
+    const currentCommit = runGitCommand(["rev-parse", "HEAD"], cwd);
+    const remoteCommit = runGitCommand(["rev-parse", `origin/${branch}`], cwd);
+
+    logger.info("Aggiorna ora completato", {
+      branch,
+      updatedCommits,
+      beforeBehind,
+      afterBehind,
+    });
+
+    return res.json({
+      ok: true,
+      branch,
+      pulled: true,
+      beforeBehind,
+      afterBehind,
+      updatedCommits,
+      message: `Aggiornamento completato su ${branch}.`,
+      restartRecommended: true,
+      currentCommit: currentCommit.ok && currentCommit.stdout ? currentCommit.stdout : null,
+      remoteCommit: remoteCommit.ok && remoteCommit.stdout ? remoteCommit.stdout : null,
+    });
   });
 
   // ─── Istruzioni AI personalizzabili ─────────────────────────────────────────

@@ -214,3 +214,9 @@ Quando aggiorni il codice:
 - mantieni i dati progetto (`project.sqlite`, `media`, `exports`, `backups`),
 - riavvia l'app,
 - se necessario esegui `npm install` per dipendenze nuove.
+
+Controllo aggiornamenti da UI:
+- usa il pulsante `Controlla aggiornamenti` nella barra laterale in basso (vicino a impostazioni/tema),
+- se ci sono aggiornamenti disponibili, usa `Aggiorna ora` per eseguire `git pull --ff-only`,
+- dopo l'aggiornamento e consigliato riavviare l'app,
+- il launcher `avvia.bat` non esegue piu `git fetch/pull` automatico, per ridurre i tempi di avvio.
