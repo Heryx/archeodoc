@@ -66,7 +66,11 @@ export function Sidebar() {
   const gidFromQuery = parseNumericParam(params.get("giornataId"));
   const giornataContextId = gidFromPath || gidFromQuery;
   const giornataQuery = giornataContextId ? `?giornataId=${giornataContextId}` : "";
-  const panelHref = (panel: "settings" | "qc" | "stats" | "thesaurus" | "report") => {
+
+  // Costruisce l'href con il # esplicito per il corretto funzionamento con useHashLocation.
+  // Con hash routing wouter legge solo ciò che sta dentro #/percorso?query,
+  // quindi il ?panel= deve stare DENTRO il hash, non prima del #.
+  const panelHrefFull = (panel: "settings" | "qc" | "stats" | "thesaurus" | "report") => {
     const next = new URLSearchParams(search);
     if (currentPanel === panel) {
       next.delete("panel");
@@ -74,7 +78,7 @@ export function Sidebar() {
       next.set("panel", panel);
     }
     const query = next.toString();
-    return `${cleanLocation}${query ? `?${query}` : "?panel="}`;
+    return `#${cleanLocation}${query ? `?${query}` : ""}`;
   };
 
   const { data: cantieri = [] } = useQuery<any[]>({
@@ -122,52 +126,59 @@ export function Sidebar() {
       ]
     : [];
 
-  const analisiItems: NavItem[] = cid
+  const analisiItems = cid
     ? [
         {
           href: `/cantiere/${cid}/matrix`,
           icon: GitBranch,
           label: "Harris Matrix",
-          isActive: (path) => path === `/cantiere/${cid}/matrix` || path.startsWith(`/cantiere/${cid}/matrix/`),
+          isActive: (path: string) => path === `/cantiere/${cid}/matrix` || path.startsWith(`/cantiere/${cid}/matrix/`),
+          isPanel: false,
         },
         {
           href: `/cantiere/${cid}/webmap`,
           icon: MapIcon,
           label: "WebMap",
-          isActive: (path) => path === `/cantiere/${cid}/webmap` || path.startsWith(`/cantiere/${cid}/webmap/`),
+          isActive: (path: string) => path === `/cantiere/${cid}/webmap` || path.startsWith(`/cantiere/${cid}/webmap/`),
+          isPanel: false,
         },
         {
           href: `/cantiere/${cid}/upload`,
           icon: Upload,
           label: "Carica doc.",
-          isActive: (path) => path === `/cantiere/${cid}/upload` || path.startsWith(`/cantiere/${cid}/upload/`),
+          isActive: (path: string) => path === `/cantiere/${cid}/upload` || path.startsWith(`/cantiere/${cid}/upload/`),
+          isPanel: false,
         },
         {
-          href: panelHref("thesaurus"),
+          href: panelHrefFull("thesaurus"),
           icon: BookOpenText,
           label: "Thesaurus",
-          isActive: (path) =>
+          isActive: (path: string) =>
             currentPanel === "thesaurus" ||
             path === `/cantiere/${cid}/thesaurus` ||
             path.startsWith(`/cantiere/${cid}/thesaurus/`),
+          isPanel: true,
         },
         {
-          href: panelHref("qc"),
+          href: panelHrefFull("qc"),
           icon: ShieldCheck,
           label: "QC check",
-          isActive: (path) => currentPanel === "qc" || path === `/cantiere/${cid}/qc` || path.startsWith(`/cantiere/${cid}/qc/`),
+          isActive: (path: string) => currentPanel === "qc" || path === `/cantiere/${cid}/qc` || path.startsWith(`/cantiere/${cid}/qc/`),
+          isPanel: true,
         },
         {
-          href: panelHref("report"),
+          href: panelHrefFull("report"),
           icon: FileText,
           label: "Report AI",
-          isActive: (path) => currentPanel === "report" || path === `/cantiere/${cid}/report` || path.startsWith(`/cantiere/${cid}/report/`),
+          isActive: (path: string) => currentPanel === "report" || path === `/cantiere/${cid}/report` || path.startsWith(`/cantiere/${cid}/report/`),
+          isPanel: true,
         },
         {
-          href: panelHref("stats"),
+          href: panelHrefFull("stats"),
           icon: BarChart3,
           label: "Statistiche",
-          isActive: (path) => currentPanel === "stats" || path === `/cantiere/${cid}/stats` || path.startsWith(`/cantiere/${cid}/stats/`),
+          isActive: (path: string) => currentPanel === "stats" || path === `/cantiere/${cid}/stats` || path.startsWith(`/cantiere/${cid}/stats/`),
+          isPanel: true,
         },
       ]
     : [];
@@ -259,22 +270,39 @@ export function Sidebar() {
             Analisi e strumenti
           </div>
           <ul className="space-y-0.5">
-            {analisiItems.map(({ href, icon: Icon, label, isActive }) => {
+            {analisiItems.map(({ href, icon: Icon, label, isActive, isPanel }) => {
               const active = isActive(cleanLocation);
               return (
-                <li key={href}>
-                  <Link
-                    href={href}
-                    className={cn(
-                      "flex items-center gap-2.5 px-2 py-2 rounded-md text-sm transition-colors",
-                      active
-                        ? "bg-primary/10 text-primary font-medium"
-                        : "text-foreground/70 hover:bg-muted hover:text-foreground",
-                    )}
-                  >
-                    <Icon size={15} />
-                    {label}
-                  </Link>
+                <li key={label}>
+                  {isPanel ? (
+                    // Pannelli laterali: usa <a> con href hash esplicito (#/percorso?panel=x)
+                    <a
+                      href={href}
+                      className={cn(
+                        "flex items-center gap-2.5 px-2 py-2 rounded-md text-sm transition-colors",
+                        active
+                          ? "bg-primary/10 text-primary font-medium"
+                          : "text-foreground/70 hover:bg-muted hover:text-foreground",
+                      )}
+                    >
+                      <Icon size={15} />
+                      {label}
+                    </a>
+                  ) : (
+                    // Pagine normali: usa wouter Link
+                    <Link
+                      href={href}
+                      className={cn(
+                        "flex items-center gap-2.5 px-2 py-2 rounded-md text-sm transition-colors",
+                        active
+                          ? "bg-primary/10 text-primary font-medium"
+                          : "text-foreground/70 hover:bg-muted hover:text-foreground",
+                      )}
+                    >
+                      <Icon size={15} />
+                      {label}
+                    </Link>
+                  )}
                 </li>
               );
             })}
@@ -285,8 +313,8 @@ export function Sidebar() {
       <div className="px-3 pb-4 mt-auto border-t border-border pt-3 flex items-center justify-between">
         <span className="text-xs text-muted-foreground">v1.0</span>
         <div className="flex items-center gap-1">
-          <Link
-            href={panelHref("settings")}
+          <a
+            href={panelHrefFull("settings")}
             className={cn(
               "p-1.5 rounded-md transition-colors",
               currentPanel === "settings" || cleanLocation === "/impostazioni"
@@ -297,7 +325,7 @@ export function Sidebar() {
             title="Impostazioni"
           >
             <Settings size={15} />
-          </Link>
+          </a>
           <button
             onClick={toggle}
             data-testid="button-theme-toggle"
