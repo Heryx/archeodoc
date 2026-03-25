@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import type { WithProject } from "./types";
 import { analizzaTestoUS, analizzaTestoGiornata } from "../ai";
+import { applyAiFieldsToUS, buildUSAiFillSuggestions } from "../ai_fill";
 import { exportSchedaUSDocx, exportReportGiornalieroDocx } from "../docx_export";
 import {
   exportHarrisMatrixDocx,
@@ -12,6 +13,16 @@ import {
 function parseMatrixMode(raw: unknown): HarrisMatrixMode {
   if (raw === "fisica" || raw === "stratigrafica" || raw === "all") return raw;
   return "all";
+}
+
+function parseAiFillSource(raw: unknown): "descrizione" | "diario" | "entrambi" {
+  if (raw === "descrizione" || raw === "diario" || raw === "entrambi") return raw;
+  return "entrambi";
+}
+
+function parseRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
 }
 
 export function registerAIExportRoutes(app: Express, withProject: WithProject) {
@@ -36,6 +47,53 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     }
   }));
 
+  // AI fill singola US (suggerimenti)
+  app.post("/api/us/:id/ai-fill", withProject(async (ctx, req, res) => {
+    const id = Number(req.params.id);
+    const us = ctx.storage.getUS(id);
+    if (!us) return res.status(404).json({ error: "US non trovata" });
+
+    const giornata = us.giornataId ? ctx.storage.getGiornata(us.giornataId) : undefined;
+    const cantiere = ctx.storage.getCantiere(us.cantiereId);
+    const source = parseAiFillSource(req.body?.source);
+
+    try {
+      const suggestions = await buildUSAiFillSuggestions({
+        us,
+        cantiere,
+        giornata,
+        source,
+      });
+      res.json({ suggestions, sourceUsed: source });
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Errore generazione suggerimenti AI" });
+    }
+  }));
+
+  // Applica i campi approvati ai dati US
+  app.post("/api/us/:id/ai-fill-apply", withProject(async (ctx, req, res) => {
+    const id = Number(req.params.id);
+    const us = ctx.storage.getUS(id);
+    if (!us) return res.status(404).json({ error: "US non trovata" });
+
+    const fields = parseRecord(req.body?.fields);
+    if (Object.keys(fields).length === 0) {
+      return res.status(400).json({ error: "Nessun campo da applicare" });
+    }
+
+    try {
+      const patch = applyAiFieldsToUS(us, fields);
+      if (Object.keys(patch).length === 0) {
+        return res.status(400).json({ error: "Nessun campo valido da applicare" });
+      }
+      const updated = ctx.storage.updateUS(id, patch);
+      if (!updated) return res.status(404).json({ error: "US non trovata" });
+      res.json({ us: updated });
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Errore applicazione campi AI" });
+    }
+  }));
+
   // AI giornata
   app.post("/api/giornate/:id/analizza-ai", withProject(async (ctx, req, res) => {
     const id = Number(req.params.id);
@@ -51,6 +109,37 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
       res.json(result);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  }));
+
+  // AI fill batch su tutte le US della giornata
+  app.post("/api/giornate/:id/ai-fill-us", withProject(async (ctx, req, res) => {
+    const id = Number(req.params.id);
+    const giornata = ctx.storage.getGiornata(id);
+    if (!giornata) return res.status(404).json({ error: "Giornata non trovata" });
+
+    const source = parseAiFillSource(req.body?.source);
+    const usList = ctx.storage.getUSList(giornata.cantiereId, id);
+    const cantiere = ctx.storage.getCantiere(giornata.cantiereId);
+
+    try {
+      const results: Array<{ usId: number; codiceUS: string; suggestions: Record<string, unknown> }> = [];
+      for (const us of usList) {
+        const suggestions = await buildUSAiFillSuggestions({
+          us,
+          cantiere,
+          giornata,
+          source,
+        });
+        results.push({
+          usId: us.id,
+          codiceUS: us.codiceUS,
+          suggestions,
+        });
+      }
+      res.json({ results, sourceUsed: source, total: results.length });
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Errore analisi batch AI delle US" });
     }
   }));
 

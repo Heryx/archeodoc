@@ -1,4 +1,4 @@
-import { AlertCircle, AlertTriangle, CheckCircle2, Clock, Package, Pencil, Trash2, Wand2 } from "lucide-react";
+import { AlertCircle, AlertTriangle, CheckCircle2, Clock, Package, Pencil, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -17,6 +17,7 @@ type USCardProps = {
   modelName?: string;
   completionStatus?: "bozza" | "completa";
   onGenerate: (id: number) => void;
+  onAiFill: (us: any) => void;
   onEdit: (us: any) => void;
   onDelete: (us: any) => void;
   onOpenMateriali?: (us: any) => void;
@@ -28,6 +29,7 @@ export function USCard({
   modelName,
   completionStatus = "bozza",
   onGenerate,
+  onAiFill,
   onEdit,
   onDelete,
   onOpenMateriali,
@@ -111,6 +113,16 @@ export function USCard({
               title={!aiAvailable ? "Configura GEMINI_API_KEY o ANTHROPIC_API_KEY nel file .env per usare l'AI" : undefined}
             >
               <Wand2 size={12} /> Analizza AI
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1 text-xs"
+              onClick={() => onAiFill(us)}
+              disabled={!aiAvailable}
+              title={!aiAvailable ? "Configura GEMINI_API_KEY o ANTHROPIC_API_KEY nel file .env per usare l'AI" : undefined}
+            >
+              <Sparkles size={12} /> Compila da diario
             </Button>
             <Button size="sm" variant="ghost" className="gap-1 text-xs" onClick={() => onEdit(us)}>
               <Pencil size={12} /> Modifica

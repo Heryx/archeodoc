@@ -23,6 +23,7 @@ import type { FieldDefinition, SchemaDefinition } from "@shared/types/schema";
 import { getUsTopLevelThesaurusFromSchema } from "@shared/us_schema_thesaurus";
 import { USCard } from "@/components/us/USCard";
 import { USAllegatiImpact } from "@/components/us/USAllegati";
+import { AiFillPanel, type AiFillResult } from "@/components/us/AiFillPanel";
 import { USFormDialog } from "@/components/us/USFormDialog";
 import { USModelDialog } from "@/components/us/USModelDialog";
 import {
@@ -50,6 +51,7 @@ type ProjectSchemaResponse = {
 };
 
 type USSaveMode = "draft" | "final";
+type AIFillSource = "descrizione" | "diario" | "entrambi";
 const AUTO_GIORNATA_DATE_KEYS = ["dataCompilazione", "dataRilevamentoCampo", "giorno", "dataScheda"] as const;
 
 function giornataFilterFromLocation(location: string): string {
@@ -145,6 +147,9 @@ export function USPage() {
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
   const [deleteImpact, setDeleteImpact] = useState<USDeleteImpact | null>(null);
   const [isLoadingDeleteImpact, setIsLoadingDeleteImpact] = useState(false);
+  const [aiFillOpen, setAiFillOpen] = useState(false);
+  const [aiFillTarget, setAiFillTarget] = useState<any | null>(null);
+  const [aiFillSuggestions, setAiFillSuggestions] = useState<AiFillResult | null>(null);
   const [modelDraftKey, setModelDraftKey] = useState(BASE_US_MODEL_KEY);
   const [customModelName, setCustomModelName] = useState("");
   const [customModelDescription, setCustomModelDescription] = useState("");
@@ -502,6 +507,46 @@ export function USPage() {
     onError: () => toast({ title: "Errore generazione scheda AI", variant: "destructive" }),
   });
 
+  const requestAiFill = useMutation({
+    mutationFn: async ({ usId, source }: { usId: number; source: AIFillSource }) => {
+      const r = await apiRequest("POST", `/api/us/${usId}/ai-fill`, { source });
+      return r.json() as Promise<{ suggestions: AiFillResult }>;
+    },
+    onSuccess: (result, vars) => {
+      const target = usList.find((item) => item.id === vars.usId) || { id: vars.usId, codiceUS: `US ${vars.usId}` };
+      setAiFillTarget(target);
+      setAiFillSuggestions(result?.suggestions || {});
+      setAiFillOpen(true);
+      const suggestionCount = Object.keys(result?.suggestions || {}).length;
+      if (suggestionCount === 0) {
+        toast({ title: "Nessun suggerimento trovato nel testo disponibile" });
+      }
+    },
+    onError: () => toast({ title: "Errore compilazione assistita AI", variant: "destructive" }),
+  });
+
+  const applyAiFill = useMutation({
+    mutationFn: async ({
+      usId,
+      fields,
+    }: {
+      usId: number;
+      fields: Record<string, string | boolean | string[]>;
+    }) => {
+      const r = await apiRequest("POST", `/api/us/${usId}/ai-fill-apply`, { fields });
+      return r.json();
+    },
+    onSuccess: () => {
+      qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
+      qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", filterGiornata, activeProjectId] });
+      setAiFillOpen(false);
+      setAiFillTarget(null);
+      setAiFillSuggestions(null);
+      toast({ title: "Campi AI applicati alla scheda US" });
+    },
+    onError: () => toast({ title: "Errore applicazione campi AI", variant: "destructive" }),
+  });
+
   const openEditDialog = (us: any) => {
     setEditingId(us.id);
     const mapped = mapUsToForm(us);
@@ -744,6 +789,24 @@ export function USPage() {
         </AlertDialogContent>
       </AlertDialog>
 
+      <AiFillPanel
+        open={aiFillOpen}
+        onOpenChange={(value) => {
+          setAiFillOpen(value);
+          if (!value && !applyAiFill.isPending) {
+            setAiFillTarget(null);
+            setAiFillSuggestions(null);
+          }
+        }}
+        suggestions={aiFillSuggestions}
+        isApplying={applyAiFill.isPending}
+        usCode={aiFillTarget?.codiceUS}
+        onApply={(fields) => {
+          if (!aiFillTarget) return;
+          applyAiFill.mutate({ usId: aiFillTarget.id, fields });
+        }}
+      />
+
       {isLoading ? (
         <div className="space-y-3">
           {[1, 2, 3].map((i) => (
@@ -763,6 +826,7 @@ export function USPage() {
               modelName={modelNameByKey[us.schedaModelKey || activeModelKey]}
               completionStatus={completionStatusByUsId.get(us.id) || "bozza"}
               onGenerate={(id) => generateScheda.mutate(id)}
+              onAiFill={(item) => requestAiFill.mutate({ usId: item.id, source: "entrambi" })}
               onEdit={openEditDialog}
               onDelete={openDeleteDialog}
               onOpenMateriali={(selectedUs) => {
