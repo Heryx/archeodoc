@@ -3,9 +3,13 @@ import os from "os";
 import path from "path";
 import Database from "better-sqlite3";
 import wkx from "wkx";
+import proj4 from "proj4";
+import { createRequire } from "module";
 import type { IStorage } from "./storage";
 import type { USThesaurusConfig } from "@shared/us_thesaurus";
 import { normalizeUsDefinizioneWithVocabulary, normalizeUsTipoWithVocabulary } from "@shared/us_thesaurus";
+
+const require = createRequire(path.join(process.cwd(), "package.json"));
 
 type GpkgGeometryColumn = {
   table_name: string;
@@ -445,6 +449,147 @@ function parseGpkgGeometryBlob(raw: unknown): any | null {
   }
 }
 
+const projDefCache = new Map<number, string | null>();
+
+function utmWgs84ProjDef(srid: number): string | null {
+  if (srid >= 32601 && srid <= 32660) {
+    const zone = srid - 32600;
+    return `+proj=utm +zone=${zone} +datum=WGS84 +units=m +no_defs`;
+  }
+  if (srid >= 32701 && srid <= 32760) {
+    const zone = srid - 32700;
+    return `+proj=utm +zone=${zone} +south +datum=WGS84 +units=m +no_defs`;
+  }
+  return null;
+}
+
+function asProj4Def(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  }
+  return null;
+}
+
+async function fetchEpsgIoProj4(srid: number): Promise<string | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3500);
+
+  try {
+    const response = await fetch(`https://epsg.io/${srid}.proj4`, {
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
+    const body = (await response.text()).trim();
+    if (!body.startsWith("+proj")) return null;
+    return body;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function resolveProj4Def(srid: number): Promise<string | null> {
+  if (projDefCache.has(srid)) return projDefCache.get(srid) ?? null;
+
+  const utmDef = utmWgs84ProjDef(srid);
+  if (utmDef) {
+    projDefCache.set(srid, utmDef);
+    return utmDef;
+  }
+
+  try {
+    const builtIn = asProj4Def((proj4 as any).defs(`EPSG:${srid}`));
+    if (builtIn) {
+      projDefCache.set(srid, builtIn);
+      return builtIn;
+    }
+  } catch {
+    // continue with next strategy
+  }
+
+  try {
+    const entry = require(`epsg-index/s/${srid}.json`) as { proj4?: unknown } | undefined;
+    const fromIndex = asProj4Def(entry?.proj4);
+    if (fromIndex) {
+      (proj4 as any).defs(`EPSG:${srid}`, fromIndex);
+      projDefCache.set(srid, fromIndex);
+      return fromIndex;
+    }
+  } catch {
+    // continue with next strategy
+  }
+
+  const fromWeb = await fetchEpsgIoProj4(srid);
+  if (fromWeb) {
+    try {
+      (proj4 as any).defs(`EPSG:${srid}`, fromWeb);
+    } catch {
+      // keep string in cache, converter validation happens later
+    }
+    projDefCache.set(srid, fromWeb);
+    return fromWeb;
+  }
+
+  projDefCache.set(srid, null);
+  return null;
+}
+
+function reprojectCoords(coords: unknown, converter: proj4.Converter): unknown {
+  if (!Array.isArray(coords)) return coords;
+  if (typeof coords[0] === "number" && typeof coords[1] === "number") {
+    const [x, y, z] = coords as number[];
+    const [lon, lat] = converter.forward([x, y]);
+    return z === undefined ? [lon, lat] : [lon, lat, z];
+  }
+  return coords.map((item) => reprojectCoords(item, converter));
+}
+
+function reprojectGeometry(geometry: any, converter: proj4.Converter): any {
+  if (!geometry || typeof geometry !== "object") return geometry;
+  if (!("coordinates" in geometry)) return geometry;
+  return {
+    ...geometry,
+    coordinates: reprojectCoords((geometry as { coordinates: unknown }).coordinates, converter),
+  };
+}
+
+async function reprojectFeaturesToWgs84(
+  features: Array<{ type: "Feature"; geometry: any; properties: Record<string, unknown> }>,
+  sourceSrid: number | null,
+  warnings: string[],
+): Promise<Array<{ type: "Feature"; geometry: any; properties: Record<string, unknown> }>> {
+  if (!sourceSrid || sourceSrid === 4326 || sourceSrid === 4258) return features;
+
+  const sourceCode = `EPSG:${sourceSrid}`;
+  const targetCode = "EPSG:4326";
+  const projDef = await resolveProj4Def(sourceSrid);
+
+  if (!projDef) {
+    warnings.push(
+      `SRID ${sourceSrid} non risolto per la riproiezione automatica in WGS84. Le geometrie potrebbero non essere visualizzate correttamente.`,
+    );
+    return features;
+  }
+
+  try {
+    if (!(proj4 as any).defs(sourceCode)) {
+      (proj4 as any).defs(sourceCode, projDef);
+    }
+    const converter = proj4(sourceCode, targetCode);
+    return features.map((feature) => ({
+      ...feature,
+      geometry: reprojectGeometry(feature.geometry, converter),
+    }));
+  } catch {
+    warnings.push(
+      `Errore durante la riproiezione SRID ${sourceSrid} -> EPSG:4326. Le geometrie restano nel sistema originale.`,
+    );
+    return features;
+  }
+}
+
 function pickFirstColor(styleText: string | null | undefined): string | null {
   if (!styleText) return null;
 
@@ -552,7 +697,7 @@ export function previewGeoPackage(input: GeoPackagePreviewInput): GeoPackagePrev
   }
 }
 
-export function previewGeoPackageWebMap(input: GeoPackageWebMapPreviewInput): GeoPackageWebMapPreviewResult {
+export async function previewGeoPackageWebMap(input: GeoPackageWebMapPreviewInput): Promise<GeoPackageWebMapPreviewResult> {
   const { fileBuffer, originalName, tableName, limit } = input;
   const warnings: string[] = [];
   const maxFeatures = Number.isFinite(limit as number)
@@ -629,13 +774,15 @@ export function previewGeoPackageWebMap(input: GeoPackageWebMapPreviewInput): Ge
       warnings.push(`Nessuna geometria decodificabile trovata in '${active.tableName}'.`);
     }
 
+    const reprojectedFeatures = await reprojectFeaturesToWgs84(features, active.srid, warnings);
+
     return {
       sourceFileName: originalName,
       tableName: active.tableName,
       tables: tablesWithGeometry,
       featureCollection: {
         type: "FeatureCollection",
-        features,
+        features: reprojectedFeatures,
       },
       styleHint: defaultStyleHint(style),
       warnings,

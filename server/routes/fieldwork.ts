@@ -302,7 +302,7 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
     }
   }));
 
-  app.post("/api/cantieri/:cid/geopackage/webmap-preview", geopackageUpload.single("file"), withProject((ctx, req, res) => {
+  app.post("/api/cantieri/:cid/geopackage/webmap-preview", geopackageUpload.single("file"), withProject(async (ctx, req, res) => {
     const cid = Number(req.params.cid);
     const cantiere = ctx.storage.getCantiere(cid);
     if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
@@ -316,7 +316,7 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
     const limit = req.body?.limit ? Number(req.body.limit) : undefined;
 
     try {
-      const preview = previewGeoPackageWebMap({
+      const preview = await previewGeoPackageWebMap({
         fileBuffer: file.buffer,
         originalName: file.originalname,
         tableName,
