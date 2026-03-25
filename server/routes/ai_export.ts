@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import type { WithProject } from "./types";
 import { analizzaTestoUS, analizzaTestoGiornata } from "../ai";
+import { logger } from "../logger";
 import { applyAiFieldsToUS, buildUSAiFillSuggestions } from "../ai_fill";
 import { exportSchedaUSDocx, exportReportGiornalieroDocx } from "../docx_export";
 import {
@@ -66,7 +67,9 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
       });
       res.json({ suggestions, sourceUsed: source });
     } catch (error: any) {
-      res.status(500).json({ error: error?.message || "Errore generazione suggerimenti AI" });
+      const msg = error instanceof Error ? error.message : String(error);
+      logger.error("ai-fill US fallito", { usId: id, err: msg });
+      res.status(500).json({ error: msg || "Errore generazione suggerimenti AI" });
     }
   }));
 

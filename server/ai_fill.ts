@@ -1,5 +1,5 @@
 import type { Cantiere, Giornata, InsertUS, UnitaStratigrafica } from "@shared/schema";
-import { AI_AVAILABLE, AI_PROVIDER } from "./ai";
+
 import { getSetting } from "./ai_settings";
 import { logger } from "./logger";
 import { buildUsFillPrompt } from "./prompts/us_fill_prompt";
@@ -589,7 +589,8 @@ function mergeAutomaticSuggestions(
 export async function extractUSFieldsFromText(
   testo: string,
 ): Promise<AiFillResult> {
-  if (!AI_AVAILABLE || !testo.trim()) return {};
+  const currentProvider = resolveProvider();
+  if (currentProvider === "none" || !testo.trim()) return {};
 
   let systemPrompt = "Sei un assistente archeologico esperto nella compilazione di schede US.";
   try {
@@ -623,11 +624,9 @@ export async function extractUSFieldsFromText(
     }
     return out;
   } catch (error) {
-    logger.warn("extractUSFieldsFromText fallita", {
-      provider: AI_PROVIDER,
-      message: error instanceof Error ? error.message : String(error),
-    });
-    return {};
+    const msg = error instanceof Error ? error.message : String(error);
+    logger.error("extractUSFieldsFromText fallita", { provider: currentProvider, message: msg });
+    throw error; // propagate so the route returns a real error message
   }
 }
 
