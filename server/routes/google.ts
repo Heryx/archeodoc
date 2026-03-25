@@ -97,7 +97,7 @@ export function registerGoogleRoutes(app: Express, withProject: WithProject) {
       assertTokenHasRequiredScopes();
       const { title, text, sections } = await getDocumentText(url);
       const mapped = mapSectionsToUS(sections);
-      const hasMappedFields = Object.keys(mapped).length >= 2;
+      const hasMappedFields = Object.keys(mapped).length >= 1;
 
       if (hasMappedFields) {
         res.json({ mode: "structured", title, mapped, text });
@@ -121,7 +121,7 @@ export function registerGoogleRoutes(app: Express, withProject: WithProject) {
       assertTokenHasRequiredScopes();
       const { title, text, sections } = await getDocumentText(url);
       const mapped = mapSectionsToGiornata(sections);
-      const hasMappedFields = Object.keys(mapped).length >= 2;
+      const hasMappedFields = Object.keys(mapped).length >= 1;
 
       if (hasMappedFields) {
         res.json({ mode: "structured", title, mapped, text });

@@ -1,4 +1,4 @@
-﻿import type { Dispatch, SetStateAction } from "react";
+﻿import { useState, type Dispatch, type SetStateAction } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import GoogleDocsImport from "@/components/GoogleDocsImport";
@@ -33,6 +33,7 @@ type USFormDialogProps = {
   draftLabelPending: string;
   draftDisabled: boolean;
   onImportedAiTextNotice: () => void;
+  onTriggerAiAnalysis?: (text: string) => void;
 };
 
 export function USFormDialog({
@@ -55,15 +56,24 @@ export function USFormDialog({
   draftLabelPending,
   draftDisabled,
   onImportedAiTextNotice,
+  onTriggerAiAnalysis,
 }: USFormDialogProps) {
+  const [showAiHint, setShowAiHint] = useState(false);
+
   function handleImport(data: GoogleImportPayload) {
     if (data.mode === "structured") {
       setForm((previous) => ({ ...previous, ...data.mapped }));
       return;
     }
 
+    // AI mode: put text in descrizione AND trigger AI analysis
     setForm((previous) => ({ ...previous, descrizione: data.text }));
-    onImportedAiTextNotice();
+    if (onTriggerAiAnalysis) {
+      onTriggerAiAnalysis(data.text);
+    } else {
+      setShowAiHint(true);
+      onImportedAiTextNotice();
+    }
   }
 
   return (
@@ -78,6 +88,11 @@ export function USFormDialog({
             <div className="rounded-md border border-border bg-muted/10 p-3">
               <GoogleDocsImport mode="us" onImport={handleImport} />
             </div>
+            {showAiHint && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                Testo importato nel campo Descrizione. Salva la scheda e poi clicca <strong>Analisi AI</strong> nella pagina della scheda per compilare tutti i campi automaticamente.
+              </div>
+            )}
             <USFormFields
               form={form}
               setForm={setForm}

@@ -749,6 +749,19 @@ export function USPage() {
         onImportedAiTextNotice={() => {
           toast({ title: "Testo importato - clicca Analisi AI per compilare i campi" });
         }}
+        onTriggerAiAnalysis={() => {
+          if (editingId) {
+            // Save as draft first, then trigger AI analysis
+            updateUS.mutate(
+              { id: editingId, data: editForm, saveMode: "draft" },
+              {
+                onSuccess: () => {
+                  generateScheda.mutate(editingId);
+                },
+              },
+            );
+          }
+        }}
       />
 
       <AlertDialog

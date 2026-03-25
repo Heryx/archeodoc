@@ -166,10 +166,13 @@ export default function GoogleDocsImport({ mode, onImport, disabled }: GoogleDoc
             </>
           ) : (
             <>
-              <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">Verrà analizzato dall'AI</Badge>
+              <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">Testo libero — verrà importato nella descrizione</Badge>
               <div className="text-sm text-muted-foreground max-h-40 overflow-y-auto whitespace-pre-wrap">
                 {result.text.length > 500 ? result.text.slice(0, 500) + "…" : result.text}
               </div>
+              <p className="text-sm text-amber-700">
+                Dopo aver cliccato "Applica", salva la scheda e usa "Analisi AI" per compilare i campi automaticamente.
+              </p>
             </>
           )}
           <div className="flex gap-2">
