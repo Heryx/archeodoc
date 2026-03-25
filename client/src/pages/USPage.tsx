@@ -751,12 +751,12 @@ export function USPage() {
         }}
         onTriggerAiAnalysis={() => {
           if (editingId) {
-            // Save as draft first, then trigger AI analysis
+            // Save as draft first, then trigger AI fill for field suggestions
             updateUS.mutate(
               { id: editingId, data: editForm, saveMode: "draft" },
               {
                 onSuccess: () => {
-                  generateScheda.mutate(editingId);
+                  requestAiFill.mutate({ usId: editingId, source: "descrizione" });
                 },
               },
             );

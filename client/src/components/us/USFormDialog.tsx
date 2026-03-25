@@ -90,7 +90,7 @@ export function USFormDialog({
             </div>
             {showAiHint && (
               <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                Testo importato nel campo Descrizione. Salva la scheda e poi clicca <strong>Analisi AI</strong> nella pagina della scheda per compilare tutti i campi automaticamente.
+                Testo importato nel campo Descrizione. Salva prima come bozza, poi usa il pulsante <strong>Compilazione AI</strong> per compilare automaticamente tutti i campi.
               </div>
             )}
             <USFormFields
