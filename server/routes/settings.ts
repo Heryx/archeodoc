@@ -58,12 +58,15 @@ export function registerSettingsRoutes(app: Express, withProject: WithProject) {
     // Restituisce le chiavi mascherate (mostra solo se presenti, non il valore)
     const geminiKey = process.env.GEMINI_API_KEY?.trim() || "";
     const anthropicKey = process.env.ANTHROPIC_API_KEY?.trim() || "";
+    const openaiKey = process.env.OPENAI_API_KEY?.trim() || "";
     const aiProvider = process.env.AI_PROVIDER?.trim() || "";
     res.json({
       geminiKeySet: geminiKey.length > 0,
       anthropicKeySet: anthropicKey.length > 0,
+      openaiKeySet: openaiKey.length > 0,
       geminiKeyPreview: geminiKey.length > 6 ? geminiKey.slice(0, 4) + "..." + geminiKey.slice(-4) : (geminiKey.length > 0 ? "***" : ""),
       anthropicKeyPreview: anthropicKey.length > 6 ? anthropicKey.slice(0, 8) + "..." + anthropicKey.slice(-4) : (anthropicKey.length > 0 ? "***" : ""),
+      openaiKeyPreview: openaiKey.length > 6 ? openaiKey.slice(0, 4) + "..." + openaiKey.slice(-4) : (openaiKey.length > 0 ? "***" : ""),
       aiProvider: aiProvider || "auto",
       currentProvider: AI_PROVIDER,
       available: AI_AVAILABLE,
@@ -72,9 +75,10 @@ export function registerSettingsRoutes(app: Express, withProject: WithProject) {
 
   // ─── Impostazioni AI: salvataggio chiavi nel .env ──────────────────────────
   app.post("/api/settings/ai", (req, res) => {
-    const { geminiKey, anthropicKey, aiProvider } = req.body as {
+    const { geminiKey, anthropicKey, openaiKey, aiProvider } = req.body as {
       geminiKey?: string;
       anthropicKey?: string;
+      openaiKey?: string;
       aiProvider?: string;
     };
 
@@ -107,6 +111,7 @@ export function registerSettingsRoutes(app: Express, withProject: WithProject) {
     let updated = envContent;
     if (geminiKey !== undefined) updated = setEnvVar(updated, "GEMINI_API_KEY", geminiKey);
     if (anthropicKey !== undefined) updated = setEnvVar(updated, "ANTHROPIC_API_KEY", anthropicKey);
+    if (openaiKey !== undefined) updated = setEnvVar(updated, "OPENAI_API_KEY", openaiKey);
     if (aiProvider !== undefined) updated = setEnvVar(updated, "AI_PROVIDER", aiProvider === "auto" ? "" : aiProvider);
 
     try {
@@ -125,6 +130,11 @@ export function registerSettingsRoutes(app: Express, withProject: WithProject) {
       const v = anthropicKey.trim();
       if (v) process.env.ANTHROPIC_API_KEY = v;
       else delete process.env.ANTHROPIC_API_KEY;
+    }
+    if (openaiKey !== undefined) {
+      const v = openaiKey.trim();
+      if (v) process.env.OPENAI_API_KEY = v;
+      else delete process.env.OPENAI_API_KEY;
     }
     if (aiProvider !== undefined) {
       if (aiProvider && aiProvider !== "auto") process.env.AI_PROVIDER = aiProvider.trim();

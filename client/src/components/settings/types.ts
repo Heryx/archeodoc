@@ -1,10 +1,12 @@
 export type AiSettings = {
   geminiKeySet: boolean;
   anthropicKeySet: boolean;
+  openaiKeySet: boolean;
   geminiKeyPreview: string;
   anthropicKeyPreview: string;
-  aiProvider: "auto" | "gemini" | "claude";
-  currentProvider: "gemini" | "claude" | "none";
+  openaiKeyPreview: string;
+  aiProvider: "auto" | "gemini" | "claude" | "openai";
+  currentProvider: "gemini" | "claude" | "openai" | "none";
   available: boolean;
 };
 

@@ -26,9 +26,11 @@ export function ImpostazioniPage({ embedded = false }: ImpostazioniPageProps = {
 
   const [geminiKey, setGeminiKey] = useState("");
   const [anthropicKey, setAnthropicKey] = useState("");
-  const [aiProvider, setAiProvider] = useState<"auto" | "gemini" | "claude">("auto");
+  const [openaiKey, setOpenaiKey] = useState("");
+  const [aiProvider, setAiProvider] = useState<"auto" | "gemini" | "claude" | "openai">("auto");
   const [showGemini, setShowGemini] = useState(false);
   const [showAnthropic, setShowAnthropic] = useState(false);
+  const [showOpenai, setShowOpenai] = useState(false);
   const [initialized, setInitialized] = useState(false);
 
   const [aiPrompts, setAiPrompts] = useState<AiPromptSetting[]>([]);
@@ -95,6 +97,9 @@ export function ImpostazioniPage({ embedded = false }: ImpostazioniPageProps = {
       if (anthropicKey !== "") {
         body.anthropicKey = anthropicKey;
       }
+      if (openaiKey !== "") {
+        body.openaiKey = openaiKey;
+      }
 
       const response = await apiRequest("POST", "/api/settings/ai", body);
       return response.json();
@@ -103,6 +108,7 @@ export function ImpostazioniPage({ embedded = false }: ImpostazioniPageProps = {
       toast({ title: "Impostazioni salvate", description: data.message });
       setGeminiKey("");
       setAnthropicKey("");
+      setOpenaiKey("");
       setInitialized(false);
       queryClient.invalidateQueries({ queryKey: ["/api/settings/ai"] });
       queryClient.invalidateQueries({ queryKey: ["/api/ai/status"] });
@@ -113,13 +119,13 @@ export function ImpostazioniPage({ embedded = false }: ImpostazioniPageProps = {
   });
 
   const clearKeyMutation = useMutation({
-    mutationFn: async (key: "gemini" | "anthropic") => {
-      const body = key === "gemini" ? { geminiKey: "" } : { anthropicKey: "" };
+    mutationFn: async (key: "gemini" | "anthropic" | "openai") => {
+      const body = key === "gemini" ? { geminiKey: "" } : key === "anthropic" ? { anthropicKey: "" } : { openaiKey: "" };
       const response = await apiRequest("POST", "/api/settings/ai", body);
       return response.json();
     },
     onSuccess: (_data, key) => {
-      toast({ title: `Chiave ${key === "gemini" ? "Gemini" : "Anthropic"} rimossa` });
+      toast({ title: `Chiave ${key === "gemini" ? "Gemini" : key === "anthropic" ? "Anthropic" : "OpenAI"} rimossa` });
       setInitialized(false);
       queryClient.invalidateQueries({ queryKey: ["/api/settings/ai"] });
       queryClient.invalidateQueries({ queryKey: ["/api/ai/status"] });
@@ -151,22 +157,28 @@ export function ImpostazioniPage({ embedded = false }: ImpostazioniPageProps = {
       setGeminiKey,
       anthropicKey,
       setAnthropicKey,
+      openaiKey,
+      setOpenaiKey,
       showGemini,
       setShowGemini,
       showAnthropic,
       setShowAnthropic,
+      showOpenai,
+      setShowOpenai,
       savePending: saveMutation.isPending,
       clearPending: clearKeyMutation.isPending,
       onSave: () => saveMutation.mutate(),
-      onClearKey: (key: "gemini" | "anthropic") => clearKeyMutation.mutate(key),
+      onClearKey: (key: "gemini" | "anthropic" | "openai") => clearKeyMutation.mutate(key),
     }),
     [
       settings,
       aiProvider,
       geminiKey,
       anthropicKey,
+      openaiKey,
       showGemini,
       showAnthropic,
+      showOpenai,
       saveMutation,
       clearKeyMutation,
     ],
