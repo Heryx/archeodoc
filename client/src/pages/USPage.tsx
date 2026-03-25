@@ -2,7 +2,14 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useParams } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
-import { applyAiFillFields, getAiFillSuggestions, type AIFillSource, type AiFillResult } from "@/lib/api";
+import {
+  applyAiFillFields,
+  getAiFillSuggestions,
+  getAiFillSuggestionsFromDocx,
+  getAiFillSuggestionsFromGoogleDoc,
+  type AIFillSource,
+  type AiFillResult,
+} from "@/lib/api";
 import { extractSearchFromLocation } from "@/lib/location";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -25,6 +32,7 @@ import { getUsTopLevelThesaurusFromSchema } from "@shared/us_schema_thesaurus";
 import { USCard } from "@/components/us/USCard";
 import { USAllegatiImpact } from "@/components/us/USAllegati";
 import { AiFillPanel } from "@/components/us/AiFillPanel";
+import { DiarioSourceDialog } from "@/components/us/DiarioSourceDialog";
 import { USFormDialog } from "@/components/us/USFormDialog";
 import { USModelDialog } from "@/components/us/USModelDialog";
 import {
@@ -49,6 +57,11 @@ type CantiereUSModelResponse = {
 
 type ProjectSchemaResponse = {
   schema: SchemaDefinition;
+};
+
+type CantiereLiteResponse = {
+  id: number;
+  googleDocId?: string | null;
 };
 
 type USSaveMode = "draft" | "final";
@@ -147,6 +160,8 @@ export function USPage() {
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
   const [deleteImpact, setDeleteImpact] = useState<USDeleteImpact | null>(null);
   const [isLoadingDeleteImpact, setIsLoadingDeleteImpact] = useState(false);
+  const [aiSourceDialogOpen, setAiSourceDialogOpen] = useState(false);
+  const [aiSourceTarget, setAiSourceTarget] = useState<any | null>(null);
   const [aiFillOpen, setAiFillOpen] = useState(false);
   const [aiFillTarget, setAiFillTarget] = useState<any | null>(null);
   const [aiFillSuggestions, setAiFillSuggestions] = useState<AiFillResult | null>(null);
@@ -158,6 +173,12 @@ export function USPage() {
   const { data: giornate = [] } = useQuery<any[]>({
     queryKey: ["/api/cantieri", cid, "giornate", activeProjectId],
     queryFn: async () => (await apiRequest("GET", `/api/cantieri/${cid}/giornate`)).json(),
+    enabled: !!cid,
+  });
+
+  const { data: cantiereData } = useQuery<CantiereLiteResponse>({
+    queryKey: ["/api/cantieri", cid, activeProjectId],
+    queryFn: async () => (await apiRequest("GET", `/api/cantieri/${cid}`)).json(),
     enabled: !!cid,
   });
 
@@ -507,21 +528,55 @@ export function USPage() {
     onError: () => toast({ title: "Errore generazione scheda AI", variant: "destructive" }),
   });
 
+  const openAiSuggestionsPanel = (usId: number, suggestions: AiFillResult) => {
+    const target = usList.find((item) => item.id === usId) || { id: usId, codiceUS: `US ${usId}` };
+    setAiSourceDialogOpen(false);
+    setAiSourceTarget(null);
+    setAiFillTarget(target);
+    setAiFillSuggestions(suggestions || {});
+    setAiFillOpen(true);
+
+    const suggestionCount = Object.keys(suggestions || {}).length;
+    if (suggestionCount === 0) {
+      toast({ title: "Nessun suggerimento trovato nel testo disponibile" });
+    }
+  };
+
   const requestAiFill = useMutation({
     mutationFn: async ({ usId, source }: { usId: number; source: AIFillSource }) => {
       return getAiFillSuggestions(usId, source);
     },
     onSuccess: (result, vars) => {
-      const target = usList.find((item) => item.id === vars.usId) || { id: vars.usId, codiceUS: `US ${vars.usId}` };
-      setAiFillTarget(target);
-      setAiFillSuggestions(result?.suggestions || {});
-      setAiFillOpen(true);
-      const suggestionCount = Object.keys(result?.suggestions || {}).length;
-      if (suggestionCount === 0) {
-        toast({ title: "Nessun suggerimento trovato nel testo disponibile" });
-      }
+      openAiSuggestionsPanel(vars.usId, result?.suggestions || {});
     },
     onError: () => toast({ title: "Errore compilazione assistita AI", variant: "destructive" }),
+  });
+
+  const requestAiFillDocx = useMutation({
+    mutationFn: async ({ usId, file }: { usId: number; file: File }) => {
+      return getAiFillSuggestionsFromDocx(usId, file);
+    },
+    onSuccess: (result, vars) => {
+      openAiSuggestionsPanel(vars.usId, result?.suggestions || {});
+    },
+    onError: () => toast({ title: "Errore analisi file DOCX", variant: "destructive" }),
+  });
+
+  const requestAiFillGoogle = useMutation({
+    mutationFn: async ({ usId, url }: { usId: number; url?: string }) => {
+      return getAiFillSuggestionsFromGoogleDoc(usId, url);
+    },
+    onSuccess: (result, vars) => {
+      openAiSuggestionsPanel(vars.usId, result?.suggestions || {});
+    },
+    onError: (error: any) => {
+      const description = extractApiErrorDescription(error);
+      toast({
+        title: "Errore analisi Google Docs",
+        description: description || undefined,
+        variant: "destructive",
+      });
+    },
   });
 
   const applyAiFill = useMutation({
@@ -602,6 +657,13 @@ export function USPage() {
     const s = (us.qcStatus || "pending") as keyof typeof counts;
     if (s in counts) counts[s]++;
   }
+
+  const linkedGoogleDocId = String(cantiereData?.googleDocId || "").trim();
+  const linkedGoogleDocUrl = linkedGoogleDocId
+    ? `https://docs.google.com/document/d/${linkedGoogleDocId}/edit`
+    : "";
+  const isAiSourceSubmitting =
+    requestAiFill.isPending || requestAiFillDocx.isPending || requestAiFillGoogle.isPending;
 
   return (
     <div className="p-8 max-w-4xl mx-auto">
@@ -800,6 +862,32 @@ export function USPage() {
         </AlertDialogContent>
       </AlertDialog>
 
+      <DiarioSourceDialog
+        open={aiSourceDialogOpen}
+        onOpenChange={(value) => {
+          setAiSourceDialogOpen(value);
+          if (!value && !isAiSourceSubmitting) {
+            setAiSourceTarget(null);
+          }
+        }}
+        usCode={aiSourceTarget?.codiceUS}
+        defaultGoogleDocUrl={linkedGoogleDocUrl}
+        hasLinkedGoogleDoc={!!linkedGoogleDocId}
+        isSubmitting={isAiSourceSubmitting}
+        onSubmitGiornata={() => {
+          if (!aiSourceTarget) return;
+          requestAiFill.mutate({ usId: aiSourceTarget.id, source: "entrambi" });
+        }}
+        onSubmitDocx={(file) => {
+          if (!aiSourceTarget) return;
+          requestAiFillDocx.mutate({ usId: aiSourceTarget.id, file });
+        }}
+        onSubmitGoogleDoc={(url) => {
+          if (!aiSourceTarget) return;
+          requestAiFillGoogle.mutate({ usId: aiSourceTarget.id, url });
+        }}
+      />
+
       <AiFillPanel
         open={aiFillOpen}
         onOpenChange={(value) => {
@@ -837,7 +925,10 @@ export function USPage() {
               modelName={modelNameByKey[us.schedaModelKey || activeModelKey]}
               completionStatus={completionStatusByUsId.get(us.id) || "bozza"}
               onGenerate={(id) => generateScheda.mutate(id)}
-              onAiFill={(item) => requestAiFill.mutate({ usId: item.id, source: "entrambi" })}
+              onAiFill={(item) => {
+                setAiSourceTarget(item);
+                setAiSourceDialogOpen(true);
+              }}
               onEdit={openEditDialog}
               onDelete={openDeleteDialog}
               onOpenMateriali={(selectedUs) => {

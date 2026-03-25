@@ -1,6 +1,9 @@
 import { apiRequest } from "@/lib/queryClient";
+import { getProjectHeader } from "@/lib/project";
 
-export type AIFillSource = "descrizione" | "diario" | "entrambi";
+const API_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
+
+export type AIFillSource = "descrizione" | "diario" | "entrambi" | "text";
 export type AiFieldConfidence = "alta" | "media" | "bassa";
 
 export type AiFieldSuggestion = {
@@ -36,6 +39,45 @@ export async function getAiFillSuggestions(
   return response.json();
 }
 
+export async function getAiFillSuggestionsFromText(
+  usId: number,
+  text: string,
+): Promise<AiFillSuggestionsResponse> {
+  const response = await apiRequest("POST", `/api/us/${usId}/ai-fill`, { source: "text", text });
+  return response.json();
+}
+
+export async function getAiFillSuggestionsFromDocx(
+  usId: number,
+  file: File,
+): Promise<AiFillSuggestionsResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch(`${API_BASE}/api/us/${usId}/ai-fill-docx`, {
+    method: "POST",
+    headers: getProjectHeader(),
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const text = (await response.text()) || response.statusText;
+    throw new Error(`${response.status}: ${text}`);
+  }
+
+  return response.json();
+}
+
+export async function getAiFillSuggestionsFromGoogleDoc(
+  usId: number,
+  url?: string,
+): Promise<AiFillSuggestionsResponse> {
+  const response = await apiRequest("POST", `/api/us/${usId}/ai-fill-google-doc`, {
+    url: String(url || "").trim() || undefined,
+  });
+  return response.json();
+}
+
 export async function applyAiFillFields(
   usId: number,
   fields: Record<string, string | boolean | string[]>,
@@ -51,4 +93,3 @@ export async function getAiFillBatch(
   const response = await apiRequest("POST", `/api/giornate/${giornataId}/ai-fill-us`, { source });
   return response.json();
 }
-

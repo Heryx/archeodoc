@@ -1,9 +1,17 @@
 import type { Express } from "express";
+import multer from "multer";
 import type { WithProject } from "./types";
 import { analizzaTestoUS, analizzaTestoGiornata } from "../ai";
 import { logger } from "../logger";
 import { applyAiFieldsToUS, buildUSAiFillSuggestions } from "../ai_fill";
+import { extractTextFromDocxBuffer } from "../docx_extract";
 import { exportSchedaUSDocx, exportReportGiornalieroDocx } from "../docx_export";
+import { getDocumentText } from "../google_docs";
+import {
+  assertTokenHasRequiredScopes,
+  GOOGLE_REQUIRED_SCOPES,
+  normalizeGoogleError,
+} from "../google_auth";
 import {
   exportHarrisMatrixDocx,
   exportHarrisMatrixPdf,
@@ -16,8 +24,8 @@ function parseMatrixMode(raw: unknown): HarrisMatrixMode {
   return "all";
 }
 
-function parseAiFillSource(raw: unknown): "descrizione" | "diario" | "entrambi" {
-  if (raw === "descrizione" || raw === "diario" || raw === "entrambi") return raw;
+function parseAiFillSource(raw: unknown): "descrizione" | "diario" | "entrambi" | "text" {
+  if (raw === "descrizione" || raw === "diario" || raw === "entrambi" || raw === "text") return raw;
   return "entrambi";
 }
 
@@ -25,6 +33,15 @@ function parseRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
 }
+
+function parseOptionalText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+const aiFillDocxUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 },
+});
 
 export function registerAIExportRoutes(app: Express, withProject: WithProject) {
   // AI US
@@ -57,19 +74,118 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     const giornata = us.giornataId ? ctx.storage.getGiornata(us.giornataId) : undefined;
     const cantiere = ctx.storage.getCantiere(us.cantiereId);
     const source = parseAiFillSource(req.body?.source);
+    const directText = parseOptionalText(req.body?.text);
+    if (source === "text" && !directText) {
+      return res.status(400).json({ error: "Testo sorgente mancante" });
+    }
 
     try {
       const suggestions = await buildUSAiFillSuggestions({
         us,
         cantiere,
         giornata,
-        source,
+        source: source === "text" ? "entrambi" : source,
+        sourceTextOverride: source === "text" ? directText : "",
       });
-      res.json({ suggestions, sourceUsed: source });
+      res.json({ suggestions, sourceUsed: source, textLength: source === "text" ? directText.length : undefined });
     } catch (error: any) {
       const msg = error instanceof Error ? error.message : String(error);
       logger.error("ai-fill US fallito", { usId: id, err: msg });
       res.status(500).json({ error: msg || "Errore generazione suggerimenti AI" });
+    }
+  }));
+
+  // AI fill da file DOCX (upload diretto)
+  app.post("/api/us/:id/ai-fill-docx", aiFillDocxUpload.single("file"), withProject(async (ctx, req, res) => {
+    const id = Number(req.params.id);
+    const us = ctx.storage.getUS(id);
+    if (!us) return res.status(404).json({ error: "US non trovata" });
+
+    const file = req.file as Express.Multer.File | undefined;
+    if (!file) {
+      return res.status(400).json({ error: "File DOCX mancante" });
+    }
+    if (!/\.docx$/i.test(file.originalname || "")) {
+      return res.status(400).json({ error: "Formato non valido: carica un file .docx" });
+    }
+
+    const giornata = us.giornataId ? ctx.storage.getGiornata(us.giornataId) : undefined;
+    const cantiere = ctx.storage.getCantiere(us.cantiereId);
+
+    try {
+      const text = await extractTextFromDocxBuffer(file.buffer);
+      if (!text) {
+        return res.status(422).json({ error: "Il file DOCX non contiene testo utile" });
+      }
+
+      const suggestions = await buildUSAiFillSuggestions({
+        us,
+        cantiere,
+        giornata,
+        source: "entrambi",
+        sourceTextOverride: text,
+      });
+
+      res.json({
+        suggestions,
+        sourceUsed: "text",
+        filename: file.originalname,
+        textLength: text.length,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Errore estrazione testo da DOCX" });
+    }
+  }));
+
+  // AI fill da Google Docs (url o doc del cantiere gia collegato)
+  app.post("/api/us/:id/ai-fill-google-doc", withProject(async (ctx, req, res) => {
+    const id = Number(req.params.id);
+    const us = ctx.storage.getUS(id);
+    if (!us) return res.status(404).json({ error: "US non trovata" });
+
+    const cantiere = ctx.storage.getCantiere(us.cantiereId);
+    const giornata = us.giornataId ? ctx.storage.getGiornata(us.giornataId) : undefined;
+    const requestedUrl = parseOptionalText(req.body?.url);
+    const fallbackDocId = parseOptionalText(cantiere?.googleDocId);
+    const docRef = requestedUrl || fallbackDocId;
+
+    if (!docRef) {
+      return res.status(400).json({
+        error: "Inserisci un URL Google Docs oppure collega un documento al cantiere",
+      });
+    }
+
+    try {
+      assertTokenHasRequiredScopes();
+      const doc = await getDocumentText(docRef);
+      const text = parseOptionalText(doc.text);
+      if (!text) {
+        return res.status(422).json({ error: "Il documento Google Docs non contiene testo utile" });
+      }
+
+      const suggestions = await buildUSAiFillSuggestions({
+        us,
+        cantiere,
+        giornata,
+        source: "entrambi",
+        sourceTextOverride: text,
+      });
+
+      res.json({
+        suggestions,
+        sourceUsed: "text",
+        googleDocTitle: doc.title,
+        googleDocRef: requestedUrl || fallbackDocId,
+        textLength: text.length,
+      });
+    } catch (error) {
+      const normalized = normalizeGoogleError(error, "Errore lettura Google Docs");
+      res.status(normalized.status).json({
+        error: normalized.message,
+        code: normalized.code,
+        missingScopes: normalized.missingScopes,
+        requiredScopes: GOOGLE_REQUIRED_SCOPES,
+      });
     }
   }));
 
@@ -122,6 +238,7 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     if (!giornata) return res.status(404).json({ error: "Giornata non trovata" });
 
     const source = parseAiFillSource(req.body?.source);
+    const normalizedSource = source === "text" ? "entrambi" : source;
     const usList = ctx.storage.getUSList(giornata.cantiereId, id);
     const cantiere = ctx.storage.getCantiere(giornata.cantiereId);
 
@@ -132,7 +249,7 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
           us,
           cantiere,
           giornata,
-          source,
+          source: normalizedSource,
         });
         results.push({
           usId: us.id,
@@ -140,7 +257,7 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
           suggestions,
         });
       }
-      res.json({ results, sourceUsed: source, total: results.length });
+      res.json({ results, sourceUsed: normalizedSource, total: results.length });
     } catch (error: any) {
       res.status(500).json({ error: error?.message || "Errore analisi batch AI delle US" });
     }

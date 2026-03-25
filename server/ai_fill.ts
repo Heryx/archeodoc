@@ -635,9 +635,11 @@ export async function buildUSAiFillSuggestions(input: {
   cantiere?: Cantiere;
   giornata?: Giornata;
   source?: AIFillSource;
+  sourceTextOverride?: string;
 }): Promise<AiFillResult> {
   const source = input.source || "entrambi";
-  const sourceText = buildSourceText(input.us, input.giornata, source);
+  const sourceText =
+    String(input.sourceTextOverride || "").trim() || buildSourceText(input.us, input.giornata, source);
   const aiSuggestions = await extractUSFieldsFromText(sourceText);
   return mergeAutomaticSuggestions(input.us, input.cantiere, input.giornata, aiSuggestions);
 }
