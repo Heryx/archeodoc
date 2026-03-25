@@ -138,11 +138,14 @@ export function checkUS(us: UnitaStratigrafica, allegatiUS: Allegato[]): QcIssue
       usId: us.id,
     });
   }
-  if (us.quota === null || us.quota === undefined) {
+  if (
+    (us.quota === null || us.quota === undefined) &&
+    (us.quotaPianoCampagna === null || us.quotaPianoCampagna === undefined)
+  ) {
     issues.push({
       livello: "warning",
       categoria: "completezza",
-      messaggio: `US ${us.codiceUS}: quota non rilevata`,
+      messaggio: `US ${us.codiceUS}: quota non rilevata (s.l.m. o da piano campagna)`,
       campoInteressato: "quota",
       usId: us.id,
     });

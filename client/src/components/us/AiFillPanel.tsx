@@ -18,7 +18,7 @@ type AiFillPanelProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   suggestions: AiFillResult | null;
-  onApply: (fields: Record<string, string | boolean | string[]>) => void;
+  onApply: (fields: Record<string, string | number | boolean | string[]>) => void;
   isApplying?: boolean;
   usCode?: string;
 };
@@ -29,14 +29,14 @@ const CONFIDENCE_ORDER: Record<AiFieldConfidence, number> = {
   bassa: 2,
 };
 
-function formatValue(value: string | boolean | string[]): string {
+function formatValue(value: string | number | boolean | string[]): string {
   if (Array.isArray(value)) {
     return value.join(", ");
   }
   if (typeof value === "boolean") {
     return value ? "Si" : "No";
   }
-  return value;
+  return String(value);
 }
 
 function confidenceBadgeClass(confidence: AiFieldConfidence): string {
@@ -81,7 +81,7 @@ export function AiFillPanel({
   );
 
   const applySelection = () => {
-    const out: Record<string, string | boolean | string[]> = {};
+    const out: Record<string, string | number | boolean | string[]> = {};
     for (const entry of entries) {
       if (!selected[entry.key]) continue;
       out[entry.key] = entry.suggestion.value;

@@ -109,6 +109,7 @@ function migrate(sqlite: Database.Database) {
       descrizione TEXT,
       interpretazione TEXT,
       quota REAL,
+      quota_piano_campagna REAL,
       settore TEXT,
       coperto_da TEXT,
       copre TEXT,
@@ -345,6 +346,7 @@ function migrate(sqlite: Database.Database) {
   ensureColumn(sqlite, "unita_stratigrafiche", "affidabilita_stratigrafica", "affidabilita_stratigrafica TEXT");
   ensureColumn(sqlite, "unita_stratigrafiche", "responsabile_sabap", "responsabile_sabap TEXT");
   ensureColumn(sqlite, "unita_stratigrafiche", "responsabile_archeosistemi", "responsabile_archeosistemi TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "quota_piano_campagna", "quota_piano_campagna REAL");
   ensureColumn(sqlite, "sas_records", "data", "data TEXT");
   ensureColumn(sqlite, "ra_records", "data", "data TEXT");
   ensureColumn(sqlite, "qc_logs", "dismissed", "dismissed INTEGER DEFAULT 0");

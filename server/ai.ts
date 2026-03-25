@@ -42,7 +42,7 @@ export const CAMPI_OBBLIGATORI_US: Record<string, string[]> = {
     "tipo",            // strato, struttura, tomba…
     "definizione",
     "descrizione",
-    "quota",
+    "quota (s.l.m. o da piano campagna)",
     "settore",
     "coperto_da o copre (almeno una relazione stratigrafica)",
   ],
@@ -52,7 +52,7 @@ export const CAMPI_OBBLIGATORI_US: Record<string, string[]> = {
     "descrizione",
     "orientamento",    // N-S, E-O…
     "rito",            // inumazione, cremazione
-    "quota",
+    "quota (s.l.m. o da piano campagna)",
     "settore",
     "interpretazione",
     "periodo_iniziale",
@@ -63,7 +63,7 @@ export const CAMPI_OBBLIGATORI_US: Record<string, string[]> = {
     "tipo",
     "definizione",
     "descrizione",
-    "quota",
+    "quota (s.l.m. o da piano campagna)",
     "settore",
     "si_lega_a o coperto_da (almeno una relazione)",
     "materiali costruttivi",
@@ -72,7 +72,7 @@ export const CAMPI_OBBLIGATORI_US: Record<string, string[]> = {
     "codice_us",
     "definizione",
     "descrizione",
-    "quota",
+    "quota (s.l.m. o da piano campagna)",
     "settore",
     "coperto_da",
     "copre",
@@ -217,7 +217,8 @@ TIPO: ${us.tipo || "NON INSERITO"}
 DEFINIZIONE: ${us.definizione || "NON INSERITA"}
 DESCRIZIONE: ${us.descrizione || "NON INSERITA"}
 INTERPRETAZIONE: ${us.interpretazione || "NON INSERITA"}
-QUOTA: ${us.quota != null ? us.quota + " m s.l.m." : "NON INSERITA"}
+QUOTA S.L.M.: ${us.quota != null ? us.quota + " m" : "NON INSERITA"}
+QUOTA DA PIANO CAMPAGNA: ${us.quotaPianoCampagna != null ? us.quotaPianoCampagna + " m" : "NON INSERITA"}
 SETTORE: ${us.settore || "NON INSERITO"}
 COPERTO DA: ${us.coperto_da || "nessuna relazione"}
 COPRE: ${us.copre || "nessuna relazione"}

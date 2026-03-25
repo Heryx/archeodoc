@@ -30,6 +30,7 @@ type ColumnMap = {
   descrizione?: string;
   interpretazione?: string;
   quota?: string;
+  quotaPianoCampagna?: string;
   settore?: string;
   copertoDa?: string;
   copre?: string;
@@ -148,6 +149,7 @@ const COLUMN_CANDIDATES = {
   descrizione: ["descrizione", "description", "desc", "note", "descrizione_us"],
   interpretazione: ["interpretazione", "interpretation", "lettura", "interpretazione_us"],
   quota: ["quota", "quota_m", "elevazione", "elevation", "z", "altitudine"],
+  quotaPianoCampagna: ["quota_piano_campagna", "quota_pc", "quota_relativa", "quota_rel", "quota_da_pc"],
   settore: ["settore", "sector", "area", "trincea", "saggio"],
   copertoDa: ["coperto_da", "copertoda", "covered_by", "sotto", "under_us"],
   copre: ["copre", "covers", "sopra", "over_us"],
@@ -279,6 +281,7 @@ function buildColumnMap(columns: string[]): ColumnMap {
     descrizione: pickColumn(columns, COLUMN_CANDIDATES.descrizione),
     interpretazione: pickColumn(columns, COLUMN_CANDIDATES.interpretazione),
     quota: pickColumn(columns, COLUMN_CANDIDATES.quota),
+    quotaPianoCampagna: pickColumn(columns, COLUMN_CANDIDATES.quotaPianoCampagna),
     settore: pickColumn(columns, COLUMN_CANDIDATES.settore),
     copertoDa: pickColumn(columns, COLUMN_CANDIDATES.copertoDa),
     copre: pickColumn(columns, COLUMN_CANDIDATES.copre),
@@ -774,6 +777,7 @@ export function importUSFromGeoPackage(input: GeoPackageImportInput): GeoPackage
           descrizione: toNullableString(getRowValue(row, map.descrizione)),
           interpretazione: toNullableString(getRowValue(row, map.interpretazione)),
           quota: toNullableNumber(getRowValue(row, map.quota)),
+          quotaPianoCampagna: toNullableNumber(getRowValue(row, map.quotaPianoCampagna)),
           settore: toNullableString(getRowValue(row, map.settore)),
           coperto_da: relationFieldValue(getRowValue(row, map.copertoDa)),
           copre: relationFieldValue(getRowValue(row, map.copre)),

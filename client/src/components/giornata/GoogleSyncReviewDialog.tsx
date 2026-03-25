@@ -188,6 +188,7 @@ export function GoogleSyncReviewDialog({
                               "descrizione",
                               "interpretazione",
                               "quota",
+                              "quotaPianoCampagna",
                               "settore",
                               "coperto_da",
                               "copre",

@@ -86,7 +86,12 @@ export function USCard({
               {us.giornataId && <span className="text-xs text-muted-foreground">Giornata #{us.giornataId}</span>}
             </div>
             {us.descrizione && <p className="text-sm text-muted-foreground line-clamp-2">{us.descrizione}</p>}
-            {us.quota != null && <p className="text-xs text-muted-foreground mt-1">Quota: {us.quota} m s.l.m.</p>}
+            {(us.quota != null || us.quotaPianoCampagna != null) && (
+              <p className="text-xs text-muted-foreground mt-1">
+                {us.quota != null ? `Quota s.l.m.: ${us.quota} m` : "Quota s.l.m.: n.d."}
+                {us.quotaPianoCampagna != null ? ` • Quota da p.c.: ${us.quotaPianoCampagna} m` : ""}
+              </p>
+            )}
             {qcIssues.length > 0 && (
               <div className="mt-2 space-y-0.5">
                 {visibleIssues.map((issue: any, i: number) => (

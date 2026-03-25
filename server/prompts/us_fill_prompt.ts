@@ -6,7 +6,7 @@ Analizza il testo fornito e restituisci SOLO un JSON valido.
 Formato output obbligatorio:
 {
   "nomeCampo": {
-    "value": <string | boolean | string[]>,
+    "value": <string | number | boolean | string[]>,
     "confidence": "alta" | "media" | "bassa",
     "source": "<frase del testo>"
   }
@@ -21,6 +21,7 @@ Regole:
 
 Campi ammessi:
 - Testo base: definizione, descrizione, interpretazione, criteriDistinzione, modoFormazione, consistenza, colore, misure, statoConservazione, danneggiatoDa, datazione, epoca, periodoFase, datiQuantitativiReperti, campionatureN, responsabileSabap, responsabileArcheosistemi, localita, anno, area, piante, sezioni, prospetti, nCatalogoGenerale, nCatalogoInternazionale, settore
+- Numerici: quota, quotaPianoCampagna
 - Relazioni: coperto_da, copre, si_lega_a, uguale_a, gliSiAppoggia, siAppoggia, tagliatoDa, taglia, riempitoDa, riempie, sequenzaFisica
 - Campi selezione: densitaInorganici, densitaOrganici, elementiDatanti, flottazioneTipo, setacciaturaTipo, affidabilitaStratigrafica
 - Multiselect modello: componentiInorganici, componentiOrganici, metodoScavo, elementiDatantiFonte
@@ -43,4 +44,3 @@ ${testo}
 """
   `.trim();
 }
-

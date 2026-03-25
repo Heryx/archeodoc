@@ -14,6 +14,7 @@ export interface USData {
   inclusi?: string;
   misure?: string;
   quota?: string;
+  quotaPianoCampagna?: string;
   settore?: string;
   saggio?: string;
   quadrati?: string;
@@ -142,6 +143,13 @@ const US_TEXT_FIELD_ALIASES: Record<string, keyof USData> = {
   inclusi: "inclusi",
   misure: "misure",
   quota: "quota",
+  "quota slm": "quota",
+  "quota s l m": "quota",
+  "quota da piano campagna": "quotaPianoCampagna",
+  "quota piano campagna": "quotaPianoCampagna",
+  "quota dal piano di campagna": "quotaPianoCampagna",
+  "quota p c": "quotaPianoCampagna",
+  "quota pc": "quotaPianoCampagna",
   settore: "settore",
   saggio: "saggio",
   quadrati: "quadrati",

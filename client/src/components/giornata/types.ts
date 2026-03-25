@@ -33,6 +33,7 @@ export type GoogleSyncPreviewItem = {
     descrizione: string | null;
     interpretazione: string | null;
     quota: string | null;
+    quotaPianoCampagna: string | null;
     settore: string | null;
     coperto_da: string | null;
     copre: string | null;
@@ -51,6 +52,7 @@ export type GoogleSyncPreviewItem = {
     descrizione: string | null;
     interpretazione: string | null;
     quota: string | null;
+    quotaPianoCampagna: string | null;
     settore: string | null;
     coperto_da: string | null;
     copre: string | null;
@@ -82,6 +84,7 @@ export type GoogleSyncDecisionState = {
     descrizione?: string | null;
     interpretazione?: string | null;
     quota?: string | null;
+    quotaPianoCampagna?: string | null;
     settore?: string | null;
     coperto_da?: string | null;
     copre?: string | null;
@@ -136,7 +139,8 @@ export function googleFieldLabel(key: string): string {
     definizione: "Definizione",
     descrizione: "Descrizione",
     interpretazione: "Interpretazione",
-    quota: "Quota",
+    quota: "Quota s.l.m.",
+    quotaPianoCampagna: "Quota da piano campagna",
     settore: "Settore",
     coperto_da: "Coperto da",
     copre: "Copre",

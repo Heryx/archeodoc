@@ -119,7 +119,7 @@ export function USFormFields({ form, setForm, giornate, usThesaurus, activeModel
         <div className="border-b border-border bg-muted/20 px-3 py-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Identificazione US</p>
         </div>
-        <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-4">
           <div>
             <Label>Codice US *</Label>
             <Input
@@ -145,13 +145,23 @@ export function USFormFields({ form, setForm, giornate, usThesaurus, activeModel
             </Select>
           </div>
           <div>
-            <Label>Quota (m s.l.m.)</Label>
+            <Label>Quota s.l.m. (m)</Label>
             <Input
               type="number"
               step="0.01"
               placeholder="es. 12.45"
               value={form.quota}
               onChange={(e) => setForm((f) => ({ ...f, quota: e.target.value }))}
+            />
+          </div>
+          <div>
+            <Label>Quota da piano campagna (m)</Label>
+            <Input
+              type="number"
+              step="0.01"
+              placeholder="es. -0.35"
+              value={form.quotaPianoCampagna}
+              onChange={(e) => setForm((f) => ({ ...f, quotaPianoCampagna: e.target.value }))}
             />
           </div>
           <div>

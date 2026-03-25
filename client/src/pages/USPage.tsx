@@ -130,6 +130,7 @@ const US_TOP_LEVEL_FORM_KEYS = new Set<string>([
   "descrizione",
   "interpretazione",
   "quota",
+  "quotaPianoCampagna",
   "settore",
   "coperto_da",
   "copre",
@@ -585,7 +586,7 @@ export function USPage() {
       fields,
     }: {
       usId: number;
-      fields: Record<string, string | boolean | string[]>;
+      fields: Record<string, string | number | boolean | string[]>;
     }) => {
       return applyAiFillFields(usId, fields);
     },

@@ -7,7 +7,7 @@ export type AIFillSource = "descrizione" | "diario" | "entrambi" | "text";
 export type AiFieldConfidence = "alta" | "media" | "bassa";
 
 export type AiFieldSuggestion = {
-  value: string | boolean | string[];
+  value: string | number | boolean | string[];
   confidence: AiFieldConfidence;
   source: string;
 };
@@ -80,7 +80,7 @@ export async function getAiFillSuggestionsFromGoogleDoc(
 
 export async function applyAiFillFields(
   usId: number,
-  fields: Record<string, string | boolean | string[]>,
+  fields: Record<string, string | number | boolean | string[]>,
 ): Promise<{ us: unknown }> {
   const response = await apiRequest("POST", `/api/us/${usId}/ai-fill-apply`, { fields });
   return response.json();

@@ -11,6 +11,7 @@ type ProposedTopLevelFields = {
   descrizione: string | null;
   interpretazione: string | null;
   quota: string | null;
+  quotaPianoCampagna: string | null;
   settore: string | null;
   coperto_da: string | null;
   copre: string | null;
@@ -29,6 +30,7 @@ type ExistingSnapshot = {
   descrizione: string | null;
   interpretazione: string | null;
   quota: string | null;
+  quotaPianoCampagna: string | null;
   settore: string | null;
   coperto_da: string | null;
   copre: string | null;
@@ -54,6 +56,7 @@ const TOP_LEVEL_SYNC_KEYS = [
   "descrizione",
   "interpretazione",
   "quota",
+  "quotaPianoCampagna",
   "settore",
   "coperto_da",
   "copre",
@@ -184,6 +187,7 @@ function usDeterministicFields(us: USData): { topLevel: ProposedTopLevelFields; 
     descrizione: toNullableString(us.descrizione ?? us.note),
     interpretazione: toNullableString(us.interpretazione),
     quota: toNullableString(us.quota),
+    quotaPianoCampagna: toNullableString(us.quotaPianoCampagna),
     settore: toNullableString(us.settore),
     coperto_da: relationNumbersToJson(us.coperto_da),
     copre: relationNumbersToJson(us.copre),
@@ -320,6 +324,7 @@ function buildExistingSnapshot(us: UnitaStratigrafica): ExistingSnapshot {
     descrizione: us.descrizione,
     interpretazione: us.interpretazione,
     quota: toNullableString(us.quota),
+    quotaPianoCampagna: toNullableString(us.quotaPianoCampagna),
     settore: us.settore,
     coperto_da: us.coperto_da,
     copre: us.copre,
@@ -393,7 +398,7 @@ function toPersistedTopLevelValue(
   key: (typeof TOP_LEVEL_SYNC_KEYS)[number],
   value: string | null,
 ): string | number | null {
-  if (key === "quota") {
+  if (key === "quota" || key === "quotaPianoCampagna") {
     return toNullableNumber(value);
   }
   return value;
@@ -556,6 +561,7 @@ export function applyGoogleSyncPreview(
           descrizione: resolvedNormalized.descrizione,
           interpretazione: resolvedNormalized.interpretazione,
           quota: toNullableNumber(resolvedNormalized.quota),
+          quotaPianoCampagna: toNullableNumber(resolvedNormalized.quotaPianoCampagna),
           settore: resolvedNormalized.settore,
           coperto_da: resolvedNormalized.coperto_da,
           copre: resolvedNormalized.copre,

@@ -15,6 +15,7 @@ export type USForm = {
   descrizione: string;
   interpretazione: string;
   quota: string;
+  quotaPianoCampagna: string;
   settore: string;
   giornataId: string;
   coperto_da: string;
@@ -40,6 +41,7 @@ export const emptyUSForm: USForm = {
   descrizione: "",
   interpretazione: "",
   quota: "",
+  quotaPianoCampagna: "",
   settore: "",
   giornataId: "",
   coperto_da: "",
@@ -57,6 +59,13 @@ export const emptyUSForm: USForm = {
 function asNullable(value: string): string | null {
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function toNullableNumber(value: string): number | null {
+  const normalized = String(value || "").trim().replace(",", ".");
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function parseMultiSelectValue(raw: unknown): string[] {
@@ -177,6 +186,12 @@ export function mapUsToForm(us: any): USForm {
     if (!text) continue;
     schedaData[key] = text;
   }
+  if (!schedaData.quoteSlm && us.quota != null) {
+    schedaData.quoteSlm = String(us.quota);
+  }
+  if (!schedaData.quotePianoCampagna && us.quotaPianoCampagna != null) {
+    schedaData.quotePianoCampagna = String(us.quotaPianoCampagna);
+  }
   if (!schedaData.siAppoggiaA && asNullable(String(us.siAppoggia || ""))) {
     schedaData.siAppoggiaA = String(us.siAppoggia);
   }
@@ -226,6 +241,7 @@ export function mapUsToForm(us: any): USForm {
     descrizione: us.descrizione || "",
     interpretazione: us.interpretazione || "",
     quota: us.quota != null ? String(us.quota) : "",
+    quotaPianoCampagna: us.quotaPianoCampagna != null ? String(us.quotaPianoCampagna) : "",
     settore: us.settore || "",
     giornataId: us.giornataId != null ? String(us.giornataId) : "",
     coperto_da: us.coperto_da || "",
@@ -297,7 +313,8 @@ export function usPayload(form: USForm, thesaurus?: USThesaurusConfig) {
     definizione: asNullable(definizioneNormalized || ""),
     descrizione: asNullable(form.descrizione),
     interpretazione: asNullable(form.interpretazione),
-    quota: form.quota ? Number(form.quota) : null,
+    quota: toNullableNumber(form.quota || schedaDataClean.quoteSlm || ""),
+    quotaPianoCampagna: toNullableNumber(form.quotaPianoCampagna || schedaDataClean.quotePianoCampagna || ""),
     settore: asNullable(form.settore),
     giornataId: form.giornataId ? Number(form.giornataId) : null,
     coperto_da: asNullable(form.coperto_da),

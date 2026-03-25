@@ -56,6 +56,7 @@ export const unitaStratigrafiche = sqliteTable("unita_stratigrafiche", {
   descrizione: text("descrizione"),
   interpretazione: text("interpretazione"),
   quota: real("quota"),
+  quotaPianoCampagna: real("quota_piano_campagna"),
   settore: text("settore"),
   coperto_da: text("coperto_da"),
   copre: text("copre"),

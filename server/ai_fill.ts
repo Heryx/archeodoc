@@ -8,7 +8,7 @@ import { buildUsFillPrompt } from "./prompts/us_fill_prompt";
 export type AiFieldConfidence = "alta" | "media" | "bassa";
 
 export type AiFieldSuggestion = {
-  value: string | boolean | string[];
+  value: string | number | boolean | string[];
   confidence: AiFieldConfidence;
   source: string;
 };
@@ -36,6 +36,11 @@ const BOOLEAN_FIELD_KEYS = new Set<string>([
   "scavataIntegralmente",
   "scavataParzialmente",
   "asportataConAltriStrati",
+]);
+
+const NUMBER_FIELD_KEYS = new Set<string>([
+  "quota",
+  "quotaPianoCampagna",
 ]);
 
 const MULTISELECT_FIELD_OPTIONS: Record<string, string[]> = {
@@ -130,6 +135,7 @@ const SUGGESTION_ALIASES: Record<string, string> = {
 const ALL_ALLOWED_KEYS = new Set<string>([
   ...Array.from(TEXT_FIELD_KEYS),
   ...Array.from(BOOLEAN_FIELD_KEYS),
+  ...Array.from(NUMBER_FIELD_KEYS),
   ...Object.keys(MULTISELECT_FIELD_OPTIONS),
   ...Object.keys(SELECT_FIELD_OPTIONS),
 ]);
@@ -138,6 +144,8 @@ const TOP_LEVEL_KEYS = new Set<string>([
   "definizione",
   "descrizione",
   "interpretazione",
+  "quota",
+  "quotaPianoCampagna",
   "settore",
   "coperto_da",
   "copre",
@@ -307,6 +315,17 @@ function normalizeBooleanValue(value: unknown): boolean | null {
   return null;
 }
 
+function normalizeNumberValue(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  const raw = normalizeTextValue(value);
+  if (!raw) return null;
+  const parsed = Number(raw.replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function normalizeChoice(value: unknown, options: string[]): string | null {
   const text = normalizeTextValue(value);
   if (!text) return null;
@@ -379,6 +398,10 @@ function normalizeMultiSelect(value: unknown, options: string[]): string[] | nul
 }
 
 function normalizeSuggestionValue(key: string, value: unknown): AllowedSuggestionValue | null {
+  if (NUMBER_FIELD_KEYS.has(key)) {
+    return normalizeNumberValue(value);
+  }
+
   if (BOOLEAN_FIELD_KEYS.has(key)) {
     return normalizeBooleanValue(value);
   }

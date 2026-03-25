@@ -159,6 +159,10 @@ function buildSchedaUSTable(us: UnitaStratigrafica, cantiere: Cantiere | undefin
     lv("Località", us.localita || cantiere?.localita, 3),
   ]}));
   rows.push(new TableRow({ children: [
+    lv("Quota s.l.m. (m)", us.quota != null ? String(us.quota) : null),
+    lv("Quota da piano campagna (m)", us.quotaPianoCampagna != null ? String(us.quotaPianoCampagna) : null, 2),
+  ]}));
+  rows.push(new TableRow({ children: [
     lv("Piante",    us.piante),
     lv("Sezioni",   us.sezioni),
     lv("Prospetti", us.prospetti),
