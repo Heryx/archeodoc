@@ -31,6 +31,79 @@ export type AiFillBatchResponse = {
   total?: number;
 };
 
+export type USImportSource = "text" | "docx" | "google-doc";
+export type USImportStatus = "ready" | "duplicate_existing";
+
+export type USImportPreviewItem = {
+  tempId: string;
+  codiceUS: string;
+  tipo: string | null;
+  definizione: string | null;
+  descrizione: string | null;
+  interpretazione: string | null;
+  quota: number | null;
+  quotaPianoCampagna: number | null;
+  settore: string | null;
+  coperto_da: string | null;
+  copre: string | null;
+  si_lega_a: string | null;
+  uguale_a: string | null;
+  periodoIniziale: string | null;
+  periodoFinale: string | null;
+  materialiRinvenuti: string | null;
+  campioni: string | null;
+  schedaData: Record<string, string>;
+  confidence: AiFieldConfidence;
+  source: string;
+  status: USImportStatus;
+  reason?: string;
+};
+
+export type USImportPreview = {
+  source: USImportSource;
+  textLength: number;
+  extractedCount: number;
+  items: USImportPreviewItem[];
+  warnings: string[];
+};
+
+export type USImportPreviewResponse = {
+  mode: "preview";
+  preview: USImportPreview;
+  filename?: string;
+  googleDocTitle?: string;
+  googleDocRef?: string;
+};
+
+export type USImportApplyResponse = {
+  mode: "applied";
+  created: number;
+  skipped: number;
+  errors: string[];
+  createdCodes: string[];
+};
+
+export type USImportApplyItem = {
+  tempId: string;
+  codiceUS: string;
+  tipo: string | null;
+  definizione: string | null;
+  descrizione: string | null;
+  interpretazione: string | null;
+  quota: number | null;
+  quotaPianoCampagna: number | null;
+  settore: string | null;
+  coperto_da: string | null;
+  copre: string | null;
+  si_lega_a: string | null;
+  uguale_a: string | null;
+  periodoIniziale: string | null;
+  periodoFinale: string | null;
+  materialiRinvenuti: string | null;
+  campioni: string | null;
+  schedaData: Record<string, string>;
+};
+
 export async function getAiFillSuggestions(
   usId: number,
   source: AIFillSource = "entrambi",
@@ -91,5 +164,69 @@ export async function getAiFillBatch(
   source: AIFillSource = "entrambi",
 ): Promise<AiFillBatchResponse> {
   const response = await apiRequest("POST", `/api/giornate/${giornataId}/ai-fill-us`, { source });
+  return response.json();
+}
+
+export async function previewUsImportFromGiornataText(
+  cantiereId: number,
+  giornataId: number,
+  text?: string,
+): Promise<USImportPreviewResponse> {
+  const response = await apiRequest("POST", `/api/cantieri/${cantiereId}/giornate/${giornataId}/import-us-from-text`, {
+    text,
+  });
+  return response.json();
+}
+
+export async function previewUsImportFromGoogleDoc(
+  cantiereId: number,
+  giornataId: number,
+  url?: string,
+): Promise<USImportPreviewResponse> {
+  const response = await apiRequest("POST", `/api/cantieri/${cantiereId}/giornate/${giornataId}/import-us-from-google-doc`, {
+    url: String(url || "").trim() || undefined,
+  });
+  return response.json();
+}
+
+export async function previewUsImportFromDocx(
+  cantiereId: number,
+  giornataId: number,
+  file: File,
+): Promise<USImportPreviewResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch(`${API_BASE}/api/cantieri/${cantiereId}/giornate/${giornataId}/import-us-from-docx`, {
+    method: "POST",
+    headers: getProjectHeader(),
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const text = (await response.text()) || response.statusText;
+    throw new Error(`${response.status}: ${text}`);
+  }
+
+  return response.json();
+}
+
+export async function applyUsImportFromJournal(
+  cantiereId: number,
+  giornataId: number,
+  source: USImportSource,
+  items: USImportApplyItem[],
+): Promise<USImportApplyResponse> {
+  const endpoint =
+    source === "docx"
+      ? `/api/cantieri/${cantiereId}/giornate/${giornataId}/import-us-from-docx`
+      : source === "google-doc"
+        ? `/api/cantieri/${cantiereId}/giornate/${giornataId}/import-us-from-google-doc`
+        : `/api/cantieri/${cantiereId}/giornate/${giornataId}/import-us-from-text`;
+
+  const response = await apiRequest("POST", endpoint, {
+    confirm: true,
+    items,
+  });
   return response.json();
 }

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Sparkles } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { getCurrentProjectId, getProjectHeader } from "@/lib/project";
@@ -11,6 +12,7 @@ import { GeoPackageImportCard } from "@/components/upload/GeoPackageImportCard";
 import { SelectedFilesPanel } from "@/components/upload/SelectedFilesPanel";
 import { UploadDropzone } from "@/components/upload/UploadDropzone";
 import { UploadMetadataFields } from "@/components/upload/UploadMetadataFields";
+import { USImportFromJournalDialog } from "@/components/us/USImportFromJournalDialog";
 import type {
   AllegatoItem,
   GeoPackageImportPayload,
@@ -35,6 +37,7 @@ export function UploadPage() {
   const [operatore, setOperatore] = useState("");
   const [descrizione, setDescrizione] = useState("");
   const [showDescFor, setShowDescFor] = useState<number | null>(null);
+  const [importUsDialogOpen, setImportUsDialogOpen] = useState(false);
 
   const { data: giornate = [] } = useQuery<GiornataOption[]>({
     queryKey: ["/api/cantieri", cid, "giornate", activeProjectId],
@@ -207,6 +210,16 @@ export function UploadPage() {
       }),
   });
 
+  const { data: cantiere } = useQuery<any>({
+    queryKey: ["/api/cantieri", cid, activeProjectId],
+    queryFn: async () => (await apiRequest("GET", `/api/cantieri/${cid}`)).json(),
+    enabled: !!cid,
+  });
+
+  const giornataSelezionata = selectedGiornata
+    ? giornate.find((g) => String(g.id) === String(selectedGiornata))
+    : null;
+
   return (
     <div className="p-8 max-w-4xl mx-auto">
       <div className="mb-6">
@@ -233,6 +246,18 @@ export function UploadPage() {
             descrizione={descrizione}
             setDescrizione={setDescrizione}
           />
+
+          <div className="flex justify-end">
+            <Button
+              variant="outline"
+              className="gap-2"
+              disabled={!selectedGiornata}
+              onClick={() => setImportUsDialogOpen(true)}
+              title={!selectedGiornata ? "Seleziona prima una giornata per importare le US" : undefined}
+            >
+              <Sparkles size={15} /> Importa US da giornale
+            </Button>
+          </div>
 
           <UploadDropzone
             onFilesAdded={(files) => {
@@ -276,6 +301,22 @@ export function UploadPage() {
           setShowDescFor((prev) => (prev === id ? null : id));
         }}
       />
+
+      {selectedGiornata && (
+        <USImportFromJournalDialog
+          open={importUsDialogOpen}
+          onOpenChange={setImportUsDialogOpen}
+          cantiereId={Number(cid)}
+          giornataId={Number(selectedGiornata)}
+          giornataDate={giornataSelezionata?.data}
+          linkedGoogleDocId={cantiere?.googleDocId}
+          onImported={() => {
+            queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", activeProjectId] });
+            queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "giornate", activeProjectId] });
+          }}
+        />
+      )}
     </div>
   );
 }

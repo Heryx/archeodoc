@@ -13,7 +13,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Layers, Plus } from "lucide-react";
+import { Layers, Plus, Sparkles } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { getCurrentProjectId } from "@/lib/project";
 import { GiornataDeleteImpactDetails } from "@/components/giornata/GiornataDeleteImpact";
@@ -21,6 +21,7 @@ import { GiornataFormDialog } from "@/components/giornata/GiornataFormDialog";
 import { GiornataList } from "@/components/giornata/GiornataList";
 import { GooglePanel } from "@/components/giornata/GooglePanel";
 import { GoogleSyncReviewDialog } from "@/components/giornata/GoogleSyncReviewDialog";
+import { USImportFromJournalDialog } from "@/components/us/USImportFromJournalDialog";
 import {
   parseLastSyncSummary,
   seedGoogleDecisionState,
@@ -58,6 +59,7 @@ export function GiornataPage() {
   const [googleReviewOpen, setGoogleReviewOpen] = useState(false);
   const [googlePreview, setGooglePreview] = useState<GoogleSyncPreview | null>(null);
   const [googleDecisions, setGoogleDecisions] = useState<Record<string, GoogleSyncDecisionState>>({});
+  const [importUsDialogOpen, setImportUsDialogOpen] = useState(false);
 
   const { data: cantieri = [] } = useQuery<any[]>({
     queryKey: ["/api/cantieri", activeProjectId],
@@ -274,6 +276,7 @@ export function GiornataPage() {
   };
 
   const lastSyncSummary = parseLastSyncSummary(cantiere?.lastSyncReport);
+  const giornataSelezionata = gid ? giornate.find((g: any) => String(g.id) === String(gid)) : null;
 
   return (
     <div className="p-8 max-w-4xl mx-auto">
@@ -288,6 +291,15 @@ export function GiornataPage() {
               onClick={() => navigate(`/cantiere/${cid}/us${gid ? `?giornataId=${gid}` : ""}`)}
             >
               <Layers size={15} /> Vai alle US
+            </Button>
+            <Button
+              variant="outline"
+              className="gap-2"
+              disabled={!gid}
+              onClick={() => setImportUsDialogOpen(true)}
+              title={!gid ? "Apri prima una giornata specifica per importare le US" : undefined}
+            >
+              <Sparkles size={15} /> Importa US da giornale
             </Button>
             <Button data-testid="button-nuova-giornata" className="gap-2" onClick={() => setOpenCreate(true)}>
               <Plus size={16} /> Nuova giornata
@@ -391,6 +403,22 @@ export function GiornataPage() {
         onSchedaOverride={setGoogleSchedaOverride}
         onApply={() => applyGoogleSync.mutate()}
       />
+
+      {gid && (
+        <USImportFromJournalDialog
+          open={importUsDialogOpen}
+          onOpenChange={setImportUsDialogOpen}
+          cantiereId={Number(cid)}
+          giornataId={Number(gid)}
+          giornataDate={giornataSelezionata?.data}
+          linkedGoogleDocId={cantiere?.googleDocId}
+          onImported={() => {
+            qc.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
+            qc.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", activeProjectId] });
+            qc.invalidateQueries({ queryKey: ["/api/cantieri", cid, "giornate", activeProjectId] });
+          }}
+        />
+      )}
 
       <GiornataList
         cid={String(cid)}

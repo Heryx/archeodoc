@@ -7,6 +7,7 @@ import { applyAiFieldsToUS, buildUSAiFillSuggestions } from "../ai_fill";
 import { extractTextFromDocxBuffer } from "../docx_extract";
 import { exportSchedaUSDocx, exportReportGiornalieroDocx } from "../docx_export";
 import { getDocumentText } from "../google_docs";
+import { applyUSImportPreview, buildUSImportPreview } from "../us_extractor";
 import {
   assertTokenHasRequiredScopes,
   GOOGLE_REQUIRED_SCOPES,
@@ -38,12 +39,185 @@ function parseOptionalText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function parseBooleanLike(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+  if (typeof value !== "string") return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+function parseArray(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
 const aiFillDocxUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024 },
 });
 
 export function registerAIExportRoutes(app: Express, withProject: WithProject) {
+  // Import US automatico da testo giornata
+  app.post("/api/cantieri/:cid/giornate/:gid/import-us-from-text", withProject(async (ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const gid = Number(req.params.gid);
+
+    const cantiere = ctx.storage.getCantiere(cid);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const giornata = ctx.storage.getGiornata(gid);
+    if (!giornata || giornata.cantiereId !== cid) {
+      return res.status(404).json({ error: "Giornata non trovata per questo cantiere" });
+    }
+
+    const confirm = parseBooleanLike(req.body?.confirm);
+    if (confirm) {
+      const items = parseArray(req.body?.items);
+      if (items.length === 0) {
+        return res.status(400).json({ error: "Nessuna US selezionata da importare" });
+      }
+      const applied = applyUSImportPreview({
+        storage: ctx.storage,
+        cantiereId: cid,
+        giornataId: gid,
+        items,
+        modelKey: cantiere.usModelKey,
+      });
+      return res.json({ mode: "applied", ...applied });
+    }
+
+    try {
+      const sourceText = parseOptionalText(req.body?.text) || parseOptionalText(giornata.note);
+      const preview = await buildUSImportPreview({
+        source: "text",
+        text: sourceText,
+        existingUs: ctx.storage.getUSList(cid),
+      });
+      return res.json({ mode: "preview", preview });
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message || "Errore anteprima import da testo giornata" });
+    }
+  }));
+
+  // Import US automatico da DOCX
+  app.post("/api/cantieri/:cid/giornate/:gid/import-us-from-docx", aiFillDocxUpload.single("file"), withProject(async (ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const gid = Number(req.params.gid);
+
+    const cantiere = ctx.storage.getCantiere(cid);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const giornata = ctx.storage.getGiornata(gid);
+    if (!giornata || giornata.cantiereId !== cid) {
+      return res.status(404).json({ error: "Giornata non trovata per questo cantiere" });
+    }
+
+    const confirm = parseBooleanLike(req.body?.confirm);
+    if (confirm) {
+      const items = parseArray(req.body?.items);
+      if (items.length === 0) {
+        return res.status(400).json({ error: "Nessuna US selezionata da importare" });
+      }
+      const applied = applyUSImportPreview({
+        storage: ctx.storage,
+        cantiereId: cid,
+        giornataId: gid,
+        items,
+        modelKey: cantiere.usModelKey,
+      });
+      return res.json({ mode: "applied", ...applied });
+    }
+
+    const file = req.file as Express.Multer.File | undefined;
+    if (!file) return res.status(400).json({ error: "File DOCX mancante" });
+    if (!/\.docx$/i.test(file.originalname || "")) {
+      return res.status(400).json({ error: "Formato non valido: carica un file .docx" });
+    }
+
+    try {
+      const text = await extractTextFromDocxBuffer(file.buffer);
+      const preview = await buildUSImportPreview({
+        source: "docx",
+        text,
+        existingUs: ctx.storage.getUSList(cid),
+      });
+      return res.json({ mode: "preview", preview, filename: file.originalname });
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message || "Errore anteprima import da DOCX" });
+    }
+  }));
+
+  // Import US automatico da Google Docs
+  app.post("/api/cantieri/:cid/giornate/:gid/import-us-from-google-doc", withProject(async (ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const gid = Number(req.params.gid);
+
+    const cantiere = ctx.storage.getCantiere(cid);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const giornata = ctx.storage.getGiornata(gid);
+    if (!giornata || giornata.cantiereId !== cid) {
+      return res.status(404).json({ error: "Giornata non trovata per questo cantiere" });
+    }
+
+    const confirm = parseBooleanLike(req.body?.confirm);
+    if (confirm) {
+      const items = parseArray(req.body?.items);
+      if (items.length === 0) {
+        return res.status(400).json({ error: "Nessuna US selezionata da importare" });
+      }
+      const applied = applyUSImportPreview({
+        storage: ctx.storage,
+        cantiereId: cid,
+        giornataId: gid,
+        items,
+        modelKey: cantiere.usModelKey,
+      });
+      return res.json({ mode: "applied", ...applied });
+    }
+
+    const requestedUrl = parseOptionalText(req.body?.url);
+    const docRef = requestedUrl || parseOptionalText(cantiere.googleDocId);
+    if (!docRef) {
+      return res.status(400).json({
+        error: "Inserisci un URL Google Docs oppure collega un documento al cantiere",
+      });
+    }
+
+    try {
+      assertTokenHasRequiredScopes();
+      const doc = await getDocumentText(docRef);
+      const preview = await buildUSImportPreview({
+        source: "google-doc",
+        text: doc.text || "",
+        existingUs: ctx.storage.getUSList(cid),
+      });
+      return res.json({
+        mode: "preview",
+        preview,
+        googleDocTitle: doc.title,
+        googleDocRef: docRef,
+      });
+    } catch (error) {
+      const normalized = normalizeGoogleError(error, "Errore lettura Google Docs");
+      return res.status(normalized.status).json({
+        error: normalized.message,
+        code: normalized.code,
+        missingScopes: normalized.missingScopes,
+        requiredScopes: GOOGLE_REQUIRED_SCOPES,
+      });
+    }
+  }));
+
   // AI US
   app.post("/api/us/:id/analizza-ai", withProject(async (ctx, req, res) => {
     const id = Number(req.params.id);
