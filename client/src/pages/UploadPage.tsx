@@ -13,6 +13,8 @@ import { SelectedFilesPanel } from "@/components/upload/SelectedFilesPanel";
 import { UploadDropzone } from "@/components/upload/UploadDropzone";
 import { UploadMetadataFields } from "@/components/upload/UploadMetadataFields";
 import { USImportFromJournalDialog } from "@/components/us/USImportFromJournalDialog";
+import { QFieldUploader } from "@/components/qfield/QFieldUploader";
+import { SyncPreviewPanel } from "@/components/qfield/SyncPreviewPanel";
 import type {
   AllegatoItem,
   GeoPackageImportPayload,
@@ -20,6 +22,7 @@ import type {
   GiornataOption,
   USOption,
 } from "@/components/upload/types";
+import type { QFieldApplyResult, QFieldSyncPreview } from "@/components/qfield/types";
 
 export function UploadPage() {
   const { cid } = useParams<{ cid: string }>();
@@ -38,6 +41,8 @@ export function UploadPage() {
   const [descrizione, setDescrizione] = useState("");
   const [showDescFor, setShowDescFor] = useState<number | null>(null);
   const [importUsDialogOpen, setImportUsDialogOpen] = useState(false);
+  const [qfieldZipFile, setQfieldZipFile] = useState<File | null>(null);
+  const [qfieldPreview, setQfieldPreview] = useState<QFieldSyncPreview | null>(null);
 
   const { data: giornate = [] } = useQuery<GiornataOption[]>({
     queryKey: ["/api/cantieri", cid, "giornate", activeProjectId],
@@ -210,6 +215,80 @@ export function UploadPage() {
       }),
   });
 
+  const qfieldUploadMutation = useMutation({
+    mutationFn: async () => {
+      if (!qfieldZipFile) throw new Error("Seleziona prima il file ZIP di QFieldSync");
+
+      const formData = new FormData();
+      formData.append("file", qfieldZipFile);
+
+      const response = await fetch(`/api/cantieri/${cid}/qfield/upload-project`, {
+        method: "POST",
+        body: formData,
+        headers: getProjectHeader(),
+      });
+
+      if (!response.ok) {
+        let errorMessage = "Analisi QFieldSync fallita";
+        try {
+          const payload = await response.json();
+          if (typeof payload?.error === "string" && payload.error.trim()) errorMessage = payload.error.trim();
+        } catch {
+          // keep fallback
+        }
+        throw new Error(errorMessage);
+      }
+
+      return response.json() as Promise<QFieldSyncPreview>;
+    },
+    onSuccess: (preview) => {
+      setQfieldPreview(preview);
+      toast({
+        title: "Preview QField pronta",
+        description: `${preview.totalIncoming} US trovate, ${preview.matchedUS} già presenti nel DB.`,
+      });
+    },
+    onError: (error: any) =>
+      toast({
+        title: "Errore import QFieldSync",
+        description: error?.message || "Operazione non riuscita",
+        variant: "destructive",
+      }),
+  });
+
+  const qfieldApplyMutation = useMutation({
+    mutationFn: async (payload: {
+      approvals: Array<{ usId: number | null; codiceUS: string; field: string; value: string | number | null }>;
+      includeNonConflicts: boolean;
+      attachPhotos: boolean;
+    }) => {
+      if (!qfieldPreview) throw new Error("Nessuna preview QField disponibile");
+      const response = await apiRequest(
+        "POST",
+        `/api/cantieri/${cid}/qfield/sync-apply/${qfieldPreview.uploadId}`,
+        payload,
+      );
+      return response.json() as Promise<QFieldApplyResult>;
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", activeProjectId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "allegati"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "allegati", activeProjectId] });
+      toast({
+        title: "Sincronizzazione applicata",
+        description:
+          `US aggiornate: ${result.updated}, create: ${result.created}, foto allegate: ${result.photosAttached}, conflitti saltati: ${result.skippedConflicts}.`,
+      });
+    },
+    onError: (error: any) =>
+      toast({
+        title: "Errore applicazione sync",
+        description: error?.message || "Operazione non riuscita",
+        variant: "destructive",
+      }),
+  });
+
   const { data: cantiere } = useQuery<any>({
     queryKey: ["/api/cantieri", cid, activeProjectId],
     queryFn: async () => (await apiRequest("GET", `/api/cantieri/${cid}`)).json(),
@@ -293,6 +372,27 @@ export function UploadPage() {
         onImport={() => geopackageImportMutation.mutate()}
         importPending={geopackageImportMutation.isPending}
       />
+
+      <div className="space-y-4 my-6">
+        <QFieldUploader
+          selectedFile={qfieldZipFile}
+          onSelectFile={(file) => {
+            setQfieldZipFile(file);
+            setQfieldPreview(null);
+          }}
+          onUpload={() => qfieldUploadMutation.mutate()}
+          uploadPending={qfieldUploadMutation.isPending}
+        />
+
+        {qfieldPreview && (
+          <SyncPreviewPanel
+            cantiereId={Number(cid)}
+            preview={qfieldPreview}
+            onApply={(payload) => qfieldApplyMutation.mutate(payload)}
+            applyPending={qfieldApplyMutation.isPending}
+          />
+        )}
+      </div>
 
       <AllegatiList
         allegati={allegati}

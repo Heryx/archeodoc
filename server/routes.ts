@@ -15,6 +15,7 @@ import { registerSettingsRoutes } from "./routes/settings";
 import { registerAIExportRoutes } from "./routes/ai_export";
 import { registerQCRoutes } from "./routes/qc";
 import { registerFieldworkRoutes } from "./routes/fieldwork";
+import { registerQFieldRoutes } from "./routes/qfield";
 import type { ProjectContext, ProjectHandler } from "./routes/types";
 import {
   buildTargetAttachmentRelativePath,
@@ -502,6 +503,7 @@ export async function registerRoutes(_httpServer: Server, app: Express): Promise
   registerSettingsRoutes(app, withProject);
 
   registerAIExportRoutes(app, withProject);
+  registerQFieldRoutes(app, withProject);
 
 }
 
