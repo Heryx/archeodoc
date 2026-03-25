@@ -14,6 +14,12 @@ import { extractSearchFromLocation } from "@/lib/location";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -23,9 +29,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { GitBranch, Package, Plus, Settings2 } from "lucide-react";
+import { Download, GitBranch, Package, Plus, Settings2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { getCurrentProjectId } from "@/lib/project";
+import { buildProjectUrl, getCurrentProjectId, getProjectHeader } from "@/lib/project";
 import { BASE_US_MODEL_KEY, BUILTIN_US_MODELS, type USModelDefinition, type USModelField } from "@shared/us_models";
 import type { FieldDefinition, SchemaDefinition } from "@shared/types/schema";
 import { getUsTopLevelThesaurusFromSchema } from "@shared/us_schema_thesaurus";
@@ -167,6 +173,7 @@ export function USPage() {
   const [aiFillTarget, setAiFillTarget] = useState<any | null>(null);
   const [aiFillSuggestions, setAiFillSuggestions] = useState<AiFillResult | null>(null);
   const [modelDraftKey, setModelDraftKey] = useState(BASE_US_MODEL_KEY);
+  const [exportingKind, setExportingKind] = useState<"single" | "zip-all" | "zip-us" | null>(null);
   const [customModelName, setCustomModelName] = useState("");
   const [customModelDescription, setCustomModelDescription] = useState("");
   const [customModelFieldsRaw, setCustomModelFieldsRaw] = useState("");
@@ -666,6 +673,69 @@ export function USPage() {
   const isAiSourceSubmitting =
     requestAiFill.isPending || requestAiFillDocx.isPending || requestAiFillGoogle.isPending;
 
+  const downloadBlob = async (
+    endpoint: string,
+    fallbackFilename: string,
+    kind: "single" | "zip-all" | "zip-us",
+    okToast: string,
+    errorToast: string,
+  ) => {
+    setExportingKind(kind);
+    try {
+      const response = await fetch(buildProjectUrl(endpoint), { headers: getProjectHeader() });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || "Errore download");
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") || "";
+      const filenameMatch = disposition.match(/filename="?([^"]+)"?/i);
+      const filename = filenameMatch?.[1] || fallbackFilename;
+
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.click();
+      URL.revokeObjectURL(url);
+
+      toast({ title: okToast });
+    } catch (error: any) {
+      toast({
+        title: errorToast,
+        description: error?.message || undefined,
+        variant: "destructive",
+      });
+    } finally {
+      setExportingKind(null);
+    }
+  };
+
+  const handleExportSingleUS = async (us: any) => {
+    const fallback = `Scheda_${String(us?.codiceUS || us?.id || "US").replace(/[\s/\\:*?"<>|]/g, "_")}.docx`;
+    await downloadBlob(
+      `/api/us/${us.id}/export-docx`,
+      fallback,
+      "single",
+      `Scheda ${us.codiceUS || us.id} scaricata`,
+      "Errore export scheda US",
+    );
+  };
+
+  const handleExportZip = async (scope: "all" | "us") => {
+    const slug = String(cid || "cantiere");
+    const fallback = scope === "us" ? `cantiere_${slug}_schede_us.zip` : `cantiere_${slug}_export.zip`;
+    const endpoint = `/api/cantieri/${cid}/export-zip${scope === "us" ? "?scope=us" : ""}`;
+    await downloadBlob(
+      endpoint,
+      fallback,
+      scope === "us" ? "zip-us" : "zip-all",
+      scope === "us" ? "ZIP schede US scaricato" : "ZIP completo scaricato",
+      scope === "us" ? "Errore export ZIP schede US" : "Errore export ZIP completo",
+    );
+  };
+
   return (
     <div className="p-8 max-w-4xl mx-auto">
       <div className="mb-6 flex items-start justify-between gap-3">
@@ -695,6 +765,28 @@ export function USPage() {
           <Button variant="outline" className="gap-2" onClick={() => setOpenModelDialog(true)}>
             <Settings2 size={15} /> Modello US
           </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="gap-2" disabled={exportingKind !== null}>
+                <Download size={15} />
+                {exportingKind === "zip-all" || exportingKind === "zip-us" ? "Esporto..." : "Esporta schede"}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onClick={() => void handleExportZip("all")}
+                disabled={exportingKind !== null}
+              >
+                ZIP completo cantiere
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => void handleExportZip("us")}
+                disabled={exportingKind !== null}
+              >
+                ZIP solo schede US
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <div className="min-w-52">
               <Select
                 value={filterGiornata}
@@ -936,6 +1028,9 @@ export function USPage() {
                 const params = new URLSearchParams({ usId: String(selectedUs.id) });
                 if (filterGiornata !== "all") params.set("giornataId", filterGiornata);
                 navigate(`/cantiere/${cid}/materiali?${params.toString()}`);
+              }}
+              onExportDocx={(selectedUs) => {
+                void handleExportSingleUS(selectedUs);
               }}
               aiAvailable={aiAvailable}
             />

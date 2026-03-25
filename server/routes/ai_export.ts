@@ -25,6 +25,11 @@ function parseMatrixMode(raw: unknown): HarrisMatrixMode {
   return "all";
 }
 
+function parseZipExportScope(raw: unknown): "all" | "us" {
+  if (raw === "us") return "us";
+  return "all";
+}
+
 function parseAiFillSource(raw: unknown): "descrizione" | "diario" | "entrambi" | "text" {
   if (raw === "descrizione" || raw === "diario" || raw === "entrambi" || raw === "text") return raw;
   return "entrambi";
@@ -564,6 +569,8 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     const id = Number(req.params.id);
     const cantiere = ctx.storage.getCantiere(id);
     if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+    const scope = parseZipExportScope(req.query.scope);
+    const includeDiari = scope === "all";
 
     const JSZip = (await import("jszip")).default;
     const zip = new JSZip();
@@ -575,15 +582,17 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
 
     // Diario giornaliero DOCX (solo quelli con report AI generato)
     const diariFolderName = "diari";
-    for (const g of giornate) {
-      if (!g.aiReportText) continue;
-      try {
-        const qcLogs = ctx.storage.getQcLogs(id, g.id);
-        const campi = qcLogs.filter((l) => l.livello === "error").map((l) => l.messaggio);
-        const buf = await exportReportGiornalieroDocx(g, cantiere, g.aiReportText, campi, "");
-        folder.folder(diariFolderName)!.file(`Diario_${g.data}.docx`, buf);
-      } catch {
-        // skip
+    if (includeDiari) {
+      for (const g of giornate) {
+        if (!g.aiReportText) continue;
+        try {
+          const qcLogs = ctx.storage.getQcLogs(id, g.id);
+          const campi = qcLogs.filter((l) => l.livello === "error").map((l) => l.messaggio);
+          const buf = await exportReportGiornalieroDocx(g, cantiere, g.aiReportText, campi, "");
+          folder.folder(diariFolderName)!.file(`Diario_${g.data}.docx`, buf);
+        } catch {
+          // skip
+        }
       }
     }
 
@@ -605,16 +614,18 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     folder.file(
       "README.txt",
       `Archivio ArcheoDoc — ${cantiere.nome}\n` +
+        `Tipo export: ${includeDiari ? "completo" : "solo schede US"}\n` +
         `Codice: ${cantiere.codice}\n` +
         `Localit\u00e0: ${cantiere.localita}\n` +
         `Esportato il: ${new Date().toLocaleString("it-IT")}\n\n` +
-        `Diari generati: ${giornate.filter((g) => !!g.aiReportText).length}/${giornate.length}\n` +
+        `Diari generati: ${includeDiari ? `${giornate.filter((g) => !!g.aiReportText).length}/${giornate.length}` : "esclusi"}\n` +
         `Schede US generate: ${usList.filter((u) => !!u.schedaAiGenerata).length}/${usList.length}\n`,
     );
 
     const zipBuffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
     res.setHeader("Content-Type", "application/zip");
-    res.setHeader("Content-Disposition", `attachment; filename="${slug}_export.zip"`);
+    const filename = includeDiari ? `${slug}_export.zip` : `${slug}_schede_us.zip`;
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.send(zipBuffer);
   }));
 

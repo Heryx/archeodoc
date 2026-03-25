@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AlertCircle, AlertTriangle, CheckCircle2, Clock, Package, Pencil, Sparkles, Trash2, Wand2 } from "lucide-react";
+import { AlertCircle, AlertTriangle, CheckCircle2, Clock, Download, Package, Pencil, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -22,6 +22,7 @@ type USCardProps = {
   onEdit: (us: any) => void;
   onDelete: (us: any) => void;
   onOpenMateriali?: (us: any) => void;
+  onExportDocx?: (us: any) => void;
   aiAvailable?: boolean;
 };
 
@@ -34,6 +35,7 @@ export function USCard({
   onEdit,
   onDelete,
   onOpenMateriali,
+  onExportDocx,
   aiAvailable,
 }: USCardProps) {
   const [showAllIssues, setShowAllIssues] = useState(false);
@@ -154,6 +156,11 @@ export function USCard({
             {onOpenMateriali && (
               <Button size="sm" variant="ghost" className="gap-1 text-xs" onClick={() => onOpenMateriali(us)}>
                 <Package size={12} /> Materiali
+              </Button>
+            )}
+            {onExportDocx && (
+              <Button size="sm" variant="ghost" className="gap-1 text-xs" onClick={() => onExportDocx(us)}>
+                <Download size={12} /> Scheda .docx
               </Button>
             )}
             <Button size="sm" variant="ghost" className="gap-1 text-xs text-red-600 hover:text-red-700" onClick={() => onDelete(us)}>
