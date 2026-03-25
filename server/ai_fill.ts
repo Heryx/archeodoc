@@ -1,6 +1,7 @@
 import type { Cantiere, Giornata, InsertUS, UnitaStratigrafica } from "@shared/schema";
 
 import { getSetting } from "./ai_settings";
+import { generateWithGemini } from "./gemini";
 import { logger } from "./logger";
 import { buildUsFillPrompt } from "./prompts/us_fill_prompt";
 
@@ -229,12 +230,7 @@ function resolveProvider(): "gemini" | "claude" | "none" {
 async function callAI(prompt: string, maxTokens = 2200, systemPrompt?: string): Promise<string> {
   const provider = resolveProvider();
   if (provider === "gemini") {
-    const { GoogleGenerativeAI } = await import("@google/generative-ai");
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
-    const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
-    const result = await model.generateContent(fullPrompt);
-    return result.response.text();
+    return generateWithGemini(prompt, systemPrompt);
   }
 
   if (provider === "claude") {

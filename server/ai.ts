@@ -1,5 +1,6 @@
 import type { UnitaStratigrafica, Giornata } from "@shared/schema";
 import { getSetting } from "./ai_settings";
+import { generateWithGemini } from "./gemini";
 import { logger } from "./logger";
 
 // ─── Rilevamento provider ────────────────────────────────────────────────────
@@ -86,12 +87,7 @@ export const CAMPI_OBBLIGATORI_GIORNATA = [
 // ─── Helper: chiama l'AI con il provider attivo ───────────────────────────────
 async function callAI(prompt: string, maxTokens = 3000, systemPrompt?: string): Promise<string> {
   if (AI_PROVIDER === "gemini") {
-    const { GoogleGenerativeAI } = await import("@google/generative-ai");
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
-    const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
-    const result = await model.generateContent(fullPrompt);
-    return result.response.text();
+    return generateWithGemini(prompt, systemPrompt);
   }
 
   if (AI_PROVIDER === "claude") {
