@@ -10,65 +10,32 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { getProjectHeader } from "@/lib/project";
-
-type WebMapTable = {
-  tableName: string;
-  dataType: string;
-  rowCount: number;
-  geometryColumn: string | null;
-  srid: number | null;
-};
-
-type WebMapFeature = {
-  type: "Feature";
-  geometry: any;
-  properties: Record<string, unknown>;
-};
-
-type WebMapPreviewPayload = {
-  sourceFileName: string;
-  tableName: string;
-  tables: WebMapTable[];
-  featureCollection: {
-    type: "FeatureCollection";
-    features: WebMapFeature[];
-  };
-  styleHint: {
-    strokeColor: string;
-    fillColor: string;
-    fillOpacity: number;
-    weight: number;
-  };
-  warnings: string[];
-};
-
-const PREVIEW_SOURCE_ID = "webmap-preview-source";
-const PREVIEW_FILL_LAYER_ID = "webmap-preview-fill";
-const PREVIEW_LINE_LAYER_ID = "webmap-preview-line";
-const PREVIEW_POINT_LAYER_ID = "webmap-preview-point";
-const EMPTY_FEATURE_COLLECTION = { type: "FeatureCollection", features: [] } as const;
-
-const BASE_MAP_STYLE = {
-  version: 8,
-  sources: {
-    osm: {
-      type: "raster",
-      tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-      tileSize: 256,
-      attribution: "© OpenStreetMap contributors",
-      maxzoom: 19,
-    },
-  },
-  layers: [
-    {
-      id: "osm",
-      type: "raster",
-      source: "osm",
-    },
-  ],
-} as const;
+import { AttributeTable } from "@/components/webmap/modules/AttributeTable";
+import { LayerPanel } from "@/components/webmap/LayerPanel";
+import { TerrainPanel } from "@/components/webmap/modules/TerrainModule";
+import { StyleRendererPanel } from "@/components/webmap/modules/StyleRenderer";
+import { DEFAULT_STYLE, pickColor, useWebMap, useWebMapStore, WebMapContext } from "@/components/webmap/store";
+import { ToolbarStrip } from "@/components/webmap/ToolbarStrip";
+import {
+  BASEMAP_STYLES,
+  addLayerToMap,
+  disableTerrain,
+  enableTerrain,
+  fitToLayer,
+  fillLayerId,
+  interactiveLayerIds,
+  lineLayerId,
+  pointLayerId,
+  removeLayerFromMap,
+  sourceId,
+  syncLayerOrder,
+  syncLayerStyle,
+  syncLayerVisibility,
+} from "@/components/webmap/mapUtils";
+import type { FeatureCollection, GeometryKind, MapLayer, WebMapPreviewPayload } from "@/components/webmap/types";
 
 let drawClassPatched = false;
 
@@ -78,7 +45,6 @@ function patchMapboxDrawForMapLibre() {
 
   const classes = (MapboxDraw as any)?.constants?.classes;
   if (!classes) return;
-
   classes.CANVAS = "maplibregl-canvas";
   classes.CONTROL_BASE = "maplibregl-ctrl";
   classes.CONTROL_PREFIX = "maplibregl-ctrl-";
@@ -86,71 +52,30 @@ function patchMapboxDrawForMapLibre() {
   classes.ATTRIBUTION = "maplibregl-ctrl-attrib";
 }
 
-function ensurePreviewLayers(
-  map: maplibregl.Map,
-  styleHint: WebMapPreviewPayload["styleHint"],
-) {
-  if (!map.getSource(PREVIEW_SOURCE_ID)) {
-    map.addSource(PREVIEW_SOURCE_ID, {
-      type: "geojson",
-      data: EMPTY_FEATURE_COLLECTION as any,
-    });
-  }
+function guessGeometryKind(collection: FeatureCollection): GeometryKind {
+  const kinds = new Set(
+    collection.features
+      .map((feature) => String(feature.geometry?.type || ""))
+      .filter(Boolean)
+      .map((type) => (type.includes("Polygon") ? "Polygon" : type.includes("Line") ? "LineString" : type.includes("Point") ? "Point" : "Unknown")),
+  );
 
-  if (!map.getLayer(PREVIEW_FILL_LAYER_ID)) {
-    map.addLayer({
-      id: PREVIEW_FILL_LAYER_ID,
-      type: "fill",
-      source: PREVIEW_SOURCE_ID,
-      filter: ["==", ["geometry-type"], "Polygon"],
-      paint: {
-        "fill-color": styleHint.fillColor,
-        "fill-opacity": styleHint.fillOpacity,
-        "fill-outline-color": styleHint.strokeColor,
-      },
-    });
-  }
-
-  if (!map.getLayer(PREVIEW_LINE_LAYER_ID)) {
-    map.addLayer({
-      id: PREVIEW_LINE_LAYER_ID,
-      type: "line",
-      source: PREVIEW_SOURCE_ID,
-      filter: ["==", ["geometry-type"], "LineString"],
-      paint: {
-        "line-color": styleHint.strokeColor,
-        "line-width": Math.max(1, styleHint.weight),
-      },
-    });
-  }
-
-  if (!map.getLayer(PREVIEW_POINT_LAYER_ID)) {
-    map.addLayer({
-      id: PREVIEW_POINT_LAYER_ID,
-      type: "circle",
-      source: PREVIEW_SOURCE_ID,
-      filter: ["==", ["geometry-type"], "Point"],
-      paint: {
-        "circle-color": styleHint.fillColor,
-        "circle-stroke-color": styleHint.strokeColor,
-        "circle-stroke-width": 1.5,
-        "circle-radius": 6,
-      },
-    });
-  }
-
-  map.setPaintProperty(PREVIEW_FILL_LAYER_ID, "fill-color", styleHint.fillColor);
-  map.setPaintProperty(PREVIEW_FILL_LAYER_ID, "fill-opacity", styleHint.fillOpacity);
-  map.setPaintProperty(PREVIEW_FILL_LAYER_ID, "fill-outline-color", styleHint.strokeColor);
-  map.setPaintProperty(PREVIEW_LINE_LAYER_ID, "line-color", styleHint.strokeColor);
-  map.setPaintProperty(PREVIEW_LINE_LAYER_ID, "line-width", Math.max(1, styleHint.weight));
-  map.setPaintProperty(PREVIEW_POINT_LAYER_ID, "circle-color", styleHint.fillColor);
-  map.setPaintProperty(PREVIEW_POINT_LAYER_ID, "circle-stroke-color", styleHint.strokeColor);
+  if (kinds.size === 0) return "Unknown";
+  if (kinds.size > 1) return "Mixed";
+  return Array.from(kinds)[0] as GeometryKind;
 }
 
-function parseFeatureProperties(input: unknown): Record<string, unknown> {
-  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
-  return input as Record<string, unknown>;
+function withFeatureIds(collection: FeatureCollection): FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: collection.features.map((feature, index) => ({
+      ...feature,
+      properties: {
+        ...(feature.properties || {}),
+        _fid: index,
+      },
+    })),
+  };
 }
 
 function escapeHtml(raw: unknown): string {
@@ -162,14 +87,12 @@ function escapeHtml(raw: unknown): string {
     .replaceAll("'", "&#39;");
 }
 
-function buildPopupHtml(properties: Record<string, unknown>): string {
-  const entries = Object.entries(properties);
-  if (entries.length === 0) {
-    return '<div style="font-size:12px;">Nessun attributo</div>';
-  }
+function popupHtml(properties: Record<string, unknown>): string {
+  const entries = Object.entries(properties).filter(([key]) => !key.startsWith("_"));
+  if (entries.length === 0) return "<div style='font-size:12px'>Nessun attributo</div>";
 
-  const rows = entries
-    .slice(0, 20)
+  return `<div style="max-width:320px;">${entries
+    .slice(0, 24)
     .map(
       ([key, value]) =>
         `<div style="display:grid;grid-template-columns:110px 1fr;gap:8px;align-items:start;border-bottom:1px solid #2f2f2f;padding:4px 0;">
@@ -177,98 +100,61 @@ function buildPopupHtml(properties: Record<string, unknown>): string {
           <span style="font-size:12px;word-break:break-word;">${escapeHtml(value ?? "-")}</span>
         </div>`,
     )
-    .join("");
-
-  return `<div style="max-width:320px;">${rows}</div>`;
+    .join("")}</div>`;
 }
 
-function extendBounds(value: unknown, bounds: { minX: number; minY: number; maxX: number; maxY: number }) {
-  if (!Array.isArray(value) || value.length === 0) return;
-
-  if (typeof value[0] === "number" && typeof value[1] === "number") {
-    const x = Number(value[0]);
-    const y = Number(value[1]);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-    bounds.minX = Math.min(bounds.minX, x);
-    bounds.minY = Math.min(bounds.minY, y);
-    bounds.maxX = Math.max(bounds.maxX, x);
-    bounds.maxY = Math.max(bounds.maxY, y);
-    return;
+function buildInterpolateExpression(field: string, breaks: number[], colors: string[]) {
+  if (breaks.length === 0 || colors.length === 0) return null;
+  const expr: unknown[] = ["interpolate", ["linear"], ["to-number", ["get", field], 0]];
+  for (let i = 0; i < breaks.length; i++) {
+    expr.push(breaks[i], colors[Math.min(i, colors.length - 1)]);
   }
-
-  for (const nested of value) {
-    extendBounds(nested, bounds);
-  }
+  return expr;
 }
 
-function getFeatureCollectionBounds(featureCollection: WebMapPreviewPayload["featureCollection"] | null) {
-  if (!featureCollection || !featureCollection.features.length) return null;
+function applyGraduatedRenderer(map: maplibregl.Map, layer: MapLayer, field: string, breaks: number[], colors: string[]) {
+  const expr = buildInterpolateExpression(field, breaks, colors);
+  if (!expr) return;
+  const fillId = fillLayerId(layer.id);
+  const lineId = lineLayerId(layer.id);
+  const pointId = pointLayerId(layer.id);
 
-  const bounds = {
-    minX: Number.POSITIVE_INFINITY,
-    minY: Number.POSITIVE_INFINITY,
-    maxX: Number.NEGATIVE_INFINITY,
-    maxY: Number.NEGATIVE_INFINITY,
-  };
-
-  for (const feature of featureCollection.features) {
-    extendBounds(feature?.geometry?.coordinates, bounds);
-  }
-
-  if (
-    !Number.isFinite(bounds.minX) ||
-    !Number.isFinite(bounds.minY) ||
-    !Number.isFinite(bounds.maxX) ||
-    !Number.isFinite(bounds.maxY)
-  ) {
-    return null;
-  }
-
-  return bounds;
+  if (map.getLayer(fillId)) map.setPaintProperty(fillId, "fill-color", expr as any);
+  if (map.getLayer(lineId)) map.setPaintProperty(lineId, "line-color", expr as any);
+  if (map.getLayer(pointId)) map.setPaintProperty(pointId, "circle-color", expr as any);
 }
 
-export function WebMapPage() {
+function WebMapContent() {
   const { cid } = useParams<{ cid: string }>();
   const { toast } = useToast();
+  const { state, dispatch, mapRef } = useWebMap();
 
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
   const drawRef = useRef<MapboxDraw | null>(null);
-  const drawStatsBoundRef = useRef(false);
+  const prevLayerIdsRef = useRef<string[]>([]);
+  const basemapAppliedRef = useRef(state.basemap);
+  const stateRef = useRef(state);
 
   const [selectedGeoPackage, setSelectedGeoPackage] = useState<File | null>(null);
   const [selectedTable, setSelectedTable] = useState<string>("");
   const [limit, setLimit] = useState("1200");
-  const [payload, setPayload] = useState<WebMapPreviewPayload | null>(null);
+  const [availableTables, setAvailableTables] = useState<WebMapPreviewPayload["tables"]>([]);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [drawFeatureCount, setDrawFeatureCount] = useState(0);
 
-  const mapStyle = useMemo(() => {
-    if (!payload) {
-      return {
-        strokeColor: "#2563eb",
-        fillColor: "#2563eb",
-        fillOpacity: 0.24,
-        weight: 2,
-      };
-    }
-    return payload.styleHint;
-  }, [payload]);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   const previewMutation = useMutation({
-    mutationFn: async ({ keepTable }: { keepTable: boolean }) => {
-      if (!selectedGeoPackage) {
-        throw new Error("Seleziona un file GeoPackage");
-      }
+    mutationFn: async () => {
+      if (!selectedGeoPackage) throw new Error("Seleziona un file GeoPackage");
 
       const formData = new FormData();
       formData.append("file", selectedGeoPackage);
-      if (keepTable && selectedTable) {
-        formData.append("tableName", selectedTable);
-      }
-      if (limit.trim()) {
-        formData.append("limit", limit.trim());
-      }
+      if (selectedTable.trim()) formData.append("tableName", selectedTable.trim());
+      if (limit.trim()) formData.append("limit", limit.trim());
 
       const response = await fetch(`/api/cantieri/${cid}/geopackage/webmap-preview`, {
         method: "POST",
@@ -283,19 +169,45 @@ export function WebMapPage() {
 
       return response.json() as Promise<WebMapPreviewPayload>;
     },
-    onSuccess: (result, variables) => {
-      setPayload(result);
-      if (!variables.keepTable || !selectedTable) {
-        setSelectedTable(result.tableName);
+    onSuccess: (result) => {
+      setAvailableTables(result.tables || []);
+      setWarnings(result.warnings || []);
+      setSelectedTable(result.tableName);
+
+      const normalizedCollection = withFeatureIds(result.featureCollection);
+      const nextColor = pickColor(state.layers.length);
+      const layer: MapLayer = {
+        id: crypto.randomUUID(),
+        sourceFileName: result.sourceFileName,
+        tableName: result.tableName,
+        rowCount: normalizedCollection.features.length,
+        geometryKind: guessGeometryKind(normalizedCollection),
+        visible: true,
+        opacity: 1,
+        style: {
+          ...DEFAULT_STYLE,
+          fillColor: result.styleHint.fillColor || nextColor,
+          strokeColor: result.styleHint.strokeColor || nextColor,
+          fillOpacity: Number.isFinite(result.styleHint.fillOpacity) ? result.styleHint.fillOpacity : DEFAULT_STYLE.fillOpacity,
+          strokeWidth: Number.isFinite(result.styleHint.weight) ? Math.max(1, result.styleHint.weight) : DEFAULT_STYLE.strokeWidth,
+        },
+        featureCollection: normalizedCollection,
+      };
+
+      dispatch({ type: "ADD_LAYER", layer });
+      const map = mapRef.current;
+      if (map && map.isStyleLoaded()) {
+        fitToLayer(map, layer.featureCollection);
       }
+
       toast({
-        title: "WebMap aggiornata",
-        description: `${result.featureCollection.features.length} geometrie caricate.`,
+        title: "Layer aggiunto",
+        description: `${layer.rowCount} feature su ${layer.tableName}`,
       });
     },
     onError: (error: any) =>
       toast({
-        title: "Errore caricamento webmap",
+        title: "Errore caricamento layer",
         description: error?.message || "Operazione non riuscita",
         variant: "destructive",
       }),
@@ -303,12 +215,11 @@ export function WebMapPage() {
 
   useEffect(() => {
     if (mapRef.current || !mapContainerRef.current) return;
-
     patchMapboxDrawForMapLibre();
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
-      style: BASE_MAP_STYLE as any,
+      style: BASEMAP_STYLES[state.basemap] as any,
       center: [12.5, 41.9],
       zoom: 6,
       maxPitch: 60,
@@ -317,6 +228,7 @@ export function WebMapPage() {
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: true }), "top-right");
     map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: "metric" }), "bottom-right");
+    map.addControl(new maplibregl.FullscreenControl(), "top-right");
 
     const draw = new MapboxDraw({
       displayControlsDefault: false,
@@ -332,44 +244,51 @@ export function WebMapPage() {
     map.addControl(draw as any, "top-left");
 
     const refreshDrawStats = () => {
-      const count = drawRef.current?.getAll()?.features?.length || 0;
-      setDrawFeatureCount(count);
+      setDrawFeatureCount(drawRef.current?.getAll().features.length || 0);
     };
+    map.on("draw.create", refreshDrawStats);
+    map.on("draw.update", refreshDrawStats);
+    map.on("draw.delete", refreshDrawStats);
 
-    const handleFeatureClick = (event: any) => {
-      const clicked = event.features?.[0];
-      if (!clicked) return;
+    const handleClick = (event: maplibregl.MapMouseEvent) => {
+      const snapshot = stateRef.current;
+      const visibleLayers = snapshot.layers.filter((layer) => layer.visible);
+      if (visibleLayers.length === 0) return;
 
-      const properties = parseFeatureProperties(clicked.properties);
+      const sorted = [...visibleLayers].sort((a, b) => {
+        if (a.id === snapshot.activeLayerId) return -1;
+        if (b.id === snapshot.activeLayerId) return 1;
+        return 0;
+      });
+
+      const interactiveIds = sorted
+        .flatMap((layer) => interactiveLayerIds(layer))
+        .filter((layerId) => !!map.getLayer(layerId));
+
+      if (interactiveIds.length === 0) return;
+
+      const found = map.queryRenderedFeatures(event.point, { layers: interactiveIds });
+      if (found.length === 0) return;
+
+      const feature = found[0];
+      const source = String(feature.source || "");
+      const layer = snapshot.layers.find((item) => sourceId(item.id) === source);
+      if (layer && layer.id !== snapshot.activeLayerId) {
+        dispatch({ type: "SET_ACTIVE", id: layer.id });
+      }
+
+      const properties = (feature.properties || {}) as Record<string, unknown>;
+      const fid = Number(properties._fid);
+      dispatch({ type: "SET_SELECTED_FEATURE", id: Number.isFinite(fid) ? fid : null });
+
       popupRef.current?.remove();
       popupRef.current = new maplibregl.Popup({ maxWidth: "340px" })
         .setLngLat(event.lngLat)
-        .setHTML(buildPopupHtml(properties))
+        .setHTML(popupHtml(properties))
         .addTo(map);
     };
 
-    const bindFeatureInteractions = () => {
-      for (const layerId of [PREVIEW_FILL_LAYER_ID, PREVIEW_LINE_LAYER_ID, PREVIEW_POINT_LAYER_ID]) {
-        map.on("click", layerId, handleFeatureClick);
-        map.on("mouseenter", layerId, () => {
-          map.getCanvas().style.cursor = "pointer";
-        });
-        map.on("mouseleave", layerId, () => {
-          map.getCanvas().style.cursor = "";
-        });
-      }
-    };
-
-    map.on("load", () => {
-      ensurePreviewLayers(map, mapStyle);
-      if (!drawStatsBoundRef.current) {
-        drawStatsBoundRef.current = true;
-        map.on("draw.create", refreshDrawStats);
-        map.on("draw.update", refreshDrawStats);
-        map.on("draw.delete", refreshDrawStats);
-      }
-      bindFeatureInteractions();
-    });
+    map.on("click", handleClick);
 
     return () => {
       popupRef.current?.remove();
@@ -378,154 +297,210 @@ export function WebMapPage() {
       mapRef.current?.remove();
       mapRef.current = null;
     };
-  }, [mapStyle]);
+  }, [dispatch, mapRef, state.basemap]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (basemapAppliedRef.current === state.basemap) return;
+
+    basemapAppliedRef.current = state.basemap;
+    map.setStyle(BASEMAP_STYLES[state.basemap] as any);
+  }, [state.basemap, mapRef]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
-    const updateData = () => {
-      ensurePreviewLayers(map, mapStyle);
-      const source = map.getSource(PREVIEW_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
-      if (!source) return;
+    const sync = () => {
+      const currentIds = state.layers.map((layer) => layer.id);
+      const previousIds = prevLayerIdsRef.current;
 
-      const featureCollection = payload?.featureCollection || EMPTY_FEATURE_COLLECTION;
-      source.setData(featureCollection as any);
+      for (const removedId of previousIds.filter((id) => !currentIds.includes(id))) {
+        removeLayerFromMap(map, removedId);
+      }
 
-      const bounds = getFeatureCollectionBounds(payload?.featureCollection || null);
-      if (!bounds) return;
+      for (const layer of state.layers) {
+        addLayerToMap(map, layer);
+        syncLayerVisibility(map, layer);
+        syncLayerStyle(map, layer);
+      }
 
-      map.fitBounds(
-        [
-          [bounds.minX, bounds.minY],
-          [bounds.maxX, bounds.maxY],
-        ],
-        {
-          padding: 36,
-          maxZoom: 18,
-          duration: 500,
-        },
-      );
+      syncLayerOrder(map, state.layers);
+      prevLayerIdsRef.current = currentIds;
+
+      if (state.modules.terrain) {
+        enableTerrain(map, state.modules.demSource, state.modules.terrainExaggeration);
+      } else {
+        disableTerrain(map);
+      }
+
+      if (
+        state.modules.styleRenderer &&
+        state.styleRenderer &&
+        state.styleRenderer.mode === "graduated"
+      ) {
+        const layer = state.layers.find((item) => item.id === state.styleRenderer?.layerId);
+        if (layer) {
+          applyGraduatedRenderer(
+            map,
+            layer,
+            state.styleRenderer.field,
+            state.styleRenderer.breaks,
+            state.styleRenderer.colorRamp,
+          );
+        }
+      }
     };
 
     if (map.isStyleLoaded()) {
-      updateData();
+      sync();
       return;
     }
 
-    map.once("load", updateData);
+    map.once("styledata", sync);
     return () => {
-      map.off("load", updateData);
+      map.off("styledata", sync);
     };
-  }, [payload, mapStyle]);
+  }, [
+    state.layers,
+    state.modules.terrain,
+    state.modules.demSource,
+    state.modules.terrainExaggeration,
+    state.modules.styleRenderer,
+    state.styleRenderer,
+    mapRef,
+  ]);
+
+  const activeLayer = useMemo(
+    () => state.layers.find((layer) => layer.id === state.activeLayerId) || null,
+    [state.layers, state.activeLayerId],
+  );
 
   const clearDrawings = () => {
-    if (!drawRef.current) return;
-    drawRef.current.deleteAll();
+    drawRef.current?.deleteAll();
     setDrawFeatureCount(0);
   };
 
   return (
-    <div className="p-8 max-w-6xl mx-auto space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <MapIcon size={22} className="text-primary" />
-          WebMap GeoPackage (MapLibre)
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Visualizzazione WebGL ad alte prestazioni con editing geometrie locale (MapLibre GL JS + Draw).
-        </p>
+    <div className="h-full flex flex-col">
+      <div className="px-6 py-3 border-b border-border flex items-center gap-2">
+        <MapIcon size={18} className="text-primary" />
+        <h1 className="text-lg font-bold">WebMap GIS</h1>
+        <span className="text-xs text-muted-foreground">MapLibre · Multi-layer · QGIS-like panel</span>
       </div>
 
-      <div className="rounded-lg border border-border p-4 space-y-3">
-        <div className="grid md:grid-cols-[1fr_1fr_180px_auto] gap-3 items-end">
-          <div>
-            <Label>File GeoPackage</Label>
-            <Input
-              type="file"
-              accept=".gpkg,.sqlite"
-              onChange={(event) => {
-                const file = event.target.files?.[0] || null;
-                setSelectedGeoPackage(file);
-                setPayload(null);
-                setSelectedTable("");
-              }}
-            />
-          </div>
+      <ToolbarStrip />
+      <TerrainPanel />
+      <StyleRendererPanel />
 
-          <div>
-            <Label>Layer</Label>
-            <Select value={selectedTable} onValueChange={setSelectedTable} disabled={!payload || payload.tables.length === 0}>
-              <SelectTrigger>
-                <SelectValue placeholder="Seleziona layer..." />
-              </SelectTrigger>
-              <SelectContent>
-                {(payload?.tables || []).map((table) => (
-                  <SelectItem key={table.tableName} value={table.tableName}>
-                    {table.tableName} ({table.rowCount})
-                  </SelectItem>
+      <div className="flex-1 overflow-hidden flex">
+        <aside className="w-72 border-r border-border bg-card/70">
+          <LayerPanel />
+        </aside>
+
+        <section className="flex-1 min-w-0 flex flex-col">
+          <div className="px-4 py-3 border-b border-border space-y-2">
+            <div className="grid md:grid-cols-[1fr_1fr_160px_auto] gap-2 items-end">
+              <div>
+                <Label>GeoPackage</Label>
+                <Input
+                  type="file"
+                  accept=".gpkg,.sqlite"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0] || null;
+                    setSelectedGeoPackage(file);
+                    setAvailableTables([]);
+                    setSelectedTable("");
+                    setWarnings([]);
+                  }}
+                />
+              </div>
+
+              <div>
+                <Label>Layer</Label>
+                <Select
+                  value={selectedTable}
+                  onValueChange={setSelectedTable}
+                  disabled={availableTables.length === 0}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleziona layer..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableTables.map((table) => (
+                      <SelectItem key={table.tableName} value={table.tableName}>
+                        {table.tableName} ({table.rowCount})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label>Limite feature</Label>
+                <Input value={limit} onChange={(event) => setLimit(event.target.value)} placeholder="1200" />
+              </div>
+
+              <Button
+                className="gap-2"
+                onClick={() => previewMutation.mutate()}
+                disabled={!selectedGeoPackage || previewMutation.isPending}
+              >
+                <RefreshCcw size={15} className={previewMutation.isPending ? "animate-spin" : ""} />
+                {previewMutation.isPending ? "Carico..." : "Aggiungi layer"}
+              </Button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1">
+                <PencilRuler size={12} />
+                Geometrie disegnate: <span className="font-medium text-foreground">{drawFeatureCount}</span>
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1.5"
+                onClick={clearDrawings}
+                disabled={drawFeatureCount === 0}
+              >
+                <Eraser size={12} />
+                Cancella schizzi
+              </Button>
+              {activeLayer && (
+                <span>
+                  Layer attivo: <span className="font-medium text-foreground">{activeLayer.tableName}</span>
+                </span>
+              )}
+            </div>
+
+            {warnings.length > 0 && (
+              <div className="text-xs text-amber-700 space-y-1">
+                {warnings.map((warning) => (
+                  <p key={warning}>- {warning}</p>
                 ))}
-              </SelectContent>
-            </Select>
+              </div>
+            )}
           </div>
 
-          <div>
-            <Label>Limite feature</Label>
-            <Input value={limit} onChange={(event) => setLimit(event.target.value)} placeholder="1200" />
+          <div className="flex-1 relative">
+            <div ref={mapContainerRef} className="absolute inset-0" />
           </div>
-
-          <Button
-            className="gap-2"
-            onClick={() => previewMutation.mutate({ keepTable: true })}
-            disabled={!selectedGeoPackage || previewMutation.isPending}
-          >
-            <RefreshCcw size={15} className={previewMutation.isPending ? "animate-spin" : ""} />
-            {previewMutation.isPending ? "Carico..." : "Carica mappa"}
-          </Button>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <span className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1">
-            <PencilRuler size={12} />
-            Geometrie disegnate: <span className="font-medium text-foreground">{drawFeatureCount}</span>
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 gap-1.5"
-            onClick={clearDrawings}
-            disabled={drawFeatureCount === 0}
-          >
-            <Eraser size={12} />
-            Cancella schizzi
-          </Button>
-        </div>
-
-        {payload && (
-          <div className="text-xs text-muted-foreground">
-            File: <span className="font-medium text-foreground">{payload.sourceFileName}</span> | Layer attivo:{" "}
-            <span className="font-medium text-foreground">{payload.tableName}</span> | Feature:{" "}
-            <span className="font-medium text-foreground">{payload.featureCollection.features.length}</span>
-          </div>
-        )}
-        {payload?.warnings?.length ? (
-          <div className="text-xs text-amber-700 space-y-1">
-            {payload.warnings.map((warning) => (
-              <p key={warning}>- {warning}</p>
-            ))}
-          </div>
-        ) : null}
+          <AttributeTable />
+        </section>
       </div>
-
-      <div className="rounded-lg border border-border overflow-hidden bg-muted/10">
-        <div ref={mapContainerRef} style={{ height: "62vh", width: "100%" }} />
-      </div>
-
-      {payload && payload.featureCollection.features.length === 0 && (
-        <div className="text-sm text-muted-foreground">
-          Nessuna geometria visualizzabile nel layer selezionato.
-        </div>
-      )}
     </div>
+  );
+}
+
+export function WebMapPage() {
+  const store = useWebMapStore();
+
+  return (
+    <TooltipProvider>
+      <WebMapContext.Provider value={store}>
+        <WebMapContent />
+      </WebMapContext.Provider>
+    </TooltipProvider>
   );
 }
