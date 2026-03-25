@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useWebMap } from "../store";
 
@@ -23,6 +23,7 @@ export function StyleRendererPanel() {
   const { state, dispatch } = useWebMap();
   const [rampKey, setRampKey] = useState<keyof typeof COLOR_RAMPS>("Blu-Rosso");
   const activeLayer = state.layers.find((layer) => layer.id === state.activeLayerId);
+  const activeRenderer = state.styleRenderer?.layerId === activeLayer?.id ? state.styleRenderer : null;
 
   const numericFields = useMemo(() => {
     if (!activeLayer || activeLayer.featureCollection.features.length === 0) return [] as string[];
@@ -32,6 +33,18 @@ export function StyleRendererPanel() {
       .map(([key]) => key);
   }, [activeLayer]);
 
+  useEffect(() => {
+    if (!state.modules.styleRenderer) return;
+    if (!activeLayer) {
+      if (state.styleRenderer) dispatch({ type: "SET_STYLE_RENDERER", config: null });
+      return;
+    }
+    if (!activeRenderer) return;
+    if (!numericFields.includes(activeRenderer.field)) {
+      dispatch({ type: "SET_STYLE_RENDERER", config: null });
+    }
+  }, [state.modules.styleRenderer, state.styleRenderer, activeLayer, activeRenderer, numericFields, dispatch]);
+
   if (!state.modules.styleRenderer || !activeLayer) return null;
 
   return (
@@ -39,7 +52,7 @@ export function StyleRendererPanel() {
       <div className="space-y-1">
         <p className="text-[11px] text-muted-foreground">Campo numerico</p>
         <Select
-          value={state.styleRenderer?.field || ""}
+          value={activeRenderer && numericFields.includes(activeRenderer.field) ? activeRenderer.field : ""}
           onValueChange={(field) => {
             const values = activeLayer.featureCollection.features
               .map((feature) => feature.properties?.[field])
@@ -76,11 +89,11 @@ export function StyleRendererPanel() {
           value={rampKey}
           onValueChange={(value: keyof typeof COLOR_RAMPS) => {
             setRampKey(value);
-            if (!state.styleRenderer || state.styleRenderer.layerId !== activeLayer.id) return;
+            if (!activeRenderer) return;
             dispatch({
               type: "SET_STYLE_RENDERER",
               config: {
-                ...state.styleRenderer,
+                ...activeRenderer,
                 colorRamp: COLOR_RAMPS[value],
               },
             });

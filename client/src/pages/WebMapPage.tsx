@@ -31,6 +31,7 @@ import {
   pointLayerId,
   removeLayerFromMap,
   sourceId,
+  syncActiveLayerHighlight,
   syncLayerOrder,
   syncLayerStyle,
   syncLayerVisibility,
@@ -87,19 +88,46 @@ function escapeHtml(raw: unknown): string {
     .replaceAll("'", "&#39;");
 }
 
+function isImagePath(value: string): boolean {
+  return /\.(jpe?g|png|gif|webp|bmp|tiff?)$/i.test(value.trim());
+}
+
+function isDisplayableImageUrl(value: string): boolean {
+  const normalized = value.trim();
+  if (normalized.startsWith("http://") || normalized.startsWith("https://")) return true;
+  if (normalized.startsWith("/")) return true;
+  return false;
+}
+
+function renderPopupValue(value: unknown): string {
+  const normalized = String(value ?? "-").trim();
+  if (!normalized) return "-";
+  if (!isImagePath(normalized)) return escapeHtml(normalized);
+
+  const escaped = escapeHtml(normalized);
+  if (!isDisplayableImageUrl(normalized)) return escaped;
+
+  return `
+    <a href="${escaped}" target="_blank" rel="noreferrer" style="display:block;text-decoration:none;">
+      <img src="${escaped}" alt="preview" style="max-width:100%;max-height:160px;object-fit:cover;border-radius:6px;border:1px solid #3a3a3a;margin-bottom:4px;" />
+      <span style="font-size:11px;opacity:.8;word-break:break-word;">${escaped}</span>
+    </a>
+  `;
+}
+
 function popupHtml(properties: Record<string, unknown>): string {
   const entries = Object.entries(properties).filter(([key]) => !key.startsWith("_"));
   if (entries.length === 0) return "<div style='font-size:12px'>Nessun attributo</div>";
 
   return `<div style="max-width:320px;">${entries
     .slice(0, 24)
-    .map(
-      ([key, value]) =>
+      .map(
+        ([key, value]) =>
         `<div style="display:grid;grid-template-columns:110px 1fr;gap:8px;align-items:start;border-bottom:1px solid #2f2f2f;padding:4px 0;">
           <strong style="font-size:12px;opacity:.85;">${escapeHtml(key)}</strong>
-          <span style="font-size:12px;word-break:break-word;">${escapeHtml(value ?? "-")}</span>
+          <span style="font-size:12px;word-break:break-word;">${renderPopupValue(value)}</span>
         </div>`,
-    )
+      )
     .join("")}</div>`;
 }
 
@@ -351,6 +379,8 @@ function WebMapContent() {
           );
         }
       }
+
+      syncActiveLayerHighlight(map, state.layers, state.activeLayerId);
     };
 
     if (map.isStyleLoaded()) {
@@ -358,12 +388,14 @@ function WebMapContent() {
       return;
     }
 
-    map.once("styledata", sync);
+    map.once("style.load", sync);
     return () => {
-      map.off("styledata", sync);
+      map.off("style.load", sync);
     };
   }, [
     state.layers,
+    state.activeLayerId,
+    state.basemap,
     state.modules.terrain,
     state.modules.demSource,
     state.modules.terrainExaggeration,

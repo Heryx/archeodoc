@@ -9,7 +9,7 @@ export const BASEMAP_STYLES: Record<BasemapId, object> = {
         type: "raster",
         tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
         tileSize: 256,
-        attribution: "© OpenStreetMap contributors",
+        attribution: "(c) OpenStreetMap contributors",
         maxzoom: 19,
       },
     },
@@ -24,7 +24,7 @@ export const BASEMAP_STYLES: Record<BasemapId, object> = {
           "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         ],
         tileSize: 256,
-        attribution: "© Esri",
+        attribution: "(c) Esri",
         maxzoom: 19,
       },
     },
@@ -37,7 +37,7 @@ export const BASEMAP_STYLES: Record<BasemapId, object> = {
         type: "raster",
         tiles: ["https://tile.opentopomap.org/{z}/{x}/{y}.png"],
         tileSize: 256,
-        attribution: "© OpenTopoMap contributors",
+        attribution: "(c) OpenTopoMap contributors",
         maxzoom: 17,
       },
     },
@@ -45,20 +45,33 @@ export const BASEMAP_STYLES: Record<BasemapId, object> = {
   },
 };
 
-export const DEM_SOURCES: Record<DemSource, { tiles: string[]; label: string; attribution: string }> = {
+const maptilerKey = (import.meta as any)?.env?.VITE_MAPTILER_KEY;
+
+export const DEM_SOURCES: Record<
+  DemSource,
+  { tiles: string[]; label: string; attribution: string; encoding: "terrarium" | "mapbox" }
+> = {
   jaxa: {
     tiles: ["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"],
     label: "JAXA/Terrarium",
-    attribution: "Terrain tiles © Mapzen, JAXA",
+    attribution: "Terrain tiles (c) Mapzen, JAXA",
+    encoding: "terrarium",
   },
   copernicus: {
-    tiles: ["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"],
+    tiles: maptilerKey
+      ? [`https://api.maptiler.com/tiles/terrain-rgb-v2/{z}/{x}/{y}.webp?key=${maptilerKey}`]
+      : ["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"],
     label: "Copernicus DEM",
-    attribution: "Copernicus DEM © ESA / EU",
+    attribution: maptilerKey ? "Copernicus DEM (c) ESA/EU via MapTiler" : "Copernicus DEM (fallback Terrarium)",
+    encoding: maptilerKey ? "mapbox" : "terrarium",
   },
 };
 
 const DEM_SOURCE_ID = "terrain-dem-source";
+const SKY_LAYER_ID = "terrain-sky-layer";
+const ACTIVE_HIGHLIGHT_POLYGON_ID = "active-layer-highlight-polygon";
+const ACTIVE_HIGHLIGHT_LINE_ID = "active-layer-highlight-line";
+const ACTIVE_HIGHLIGHT_POINT_ID = "active-layer-highlight-point";
 
 export function sourceId(layerId: string) {
   return `src-${layerId}`;
@@ -97,7 +110,11 @@ export function addLayerToMap(map: maplibregl.Map, layer: MapLayer) {
       id: fillId,
       type: "fill",
       source: sid,
-      filter: ["==", ["geometry-type"], "Polygon"],
+      filter: [
+        "any",
+        ["==", ["geometry-type"], "Polygon"],
+        ["==", ["geometry-type"], "MultiPolygon"],
+      ],
       paint: {
         "fill-color": layer.style.fillColor,
         "fill-opacity": layer.style.fillOpacity * layer.opacity,
@@ -111,7 +128,11 @@ export function addLayerToMap(map: maplibregl.Map, layer: MapLayer) {
       id: lineId,
       type: "line",
       source: sid,
-      filter: ["==", ["geometry-type"], "LineString"],
+      filter: [
+        "any",
+        ["==", ["geometry-type"], "LineString"],
+        ["==", ["geometry-type"], "MultiLineString"],
+      ],
       paint: {
         "line-color": layer.style.strokeColor,
         "line-width": layer.style.strokeWidth,
@@ -125,7 +146,11 @@ export function addLayerToMap(map: maplibregl.Map, layer: MapLayer) {
       id: pointId,
       type: "circle",
       source: sid,
-      filter: ["==", ["geometry-type"], "Point"],
+      filter: [
+        "any",
+        ["==", ["geometry-type"], "Point"],
+        ["==", ["geometry-type"], "MultiPoint"],
+      ],
       paint: {
         "circle-color": layer.style.fillColor,
         "circle-stroke-color": layer.style.strokeColor,
@@ -177,32 +202,124 @@ export function syncLayerStyle(map: maplibregl.Map, layer: MapLayer) {
 }
 
 export function syncLayerOrder(map: maplibregl.Map, layers: MapLayer[]) {
-  for (const layer of layers) {
-    for (const lid of [fillLayerId(layer.id), lineLayerId(layer.id), pointLayerId(layer.id)]) {
-      if (map.getLayer(lid)) {
+  let beforeId: string | undefined;
+  for (let i = layers.length - 1; i >= 0; i--) {
+    const layer = layers[i];
+    for (const lid of [pointLayerId(layer.id), lineLayerId(layer.id), fillLayerId(layer.id)]) {
+      if (!map.getLayer(lid)) continue;
+      if (beforeId && map.getLayer(beforeId)) {
+        map.moveLayer(lid, beforeId);
+      } else {
         map.moveLayer(lid);
       }
+      beforeId = lid;
     }
   }
 }
 
+export function clearActiveLayerHighlight(map: maplibregl.Map) {
+  if (map.getLayer(ACTIVE_HIGHLIGHT_POLYGON_ID)) map.removeLayer(ACTIVE_HIGHLIGHT_POLYGON_ID);
+  if (map.getLayer(ACTIVE_HIGHLIGHT_LINE_ID)) map.removeLayer(ACTIVE_HIGHLIGHT_LINE_ID);
+  if (map.getLayer(ACTIVE_HIGHLIGHT_POINT_ID)) map.removeLayer(ACTIVE_HIGHLIGHT_POINT_ID);
+}
+
+export function syncActiveLayerHighlight(map: maplibregl.Map, layers: MapLayer[], activeLayerId: string | null) {
+  clearActiveLayerHighlight(map);
+  if (!activeLayerId) return;
+
+  const activeLayer = layers.find((layer) => layer.id === activeLayerId);
+  if (!activeLayer || !activeLayer.visible) return;
+
+  const sid = sourceId(activeLayer.id);
+  if (!map.getSource(sid)) return;
+
+  map.addLayer({
+    id: ACTIVE_HIGHLIGHT_POLYGON_ID,
+    type: "line",
+    source: sid,
+    filter: [
+      "any",
+      ["==", ["geometry-type"], "Polygon"],
+      ["==", ["geometry-type"], "MultiPolygon"],
+    ],
+    paint: {
+      "line-color": "#facc15",
+      "line-width": 3,
+      "line-dasharray": [2, 1.2],
+      "line-opacity": 0.95,
+    },
+  });
+
+  map.addLayer({
+    id: ACTIVE_HIGHLIGHT_LINE_ID,
+    type: "line",
+    source: sid,
+    filter: [
+      "any",
+      ["==", ["geometry-type"], "LineString"],
+      ["==", ["geometry-type"], "MultiLineString"],
+    ],
+    paint: {
+      "line-color": "#facc15",
+      "line-width": 4,
+      "line-dasharray": [2, 1.2],
+      "line-opacity": 0.95,
+    },
+  });
+
+  map.addLayer({
+    id: ACTIVE_HIGHLIGHT_POINT_ID,
+    type: "circle",
+    source: sid,
+    filter: [
+      "any",
+      ["==", ["geometry-type"], "Point"],
+      ["==", ["geometry-type"], "MultiPoint"],
+    ],
+    paint: {
+      "circle-color": "rgba(0,0,0,0)",
+      "circle-stroke-color": "#facc15",
+      "circle-stroke-width": 3,
+      "circle-radius": 9,
+      "circle-opacity": 1,
+    },
+  });
+
+  map.moveLayer(ACTIVE_HIGHLIGHT_POLYGON_ID);
+  map.moveLayer(ACTIVE_HIGHLIGHT_LINE_ID);
+  map.moveLayer(ACTIVE_HIGHLIGHT_POINT_ID);
+}
+
 export function enableTerrain(map: maplibregl.Map, demSource: DemSource, exaggeration: number) {
   const dem = DEM_SOURCES[demSource];
-  if (!map.getSource(DEM_SOURCE_ID)) {
-    map.addSource(DEM_SOURCE_ID, {
-      type: "raster-dem",
-      encoding: "terrarium",
-      tiles: dem.tiles,
-      tileSize: 256,
-      attribution: dem.attribution,
-    });
-  }
+
+  map.setTerrain(null);
+  if (map.getLayer(SKY_LAYER_ID)) map.removeLayer(SKY_LAYER_ID);
+  if (map.getSource(DEM_SOURCE_ID)) map.removeSource(DEM_SOURCE_ID);
+
+  map.addSource(DEM_SOURCE_ID, {
+    type: "raster-dem",
+    encoding: dem.encoding,
+    tiles: dem.tiles,
+    tileSize: 256,
+    attribution: dem.attribution,
+  });
 
   map.setTerrain({ source: DEM_SOURCE_ID, exaggeration });
+  map.addLayer({
+    id: SKY_LAYER_ID,
+    type: "sky",
+    paint: {
+      "sky-type": "atmosphere",
+      "sky-atmosphere-sun": [0, 90],
+      "sky-atmosphere-sun-intensity": 12,
+    },
+  } as any);
 }
 
 export function disableTerrain(map: maplibregl.Map) {
   map.setTerrain(null);
+  if (map.getLayer(SKY_LAYER_ID)) map.removeLayer(SKY_LAYER_ID);
   if (map.getSource(DEM_SOURCE_ID)) map.removeSource(DEM_SOURCE_ID);
 }
 
