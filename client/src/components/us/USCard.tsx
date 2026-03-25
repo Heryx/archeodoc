@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { AlertCircle, AlertTriangle, CheckCircle2, Clock, Package, Pencil, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -35,12 +36,16 @@ export function USCard({
   onOpenMateriali,
   aiAvailable,
 }: USCardProps) {
+  const [showAllIssues, setShowAllIssues] = useState(false);
+
   let qcIssues: any[] = [];
   try {
     qcIssues = JSON.parse(us.qcProblemi || "[]");
   } catch {
     qcIssues = [];
   }
+  const visibleIssues = showAllIssues ? qcIssues : qcIssues.slice(0, 3);
+  const hiddenIssuesCount = Math.max(0, qcIssues.length - visibleIssues.length);
 
   return (
     <Card
@@ -84,7 +89,7 @@ export function USCard({
             {us.quota != null && <p className="text-xs text-muted-foreground mt-1">Quota: {us.quota} m s.l.m.</p>}
             {qcIssues.length > 0 && (
               <div className="mt-2 space-y-0.5">
-                {qcIssues.slice(0, 3).map((issue: any, i: number) => (
+                {visibleIssues.map((issue: any, i: number) => (
                   <div
                     key={i}
                     className={cn(
@@ -99,7 +104,21 @@ export function USCard({
                     {issue.messaggio}
                   </div>
                 ))}
-                {qcIssues.length > 3 && <div className="text-xs text-muted-foreground px-2">+{qcIssues.length - 3} altri problemi</div>}
+                {qcIssues.length > 3 && (
+                  <div className="flex items-center gap-2 px-1 pt-1">
+                    {hiddenIssuesCount > 0 && (
+                      <div className="text-xs text-muted-foreground px-1">+{hiddenIssuesCount} altri problemi</div>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 px-2 text-xs"
+                      onClick={() => setShowAllIssues((prev) => !prev)}
+                    >
+                      {showAllIssues ? "Mostra meno" : "Mostra tutti i problemi"}
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
           </div>
