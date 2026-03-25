@@ -10,6 +10,7 @@ type AIStatusCardProps = {
 const providerLabel: Record<string, string> = {
   gemini: "Google Gemini",
   claude: "Anthropic Claude",
+  openai: "OpenAI (GPT)",
   none: "Nessuno",
 };
 
@@ -49,6 +50,14 @@ export function AIStatusCard({ settings }: AIStatusCardProps) {
           <span className="text-muted-foreground">Chiave Anthropic</span>
           {settings?.anthropicKeySet ? (
             <span className="font-mono text-xs text-green-700">{settings.anthropicKeyPreview}</span>
+          ) : (
+            <span className="text-xs text-muted-foreground">non impostata</span>
+          )}
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground">Chiave OpenAI</span>
+          {settings?.openaiKeySet ? (
+            <span className="font-mono text-xs text-green-700">{settings.openaiKeyPreview}</span>
           ) : (
             <span className="text-xs text-muted-foreground">non impostata</span>
           )}

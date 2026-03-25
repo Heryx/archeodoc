@@ -8,20 +8,24 @@ import type { AiSettings } from "@/components/settings/types";
 
 type AIKeysCardProps = {
   settings?: AiSettings;
-  aiProvider: "auto" | "gemini" | "claude";
-  setAiProvider: (value: "auto" | "gemini" | "claude") => void;
+  aiProvider: "auto" | "gemini" | "claude" | "openai";
+  setAiProvider: (value: "auto" | "gemini" | "claude" | "openai") => void;
   geminiKey: string;
   setGeminiKey: (value: string) => void;
   anthropicKey: string;
   setAnthropicKey: (value: string) => void;
+  openaiKey: string;
+  setOpenaiKey: (value: string) => void;
   showGemini: boolean;
   setShowGemini: (value: boolean) => void;
   showAnthropic: boolean;
   setShowAnthropic: (value: boolean) => void;
+  showOpenai: boolean;
+  setShowOpenai: (value: boolean) => void;
   savePending: boolean;
   clearPending: boolean;
   onSave: () => void;
-  onClearKey: (key: "gemini" | "anthropic") => void;
+  onClearKey: (key: "gemini" | "anthropic" | "openai") => void;
 };
 
 export function AIKeysCard({
@@ -32,10 +36,14 @@ export function AIKeysCard({
   setGeminiKey,
   anthropicKey,
   setAnthropicKey,
+  openaiKey,
+  setOpenaiKey,
   showGemini,
   setShowGemini,
   showAnthropic,
   setShowAnthropic,
+  showOpenai,
+  setShowOpenai,
   savePending,
   clearPending,
   onSave,
@@ -150,9 +158,58 @@ export function AIKeysCard({
         </div>
 
         <div className="space-y-1.5">
-          <Label>Provider preferito</Label>
+          <Label htmlFor="openai-key" className="flex items-center gap-2">
+            OpenAI API Key
+            <Badge variant="secondary" className="text-[10px] py-0">
+              A pagamento
+            </Badge>
+          </Label>
           <div className="flex gap-2">
-            {(["auto", "gemini", "claude"] as const).map((provider) => (
+            <div className="relative flex-1">
+              <Input
+                id="openai-key"
+                type={showOpenai ? "text" : "password"}
+                placeholder={
+                  settings?.openaiKeySet
+                    ? `Attuale: ${settings.openaiKeyPreview} - lascia vuoto per non modificare`
+                    : "sk-..."
+                }
+                value={openaiKey}
+                onChange={(event) => setOpenaiKey(event.target.value)}
+                className="pr-10 font-mono text-sm"
+              />
+              <button
+                type="button"
+                onClick={() => setShowOpenai(!showOpenai)}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                {showOpenai ? <EyeOff size={14} /> : <Eye size={14} />}
+              </button>
+            </div>
+            {settings?.openaiKeySet && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-destructive hover:text-destructive shrink-0"
+                onClick={() => onClearKey("openai")}
+                disabled={clearPending}
+              >
+                Rimuovi
+              </Button>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Ottieni la chiave su{" "}
+            <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="underline text-primary">
+              platform.openai.com
+            </a>
+          </p>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>Provider preferito</Label>
+          <div className="flex gap-2 flex-wrap">
+            {(["auto", "gemini", "openai", "claude"] as const).map((provider) => (
               <button
                 key={provider}
                 type="button"
@@ -163,12 +220,12 @@ export function AIKeysCard({
                     : "border-border text-muted-foreground hover:border-primary/50"
                 }`}
               >
-                {provider === "auto" ? "Auto (consigliato)" : provider === "gemini" ? "Gemini" : "Claude"}
+                {provider === "auto" ? "Auto (consigliato)" : provider === "gemini" ? "Gemini" : provider === "openai" ? "OpenAI (GPT)" : "Claude"}
               </button>
             ))}
           </div>
           <p className="text-xs text-muted-foreground">
-            In modalita <strong>Auto</strong>, Gemini viene preferito se la chiave e presente (e gratuito).
+            In modalita <strong>Auto</strong>, la priorità è: Gemini → OpenAI → Claude.
           </p>
         </div>
 

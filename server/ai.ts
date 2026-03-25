@@ -3,20 +3,23 @@ import { getSetting } from "./ai_settings";
 import { logger } from "./logger";
 
 // ─── Rilevamento provider ────────────────────────────────────────────────────
-// Preferisce Gemini (gratuito) se la chiave è presente, altrimenti Claude.
-// AI_PROVIDER può forzare la scelta: "gemini" | "claude"
+// Preferisce Gemini (gratuito) se la chiave è presente, poi OpenAI, poi Claude.
+// AI_PROVIDER può forzare la scelta: "gemini" | "openai" | "claude"
 // IMPORTANTE: legge sempre process.env al momento della chiamata (non cached)
 // in modo che reloadAIProvider() funzioni dopo il salvataggio dalle Impostazioni.
 
-function resolveProvider(): "gemini" | "claude" | "none" {
+function resolveProvider(): "gemini" | "claude" | "openai" | "none" {
   const envProvider = (process.env.AI_PROVIDER || "").toLowerCase().trim();
-  const hasGemini   = !!(process.env.GEMINI_API_KEY?.trim());
-  const hasClaude   = !!(process.env.ANTHROPIC_API_KEY?.trim());
+  const hasGemini  = !!(process.env.GEMINI_API_KEY?.trim());
+  const hasClaude  = !!(process.env.ANTHROPIC_API_KEY?.trim());
+  const hasOpenAI  = !!(process.env.OPENAI_API_KEY?.trim());
 
-  if (envProvider === "claude") return hasClaude ? "claude" : "none";
-  if (envProvider === "gemini") return hasGemini ? "gemini" : "none";
-  // Auto-detect: Gemini preferito (gratuito)
+  if (envProvider === "claude")  return hasClaude  ? "claude"  : "none";
+  if (envProvider === "gemini")  return hasGemini  ? "gemini"  : "none";
+  if (envProvider === "openai")  return hasOpenAI  ? "openai"  : "none";
+  // Auto-detect priority: Gemini → OpenAI → Claude
   if (hasGemini) return "gemini";
+  if (hasOpenAI) return "openai";
   if (hasClaude) return "claude";
   return "none";
 }
@@ -92,6 +95,21 @@ async function callAI(prompt: string, maxTokens = 3000, systemPrompt?: string): 
     const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
     const result = await model.generateContent(fullPrompt);
     return result.response.text();
+  }
+
+  if (AI_PROVIDER === "openai") {
+    const { OpenAI } = await import("openai");
+    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const model = process.env.OPENAI_MODEL?.trim() || "gpt-4o-mini";
+    const messages: Array<{ role: "system" | "user"; content: string }> = [];
+    if (systemPrompt) messages.push({ role: "system", content: systemPrompt });
+    messages.push({ role: "user", content: prompt });
+    const response = await client.chat.completions.create({
+      model,
+      max_tokens: maxTokens,
+      messages,
+    });
+    return response.choices[0]?.message?.content || "";
   }
 
   if (AI_PROVIDER === "claude") {

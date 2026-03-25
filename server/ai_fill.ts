@@ -214,14 +214,18 @@ const ORGANIC_BY_BOOLEAN_KEY: Record<string, string> = {
   compTessuti: "Tessuti",
 };
 
-function resolveProvider(): "gemini" | "claude" | "none" {
+function resolveProvider(): "gemini" | "claude" | "openai" | "none" {
   const envProvider = (process.env.AI_PROVIDER || "").toLowerCase().trim();
-  const hasGemini = !!process.env.GEMINI_API_KEY?.trim();
-  const hasClaude = !!process.env.ANTHROPIC_API_KEY?.trim();
+  const hasGemini  = !!process.env.GEMINI_API_KEY?.trim();
+  const hasClaude  = !!process.env.ANTHROPIC_API_KEY?.trim();
+  const hasOpenAI  = !!process.env.OPENAI_API_KEY?.trim();
 
-  if (envProvider === "claude") return hasClaude ? "claude" : "none";
-  if (envProvider === "gemini") return hasGemini ? "gemini" : "none";
+  if (envProvider === "claude")  return hasClaude  ? "claude"  : "none";
+  if (envProvider === "gemini")  return hasGemini  ? "gemini"  : "none";
+  if (envProvider === "openai")  return hasOpenAI  ? "openai"  : "none";
+  // Auto-detect priority: Gemini → OpenAI → Claude
   if (hasGemini) return "gemini";
+  if (hasOpenAI) return "openai";
   if (hasClaude) return "claude";
   return "none";
 }
@@ -235,6 +239,21 @@ async function callAI(prompt: string, maxTokens = 2200, systemPrompt?: string): 
     const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
     const result = await model.generateContent(fullPrompt);
     return result.response.text();
+  }
+
+  if (provider === "openai") {
+    const { OpenAI } = await import("openai");
+    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const model = process.env.OPENAI_MODEL?.trim() || "gpt-4o-mini";
+    const messages: Array<{ role: "system" | "user"; content: string }> = [];
+    if (systemPrompt) messages.push({ role: "system", content: systemPrompt });
+    messages.push({ role: "user", content: prompt });
+    const response = await client.chat.completions.create({
+      model,
+      max_tokens: maxTokens,
+      messages,
+    });
+    return response.choices[0]?.message?.content || "";
   }
 
   if (provider === "claude") {
