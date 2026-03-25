@@ -148,6 +148,25 @@ export function ImpostazioniPage({ embedded = false }: ImpostazioniPageProps = {
     },
   });
 
+  const clearLogsMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/logs/clear", {});
+      return response.json();
+    },
+    onSuccess: () => {
+      setLogLines([]);
+      fetchLogs();
+      toast({ title: "Log svuotati" });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Errore svuotamento log",
+        description: error?.message || "Operazione non riuscita",
+        variant: "destructive",
+      });
+    },
+  });
+
   const aiKeysProps = useMemo(
     () => ({
       settings,
@@ -248,6 +267,13 @@ export function ImpostazioniPage({ embedded = false }: ImpostazioniPageProps = {
         onDownload={() => {
           window.open("/api/logs/download", "_blank");
         }}
+        onClear={() => {
+          if (clearLogsMutation.isPending) return;
+          const confirmed = window.confirm("Confermi di voler svuotare completamente il file di log?");
+          if (!confirmed) return;
+          clearLogsMutation.mutate();
+        }}
+        clearPending={clearLogsMutation.isPending}
       />
     </div>
   );

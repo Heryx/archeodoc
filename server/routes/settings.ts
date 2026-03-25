@@ -367,6 +367,17 @@ export function registerSettingsRoutes(app: Express, withProject: WithProject) {
     res.download(logPath, "archeodoc.log");
   });
 
+  app.post("/api/logs/clear", (_req, res) => {
+    const logPath = getLogPath();
+    try {
+      fs.mkdirSync(path.dirname(logPath), { recursive: true });
+      fs.writeFileSync(logPath, "", "utf-8");
+      res.json({ ok: true, path: logPath });
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Impossibile svuotare il file di log" });
+    }
+  });
+
   // ─── Dismiss QC logs ──────────────────────────────────────────────────────
   app.post("/api/qc-logs/:id/dismiss", withProject((ctx, req, res) => {
     const id = Number(req.params.id);
