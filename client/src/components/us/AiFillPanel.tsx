@@ -12,16 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-
-export type AiFieldConfidence = "alta" | "media" | "bassa";
-
-export type AiFieldSuggestion = {
-  value: string | boolean | string[];
-  confidence: AiFieldConfidence;
-  source: string;
-};
-
-export type AiFillResult = Record<string, AiFieldSuggestion>;
+import type { AiFieldConfidence, AiFieldSuggestion, AiFillResult } from "@/lib/api";
 
 type AiFillPanelProps = {
   open: boolean;

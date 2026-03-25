@@ -2,6 +2,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useParams } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
+import { applyAiFillFields, getAiFillSuggestions, type AIFillSource, type AiFillResult } from "@/lib/api";
 import { extractSearchFromLocation } from "@/lib/location";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -23,7 +24,7 @@ import type { FieldDefinition, SchemaDefinition } from "@shared/types/schema";
 import { getUsTopLevelThesaurusFromSchema } from "@shared/us_schema_thesaurus";
 import { USCard } from "@/components/us/USCard";
 import { USAllegatiImpact } from "@/components/us/USAllegati";
-import { AiFillPanel, type AiFillResult } from "@/components/us/AiFillPanel";
+import { AiFillPanel } from "@/components/us/AiFillPanel";
 import { USFormDialog } from "@/components/us/USFormDialog";
 import { USModelDialog } from "@/components/us/USModelDialog";
 import {
@@ -51,7 +52,6 @@ type ProjectSchemaResponse = {
 };
 
 type USSaveMode = "draft" | "final";
-type AIFillSource = "descrizione" | "diario" | "entrambi";
 const AUTO_GIORNATA_DATE_KEYS = ["dataCompilazione", "dataRilevamentoCampo", "giorno", "dataScheda"] as const;
 
 function giornataFilterFromLocation(location: string): string {
@@ -509,8 +509,7 @@ export function USPage() {
 
   const requestAiFill = useMutation({
     mutationFn: async ({ usId, source }: { usId: number; source: AIFillSource }) => {
-      const r = await apiRequest("POST", `/api/us/${usId}/ai-fill`, { source });
-      return r.json() as Promise<{ suggestions: AiFillResult }>;
+      return getAiFillSuggestions(usId, source);
     },
     onSuccess: (result, vars) => {
       const target = usList.find((item) => item.id === vars.usId) || { id: vars.usId, codiceUS: `US ${vars.usId}` };
@@ -533,8 +532,7 @@ export function USPage() {
       usId: number;
       fields: Record<string, string | boolean | string[]>;
     }) => {
-      const r = await apiRequest("POST", `/api/us/${usId}/ai-fill-apply`, { fields });
-      return r.json();
+      return applyAiFillFields(usId, fields);
     },
     onSuccess: () => {
       qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
