@@ -22,6 +22,7 @@ import {
   type GeoPackageFieldMap,
 } from "../geopackage_import";
 import { exportSketchesToGeoPackage } from "../geopackage_export";
+import { insertImageIntoDocx } from "../docx_image_insert";
 
 type TransferMode = "copy" | "move";
 type USSaveMode = "draft" | "final";
@@ -115,6 +116,19 @@ function encodeUploadPath(relativePath: string): string {
     .filter(Boolean)
     .map((segment) => encodeURIComponent(segment))
     .join("/");
+}
+
+function isDocxAttachment(mimeType: string | null | undefined, nameOrPath: string): boolean {
+  const normalized = String(nameOrPath || "").toLowerCase();
+  if (normalized.endsWith(".docx")) return true;
+  const mime = String(mimeType || "").toLowerCase();
+  return mime.includes("wordprocessingml");
+}
+
+function buildSnapshotDocxName(baseName: string): string {
+  const trimmed = baseName.trim();
+  const stem = trimmed.replace(/\.docx$/i, "").replace(/[^\w\- ]+/g, "").replace(/\s+/g, "-");
+  return `${stem || "documento"}_snapshot_${Date.now()}.docx`;
 }
 
 type FieldworkHelpers = {
@@ -258,6 +272,117 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
       snapshot: {
         ...created,
         url: `/uploads/${encodeUploadPath(created.percorso)}?projectId=${encodeURIComponent(ctx.project.id)}`,
+      },
+    });
+  }));
+
+  app.post("/api/cantieri/:cid/map-snapshots/:sid/insert-into-docx", withProject(async (ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const cantiere = ctx.storage.getCantiere(cid);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const snapshotId = Number(req.params.sid);
+    const snapshot = ctx.storage.getMapSnapshot(snapshotId);
+    if (!snapshot || snapshot.cantiereId !== cid) {
+      return res.status(404).json({ error: "Snapshot non trovato" });
+    }
+
+    const allegatoId = Number(req.body?.allegatoId);
+    if (!Number.isFinite(allegatoId)) {
+      return res.status(400).json({ error: "allegatoId obbligatorio" });
+    }
+
+    const targetDocx = ctx.storage.getAllegato(allegatoId);
+    if (!targetDocx || targetDocx.cantiereId !== cid) {
+      return res.status(404).json({ error: "Documento allegato non trovato" });
+    }
+    if (!isDocxAttachment(targetDocx.mimeType, targetDocx.nomeFile || targetDocx.percorso)) {
+      return res.status(400).json({ error: "L'allegato selezionato non e un file .docx" });
+    }
+
+    const snapshotPath = resolvePathInside(ctx.project.mediaDir, snapshot.percorso);
+    const docxPath = resolvePathInside(ctx.project.mediaDir, targetDocx.percorso);
+    if (!snapshotPath || !fs.existsSync(snapshotPath)) {
+      return res.status(404).json({ error: "File snapshot non trovato su disco" });
+    }
+    if (!docxPath || !fs.existsSync(docxPath)) {
+      return res.status(404).json({ error: "File DOCX non trovato su disco" });
+    }
+
+    const widthCmRaw = Number(req.body?.widthCm);
+    const heightCmRaw = Number(req.body?.heightCm);
+    const widthCm = Number.isFinite(widthCmRaw) && widthCmRaw > 0 ? widthCmRaw : 14;
+    const heightCm = Number.isFinite(heightCmRaw) && heightCmRaw > 0 ? heightCmRaw : 8;
+    const widthEmu = Math.round(widthCm * 360_000);
+    const heightEmu = Math.round(heightCm * 360_000);
+    const paragraphIndexRaw = Number(req.body?.afterParagraphIndex);
+    const afterParagraphIndex = Number.isFinite(paragraphIndexRaw) ? Math.trunc(paragraphIndexRaw) : -1;
+
+    const docxBuffer = fs.readFileSync(docxPath);
+    const imageBuffer = fs.readFileSync(snapshotPath);
+
+    const snapshotMime =
+      snapshot.mimeType === "image/jpeg"
+        ? "image/jpeg"
+        : snapshot.mimeType === "image/png"
+          ? "image/png"
+          : null;
+    if (!snapshotMime) {
+      return res.status(400).json({ error: "Snapshot non supportato per DOCX: usa PNG o JPEG" });
+    }
+
+    let inserted;
+    try {
+      inserted = await insertImageIntoDocx({
+        docxBuffer,
+        imageBuffer,
+        imageMimeType: snapshotMime,
+        title: snapshot.titolo,
+        caption: snapshot.didascalia,
+        widthEmu,
+        heightEmu,
+        afterParagraphIndex,
+      });
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message || "Inserimento immagine nel DOCX fallito" });
+    }
+
+    const relativeDocx = String(targetDocx.percorso || "").replace(/\\/g, "/");
+    const baseDir = path.posix.dirname(relativeDocx);
+    const outputName = buildSnapshotDocxName(targetDocx.nomeFile || "relazione.docx");
+    const outputRelativePath = baseDir && baseDir !== "." ? path.posix.join(baseDir, outputName) : outputName;
+    const outputAbsolutePath = resolvePathInside(ctx.project.mediaDir, outputRelativePath);
+    if (!outputAbsolutePath) {
+      return res.status(400).json({ error: "Percorso output DOCX non valido" });
+    }
+
+    fs.mkdirSync(path.dirname(outputAbsolutePath), { recursive: true });
+    fs.writeFileSync(outputAbsolutePath, inserted.buffer);
+
+    const createdAttachment = ctx.storage.createAllegato({
+      cantiereId: cid,
+      giornataId: targetDocx.giornataId ?? null,
+      usId: targetDocx.usId ?? null,
+      tipo: "documento",
+      nomeFile: outputName,
+      percorso: outputRelativePath,
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      dimensione: inserted.buffer.length,
+      dataRilievo: targetDocx.dataRilievo ?? null,
+      operatore: targetDocx.operatore ?? null,
+      descrizione: `DOCX con snapshot mappa: ${snapshot.titolo}`,
+      coordX: targetDocx.coordX ?? null,
+      coordY: targetDocx.coordY ?? null,
+      quota: targetDocx.quota ?? null,
+      descrizionAi: null,
+    });
+
+    res.json({
+      ok: true,
+      warnings: inserted.warnings,
+      allegato: {
+        ...createdAttachment,
+        url: `/uploads/${encodeUploadPath(createdAttachment.percorso)}?projectId=${encodeURIComponent(ctx.project.id)}`,
       },
     });
   }));

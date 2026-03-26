@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import maplibregl from "maplibre-gl";
-import { Camera, Download, Loader2, Trash2 } from "lucide-react";
+import { Camera, Download, FileText, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,7 +28,18 @@ type MapExporterProps = {
   visibleLayerNames: string[];
 };
 
-type ExportTab = "capture" | "library";
+type ExportTab = "capture" | "library" | "insert";
+
+type AllegatoRecord = {
+  id: number;
+  cantiereId: number;
+  giornataId: number | null;
+  usId: number | null;
+  tipo: string;
+  nomeFile: string;
+  percorso: string;
+  mimeType: string | null;
+};
 
 function drawNorthArrow(ctx: CanvasRenderingContext2D) {
   const x = 26;
@@ -180,6 +191,12 @@ export function MapExporter({
   const [showScale, setShowScale] = useState(true);
   const [showNorth, setShowNorth] = useState(true);
   const [previewDataUrl, setPreviewDataUrl] = useState<string | null>(null);
+  const [selectedSnapshotId, setSelectedSnapshotId] = useState<number | null>(null);
+  const [selectedDocxId, setSelectedDocxId] = useState<number | null>(null);
+  const [insertWidthCm, setInsertWidthCm] = useState("14");
+  const [insertHeightCm, setInsertHeightCm] = useState("8");
+  const [insertAfterParagraph, setInsertAfterParagraph] = useState("");
+  const [insertedDocxUrl, setInsertedDocxUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -204,6 +221,26 @@ export function MapExporter({
       });
       if (!response.ok) throw new Error("Caricamento snapshot fallito");
       return response.json();
+    },
+    enabled: open,
+    staleTime: 10_000,
+  });
+
+  const docxAttachmentsQuery = useQuery<AllegatoRecord[]>({
+    queryKey: ["/api/cantieri", String(cantiereId), "allegati", "docx"],
+    queryFn: async () => {
+      const response = await fetch(`/api/cantieri/${cantiereId}/allegati`, {
+        headers: getProjectHeader(),
+      });
+      if (!response.ok) throw new Error("Caricamento allegati fallito");
+      const items = (await response.json()) as AllegatoRecord[];
+      return items.filter((item) => {
+        const mime = String(item.mimeType || "").toLowerCase();
+        const byMime = mime.includes("wordprocessingml");
+        const byName = item.nomeFile?.toLowerCase().endsWith(".docx");
+        const byPath = item.percorso?.toLowerCase().endsWith(".docx");
+        return byMime || Boolean(byName) || Boolean(byPath);
+      });
     },
     enabled: open,
     staleTime: 10_000,
@@ -300,7 +337,65 @@ export function MapExporter({
     },
   });
 
+  const insertIntoDocxMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedSnapshotId) throw new Error("Seleziona uno snapshot");
+      if (!selectedDocxId) throw new Error("Seleziona un documento DOCX");
+
+      const widthCm = Number(insertWidthCm);
+      const heightCm = Number(insertHeightCm);
+      const afterParagraphIndexRaw = Number(insertAfterParagraph);
+      const payload = {
+        allegatoId: selectedDocxId,
+        widthCm: Number.isFinite(widthCm) && widthCm > 0 ? widthCm : 14,
+        heightCm: Number.isFinite(heightCm) && heightCm > 0 ? heightCm : 8,
+        afterParagraphIndex:
+          Number.isFinite(afterParagraphIndexRaw) && afterParagraphIndexRaw >= 0
+            ? Math.trunc(afterParagraphIndexRaw)
+            : -1,
+      };
+
+      return (await apiRequest(
+        "POST",
+        `/api/cantieri/${cantiereId}/map-snapshots/${selectedSnapshotId}/insert-into-docx`,
+        payload,
+      )).json();
+    },
+    onSuccess: async (data: any) => {
+      setInsertedDocxUrl(data?.allegato?.url || null);
+      await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", String(cantiereId), "allegati", "docx"] });
+      toast({
+        title: "DOCX generato",
+        description: data?.warnings?.length
+          ? `Inserito con ${data.warnings.length} avviso/i`
+          : "Snapshot inserito nel documento",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Errore inserimento DOCX",
+        description: error?.message || "Operazione non riuscita",
+        variant: "destructive",
+      });
+    },
+  });
+
   const snapshots = snapshotsQuery.data?.snapshots || [];
+  const docxAttachments = docxAttachmentsQuery.data || [];
+
+  useEffect(() => {
+    if (!open) return;
+    if (!selectedSnapshotId && snapshots.length > 0) {
+      setSelectedSnapshotId(snapshots[0].id);
+    }
+  }, [open, snapshots, selectedSnapshotId]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (!selectedDocxId && docxAttachments.length > 0) {
+      setSelectedDocxId(docxAttachments[0].id);
+    }
+  }, [open, docxAttachments, selectedDocxId]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -328,6 +423,15 @@ export function MapExporter({
             onClick={() => setTab("library")}
           >
             Libreria ({snapshots.length})
+          </Button>
+          <Button
+            variant={tab === "insert" ? "default" : "outline"}
+            size="sm"
+            className="h-7 gap-1"
+            onClick={() => setTab("insert")}
+          >
+            <FileText size={13} />
+            Inserisci in DOCX
           </Button>
         </div>
 
@@ -457,8 +561,139 @@ export function MapExporter({
             )}
           </div>
         )}
+
+        {tab === "insert" && (
+          <div className="h-full min-h-0 grid grid-cols-[340px_1fr]">
+            <div className="border-r border-border p-4 space-y-3 overflow-y-auto">
+              <div>
+                <Label>Snapshot da inserire</Label>
+                <select
+                  className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+                  value={selectedSnapshotId ?? ""}
+                  onChange={(event) => {
+                    setSelectedSnapshotId(Number(event.target.value));
+                    setInsertedDocxUrl(null);
+                  }}
+                >
+                  <option value="" disabled>
+                    Seleziona snapshot...
+                  </option>
+                  {snapshots.map((snapshot) => (
+                    <option key={snapshot.id} value={snapshot.id}>
+                      {snapshot.titolo}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <Label>Documento DOCX destinazione</Label>
+                <select
+                  className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+                  value={selectedDocxId ?? ""}
+                  onChange={(event) => {
+                    setSelectedDocxId(Number(event.target.value));
+                    setInsertedDocxUrl(null);
+                  }}
+                >
+                  <option value="" disabled>
+                    Seleziona allegato DOCX...
+                  </option>
+                  {docxAttachments.map((attachment) => (
+                    <option key={attachment.id} value={attachment.id}>
+                      {attachment.nomeFile}
+                    </option>
+                  ))}
+                </select>
+                {docxAttachmentsQuery.isLoading && (
+                  <div className="mt-1 text-xs text-muted-foreground">Caricamento documenti...</div>
+                )}
+                {!docxAttachmentsQuery.isLoading && docxAttachments.length === 0 && (
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    Nessun `.docx` negli allegati del cantiere.
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label>Larghezza (cm)</Label>
+                  <Input
+                    value={insertWidthCm}
+                    onChange={(event) => setInsertWidthCm(event.target.value)}
+                    placeholder="14"
+                  />
+                </div>
+                <div>
+                  <Label>Altezza (cm)</Label>
+                  <Input
+                    value={insertHeightCm}
+                    onChange={(event) => setInsertHeightCm(event.target.value)}
+                    placeholder="8"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <Label>Inserisci dopo paragrafo (opzionale)</Label>
+                <Input
+                  value={insertAfterParagraph}
+                  onChange={(event) => setInsertAfterParagraph(event.target.value)}
+                  placeholder="-1 (fine documento)"
+                />
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Usa `-1` o lascia vuoto per inserire in fondo.
+                </div>
+              </div>
+
+              <Button
+                className="gap-2 w-full"
+                onClick={() => insertIntoDocxMutation.mutate()}
+                disabled={
+                  insertIntoDocxMutation.isPending ||
+                  !selectedSnapshotId ||
+                  !selectedDocxId
+                }
+              >
+                {insertIntoDocxMutation.isPending ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <FileText size={14} />
+                )}
+                Inserisci snapshot nel DOCX
+              </Button>
+            </div>
+
+            <div className="p-4 overflow-y-auto space-y-3">
+              <div className="text-sm font-medium">Output</div>
+              {insertedDocxUrl ? (
+                <div className="rounded-md border border-border p-3 space-y-2 bg-card/40">
+                  <div className="text-sm">
+                    Documento creato con successo. E stato aggiunto anche agli allegati del cantiere.
+                  </div>
+                  <a
+                    href={insertedDocxUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-xs rounded border border-border px-2 py-1 hover:bg-muted"
+                  >
+                    <Download size={12} />
+                    Apri DOCX generato
+                  </a>
+                </div>
+              ) : (
+                <div className="text-sm text-muted-foreground">
+                  Seleziona snapshot e documento, poi avvia l'inserimento.
+                </div>
+              )}
+
+              <div className="text-xs text-muted-foreground">
+                L'originale non viene modificato: viene creato un nuovo `.docx` con suffisso `_snapshot_*`.
+              </div>
+            </div>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
 }
-

@@ -82,23 +82,23 @@ ArcheoDoc e una web app TypeScript (Node.js + Express + SQLite + React) per gest
 - Salvataggio snapshot per cantiere in media progetto (`_map_snapshots/<cid>/...`).
 - Metadati snapshot persistiti: extent, center, zoom, bearing, pitch, tags.
 
-### 9) Inserimento snapshot in relazione DOCX (in sviluppo)
-- Obiettivo: inserire una figura mappa in un `.docx` esistente senza rigenerare da zero il documento.
-- Strategia tecnica prevista:
-  - parsing del DOCX (zip OpenXML),
-  - estrazione paragrafi testuali candidati,
-  - suggerimento posizione con AI (`paragraphIndex`),
-  - inserimento blocco immagine `w:drawing` nel punto scelto,
-  - backup automatico del documento originale prima della scrittura.
-- Moduli server previsti:
+### 9) Inserimento snapshot in relazione DOCX
+- Inserimento snapshot mappa in un `.docx` esistente (senza rigenerare il documento da zero).
+- Implementazione attuale:
+  - parser OpenXML con `JSZip`,
+  - aggiunta immagine in `word/media`,
+  - update relazioni in `word/_rels/document.xml.rels`,
+  - inserimento blocco `w:drawing` in `word/document.xml`,
+  - output non distruttivo: crea un nuovo file `.docx` e lo registra come allegato.
+- Moduli coinvolti:
   - `server/docx_image_insert.ts`
-  - `server/routes/map_snapshot_insert_routes.ts`
-- Flusso previsto in UI (MapExporter):
+  - route in `server/routes/fieldwork.ts`
+- Flusso UI in `MapExporter`:
+  - tab `Inserisci in DOCX`,
   - scelta snapshot,
   - scelta documento DOCX allegato,
-  - analisi AI della posizione,
-  - conferma manuale del paragrafo,
-  - inserimento immagine nel documento.
+  - opzioni dimensione (cm) + indice paragrafo opzionale,
+  - generazione nuovo DOCX con immagine.
 
 ### 10) Google Docs
 - Setup cantiere su Google Drive (`/api/cantieri/:id/google/setup`).
@@ -264,9 +264,8 @@ Puoi cambiarlo con:
   - `PATCH /api/map-snapshots/:id`
   - `DELETE /api/map-snapshots/:id`
 
-- Snapshot -> DOCX (in sviluppo)
-  - `GET /api/cantieri/:cid/map-snapshots/:snapId/docx-targets`
-  - `POST /api/cantieri/:cid/map-snapshots/:snapId/insert-into-docx`
+- Snapshot -> DOCX
+  - `POST /api/cantieri/:cid/map-snapshots/:sid/insert-into-docx`
 
 - Google
   - `POST /api/cantieri/:id/google/setup`
