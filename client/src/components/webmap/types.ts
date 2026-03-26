@@ -91,6 +91,10 @@ export type ActiveModules = {
   inspect: boolean;
   styleRenderer: boolean;
   attributeTable: boolean;
+  geocoder: boolean;
+  print: boolean;
+  snapshot: boolean;
+  layerManager: boolean;
 };
 
 export type WebMapState = {
@@ -135,4 +139,21 @@ export type MapSnapshotRecord = {
   createdAt: string;
   updatedAt: string;
   url: string;
+};
+
+export type WebMapLayer = {
+  id: number;
+  cantiereId: number;
+  tableName: string;
+  displayName: string;
+  sourceFileName: string;
+  sourceFormat: "gpkg" | "geojson" | "kml" | "csv";
+  sridOriginal: number | null;
+  featureCount: number;
+  geometryType: string | null;
+  styleJson: string | null;
+  visible: boolean;
+  zIndex: number;
+  createdAt: string;
+  updatedAt: string;
 };

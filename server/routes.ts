@@ -17,6 +17,7 @@ import { registerAIExportRoutes } from "./routes/ai_export";
 import { registerQCRoutes } from "./routes/qc";
 import { registerFieldworkRoutes } from "./routes/fieldwork";
 import { registerQFieldRoutes } from "./routes/qfield";
+import { registerWebMapRoutes } from "./routes/webmap_routes";
 import type { ProjectContext, ProjectHandler } from "./routes/types";
 import {
   buildTargetAttachmentRelativePath,
@@ -632,6 +633,10 @@ export async function registerRoutes(_httpServer: Server, app: Express): Promise
 
   registerGoogleRoutes(app, withProject);
   registerProjectRoutes(app, withProject);
+  registerWebMapRoutes(app, {
+    withProject,
+    gpkgUpload: geopackageUpload,
+  });
   registerFieldworkRoutes(app, {
     withProject,
     upload,

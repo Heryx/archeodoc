@@ -10,6 +10,7 @@ import {
   Download,
   FileArchive,
   Globe2,
+  Layers,
   Layers3,
   Map as MapIcon,
   RefreshCcw,
@@ -31,8 +32,13 @@ import { useToast } from "@/hooks/use-toast";
 import { getProjectHeader } from "@/lib/project";
 import { apiRequest } from "@/lib/queryClient";
 import { AttributeTable } from "@/components/webmap/modules/AttributeTable";
+import { Geocoder } from "@/components/webmap/modules/Geocoder";
+import { useFeaturePopup } from "@/components/webmap/modules/FeaturePopup";
+import { LayerManager } from "@/components/webmap/modules/LayerManager";
 import { MapExporter } from "@/components/webmap/modules/MapExporter";
+import { PrintMap } from "@/components/webmap/modules/PrintMap";
 import { LayerPanel } from "@/components/webmap/LayerPanel";
+import { useWebMapLayers } from "@/components/webmap/hooks/useWebMapLayers";
 import { TerrainPanel } from "@/components/webmap/modules/TerrainModule";
 import { StyleRendererPanel } from "@/components/webmap/modules/StyleRenderer";
 import { DEFAULT_STYLE, pickColor, useWebMap, useWebMapStore, WebMapContext } from "@/components/webmap/store";
@@ -405,7 +411,7 @@ function WebMapContent() {
   const [scaleLabel, setScaleLabel] = useState<string>("1:?");
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelTab, setPanelTab] = useState<WebMapPanelTab>("geopackage");
-  const [mapExporterOpen, setMapExporterOpen] = useState(false);
+  const { layers: persistedLayers } = useWebMapLayers(mapRef, Number(cid), Boolean(cid));
 
   useEffect(() => {
     stateRef.current = state;
@@ -800,6 +806,7 @@ function WebMapContent() {
       if (currentDrawMode && currentDrawMode !== "simple_select") return;
 
       const snapshot = stateRef.current;
+      if (snapshot.modules.inspect) return;
       const visibleLayers = snapshot.layers.filter((layer) => layer.visible);
       if (visibleLayers.length === 0) return;
 
@@ -960,6 +967,15 @@ function WebMapContent() {
     setPanelOpen(true);
   };
 
+  useFeaturePopup(
+    mapRef,
+    state.modules.inspect ? persistedLayers : [],
+    Number(cid),
+    (codiceUS) => {
+      window.open(`/cantiere/${cid}/us?codice=${encodeURIComponent(codiceUS)}`, "_blank", "noopener,noreferrer");
+    },
+  );
+
   return (
     <div className="h-full min-h-0 flex flex-col">
       <div className="px-6 py-3 border-b border-border flex items-center gap-2">
@@ -972,6 +988,15 @@ function WebMapContent() {
         <div className="px-3 py-1.5 border-t border-border bg-card flex items-center gap-2 flex-wrap">
           <div className="flex items-center gap-1">
             <span className="text-[11px] text-muted-foreground mr-1">Dati</span>
+            <Button
+              variant={state.modules.layerManager ? "default" : "outline"}
+              size="sm"
+              className="h-7 gap-1.5"
+              onClick={() => dispatch({ type: "TOGGLE_MODULE", module: "layerManager" })}
+            >
+              <Layers size={13} />
+              Layer DB
+            </Button>
             <Button variant="outline" size="sm" className="h-7 gap-1.5" onClick={() => openPanel("geopackage")}>
               <Layers3 size={13} />
               GeoPackage
@@ -992,7 +1017,12 @@ function WebMapContent() {
           <span className="h-5 border-r border-border" />
           <div className="flex items-center gap-1">
             <span className="text-[11px] text-muted-foreground mr-1">Output</span>
-            <Button variant="outline" size="sm" className="h-7 gap-1.5" onClick={() => setMapExporterOpen(true)}>
+            <Button
+              variant={state.modules.snapshot ? "default" : "outline"}
+              size="sm"
+              className="h-7 gap-1.5"
+              onClick={() => dispatch({ type: "TOGGLE_MODULE", module: "snapshot" })}
+            >
               <Camera size={13} />
               MapExporter
             </Button>
@@ -1010,6 +1040,17 @@ function WebMapContent() {
         <section className="flex-1 min-w-0 flex flex-col">
           <div className="flex-1 relative min-h-[360px] overflow-hidden [&_.maplibregl-control-container]:hidden">
             <div ref={mapContainerRef} className="h-full w-full" />
+            {state.modules.geocoder && (
+              <Geocoder mapRef={mapRef} position="top-right" />
+            )}
+            {state.modules.layerManager && (
+              <div className="absolute left-0 top-0 bottom-0 w-72 z-30 bg-background/95 backdrop-blur-sm border-r border-border shadow-xl">
+                <LayerManager
+                  cantiereId={Number(cid)}
+                  onClose={() => dispatch({ type: "TOGGLE_MODULE", module: "layerManager" })}
+                />
+              </div>
+            )}
             {mapUnsupported && (
               <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground bg-background/80">
                 WebGL non disponibile: impossibile visualizzare la mappa.
@@ -1049,14 +1090,24 @@ function WebMapContent() {
       </div>
 
       <MapExporter
-        open={mapExporterOpen}
-        onOpenChange={setMapExporterOpen}
+        open={state.modules.snapshot}
+        onOpenChange={(open) => {
+          if (open !== state.modules.snapshot) {
+            dispatch({ type: "TOGGLE_MODULE", module: "snapshot" });
+          }
+        }}
         cantiereId={Number(cid)}
         mapRef={mapRef}
         basemap={state.basemap}
         activeLayerName={activeLayer?.tableName || null}
         visibleLayerNames={visibleLayerNames}
       />
+      {state.modules.print && (
+        <PrintMap
+          mapRef={mapRef}
+          onClose={() => dispatch({ type: "TOGGLE_MODULE", module: "print" })}
+        />
+      )}
 
       <Sheet open={panelOpen} onOpenChange={setPanelOpen}>
         <SheetContent side="right" className="w-full sm:max-w-3xl p-0">
@@ -1271,7 +1322,11 @@ function WebMapContent() {
                     <Button
                       variant="outline"
                       className="gap-2"
-                      onClick={() => setMapExporterOpen(true)}
+                      onClick={() => {
+                        if (!state.modules.snapshot) {
+                          dispatch({ type: "TOGGLE_MODULE", module: "snapshot" });
+                        }
+                      }}
                     >
                       <Camera size={14} />
                       Apri MapExporter

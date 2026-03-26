@@ -27,6 +27,7 @@ import {
   type QcLog,
   type InsertQcLog,
 } from "@shared/schema";
+import { ensureWebMapTables } from "./webmap_layers";
 
 function hasColumn(sqlite: Database.Database, tableName: string, columnName: string): boolean {
   const columns = sqlite.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
@@ -384,6 +385,7 @@ function migrate(sqlite: Database.Database) {
   ensureColumn(sqlite, "sas_records", "data", "data TEXT");
   ensureColumn(sqlite, "ra_records", "data", "data TEXT");
   ensureColumn(sqlite, "qc_logs", "dismissed", "dismissed INTEGER DEFAULT 0");
+  ensureWebMapTables(sqlite);
 }
 
 export interface IStorage {

@@ -40,6 +40,10 @@ const initialState: WebMapState = {
     inspect: false,
     styleRenderer: false,
     attributeTable: false,
+    geocoder: false,
+    print: false,
+    snapshot: false,
+    layerManager: false,
   },
   styleRenderer: null,
 };
