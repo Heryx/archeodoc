@@ -1,6 +1,7 @@
 ﻿import type { Express } from "express";
 import type multer from "multer";
 import fs from "fs";
+import path from "path";
 import type { WithProject } from "./types";
 import type { IStorage } from "../storage";
 import {
@@ -20,9 +21,15 @@ import {
   previewGeoPackageWebMap,
   type GeoPackageFieldMap,
 } from "../geopackage_import";
+import { exportSketchesToGeoPackage } from "../geopackage_export";
 
 type TransferMode = "copy" | "move";
 type USSaveMode = "draft" | "final";
+const MAP_SNAPSHOT_MIME_TO_EXT: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+};
 
 function parseGeoPackageFieldMap(raw: unknown): GeoPackageFieldMap | undefined {
   if (!raw) return undefined;
@@ -64,6 +71,50 @@ function parseUSSaveMode(value: unknown): USSaveMode {
 
 function isNonEmptyText(value: unknown): boolean {
   return String(value ?? "").trim().length > 0;
+}
+
+function sanitizeSnapshotName(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  const base = raw || "snapshot";
+  return base
+    .replace(/[^\w\- ]+/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "snapshot";
+}
+
+function parseSnapshotDataUrl(value: unknown): { mimeType: string; buffer: Buffer } | null {
+  if (typeof value !== "string") return null;
+  const match = value.match(/^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]+)$/i);
+  if (!match) return null;
+  const mimeType = match[1].toLowerCase();
+  if (!MAP_SNAPSHOT_MIME_TO_EXT[mimeType]) return null;
+  try {
+    const buffer = Buffer.from(match[2].replace(/\s+/g, ""), "base64");
+    if (buffer.length === 0) return null;
+    return { mimeType, buffer };
+  } catch {
+    return null;
+  }
+}
+
+function parseFeatureCollection(value: unknown): { type: "FeatureCollection"; features: Array<any> } | null {
+  if (!value || typeof value !== "object") return null;
+  const fc = value as { type?: unknown; features?: unknown };
+  if (fc.type !== "FeatureCollection" || !Array.isArray(fc.features)) return null;
+  return {
+    type: "FeatureCollection",
+    features: fc.features,
+  };
+}
+
+function encodeUploadPath(relativePath: string): string {
+  return relativePath
+    .split(/[\\/]+/)
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
 }
 
 type FieldworkHelpers = {
@@ -146,6 +197,148 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
     res.json(cantiere);
   }));
 
+  app.get("/api/cantieri/:cid/map-snapshots", withProject((ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const cantiere = ctx.storage.getCantiere(cid);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const snapshots = ctx.storage.getMapSnapshots(cid).map((snapshot) => ({
+      ...snapshot,
+      url: `/uploads/${encodeUploadPath(snapshot.percorso)}?projectId=${encodeURIComponent(ctx.project.id)}`,
+    }));
+    res.json({ snapshots });
+  }));
+
+  app.post("/api/cantieri/:cid/map-snapshots", withProject((ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const cantiere = ctx.storage.getCantiere(cid);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const titolo = String(req.body?.titolo ?? "").trim();
+    if (!titolo) return res.status(400).json({ error: "Titolo snapshot obbligatorio" });
+
+    const parsed = parseSnapshotDataUrl(req.body?.imageData);
+    if (!parsed) {
+      return res.status(400).json({ error: "imageData non valido: usa un data URL base64 PNG/JPEG/WEBP" });
+    }
+
+    if (parsed.buffer.length > 8 * 1024 * 1024) {
+      return res.status(400).json({ error: "Snapshot troppo grande (max 8MB)" });
+    }
+
+    const ext = MAP_SNAPSHOT_MIME_TO_EXT[parsed.mimeType];
+    const safeName = sanitizeSnapshotName(titolo);
+    const fileName = `${Date.now()}_${safeName}.${ext}`;
+    const relativePath = path.posix.join("_map_snapshots", String(cid), fileName);
+    const absolutePath = resolvePathInside(ctx.project.mediaDir, relativePath);
+    if (!absolutePath) {
+      return res.status(400).json({ error: "Percorso snapshot non valido" });
+    }
+
+    fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+    fs.writeFileSync(absolutePath, parsed.buffer);
+
+    const created = ctx.storage.createMapSnapshot({
+      cantiereId: cid,
+      titolo,
+      didascalia: typeof req.body?.didascalia === "string" ? req.body.didascalia.trim() : null,
+      tags: typeof req.body?.tags === "string" ? req.body.tags.trim() : null,
+      percorso: relativePath,
+      mimeType: parsed.mimeType,
+      width: Number.isFinite(Number(req.body?.width)) ? Number(req.body.width) : null,
+      height: Number.isFinite(Number(req.body?.height)) ? Number(req.body.height) : null,
+      bounds: typeof req.body?.bounds === "string" ? req.body.bounds : null,
+      center: typeof req.body?.center === "string" ? req.body.center : null,
+      zoom: Number.isFinite(Number(req.body?.zoom)) ? Number(req.body.zoom) : null,
+      bearing: Number.isFinite(Number(req.body?.bearing)) ? Number(req.body.bearing) : null,
+      pitch: Number.isFinite(Number(req.body?.pitch)) ? Number(req.body.pitch) : null,
+    });
+
+    res.json({
+      snapshot: {
+        ...created,
+        url: `/uploads/${encodeUploadPath(created.percorso)}?projectId=${encodeURIComponent(ctx.project.id)}`,
+      },
+    });
+  }));
+
+  app.post("/api/cantieri/:cid/webmap/sketches/export-geopackage", withProject((ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const cantiere = ctx.storage.getCantiere(cid);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const titolo = String(req.body?.titolo ?? "").trim() || `webmap_sketches_${new Date().toISOString()}`;
+    const featureCollection = parseFeatureCollection(req.body?.featureCollection);
+    if (!featureCollection) {
+      return res.status(400).json({ error: "featureCollection non valido" });
+    }
+
+    try {
+      const exported = exportSketchesToGeoPackage({
+        outputDir: ctx.project.mediaDir,
+        cantiereId: cid,
+        title: titolo,
+        featureCollection,
+      });
+
+      return res.json({
+        ok: true,
+        file: {
+          nomeFile: exported.fileName,
+          percorso: exported.relativePath,
+          featureCount: exported.featureCount,
+          tableName: exported.tableName,
+          url: `/uploads/${encodeUploadPath(exported.relativePath)}?projectId=${encodeURIComponent(ctx.project.id)}`,
+        },
+      });
+    } catch (error: any) {
+      return res.status(400).json({ error: error?.message || "Export GeoPackage fallito" });
+    }
+  }));
+
+  app.patch("/api/map-snapshots/:id", withProject((ctx, req, res) => {
+    const id = Number(req.params.id);
+    const existing = ctx.storage.getMapSnapshot(id);
+    if (!existing) return res.status(404).json({ error: "Snapshot non trovato" });
+
+    const patch = {
+      titolo: typeof req.body?.titolo === "string" ? req.body.titolo.trim() : undefined,
+      didascalia: typeof req.body?.didascalia === "string" ? req.body.didascalia.trim() : undefined,
+      tags: typeof req.body?.tags === "string" ? req.body.tags.trim() : undefined,
+    };
+    if (patch.titolo !== undefined && !patch.titolo) {
+      return res.status(400).json({ error: "Titolo snapshot obbligatorio" });
+    }
+
+    const updated = ctx.storage.updateMapSnapshot(id, patch);
+    if (!updated) return res.status(404).json({ error: "Snapshot non trovato" });
+    res.json({
+      snapshot: {
+        ...updated,
+        url: `/uploads/${encodeUploadPath(updated.percorso)}?projectId=${encodeURIComponent(ctx.project.id)}`,
+      },
+    });
+  }));
+
+  app.delete("/api/map-snapshots/:id", withProject((ctx, req, res) => {
+    const id = Number(req.params.id);
+    const existing = ctx.storage.getMapSnapshot(id);
+    if (!existing) return res.status(404).json({ error: "Snapshot non trovato" });
+
+    const absolutePath = resolvePathInside(ctx.project.mediaDir, existing.percorso);
+    if (absolutePath && fs.existsSync(absolutePath)) {
+      try {
+        fs.unlinkSync(absolutePath);
+      } catch {
+        // ignore file cleanup errors
+      }
+    }
+
+    const deleted = ctx.storage.deleteMapSnapshot(id);
+    if (!deleted) return res.status(404).json({ error: "Snapshot non trovato" });
+    res.json({ ok: true });
+  }));
+
   app.get("/api/cantieri/:cid/us-model", withProject((ctx, req, res) => {
     const cid = Number(req.params.cid);
     const cantiere = ctx.storage.getCantiere(cid);
@@ -210,6 +403,16 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
 
     const allAllegati = ctx.storage.getAllegati(cid);
     allAllegati.forEach((a) => removeAttachmentIfExists(ctx.project, a.percorso));
+    const allSnapshots = ctx.storage.getMapSnapshots(cid);
+    allSnapshots.forEach((snapshot) => {
+      const snapshotPath = resolvePathInside(ctx.project.mediaDir, snapshot.percorso);
+      if (!snapshotPath || !fs.existsSync(snapshotPath)) return;
+      try {
+        fs.unlinkSync(snapshotPath);
+      } catch {
+        // ignore cleanup errors
+      }
+    });
 
     const deleted = ctx.storage.deleteCantiere(cid);
     if (!deleted) return res.status(404).json({ error: "Cantiere non trovato" });
@@ -218,6 +421,14 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
     if (cantiereMediaDir && fs.existsSync(cantiereMediaDir)) {
       try {
         fs.rmSync(cantiereMediaDir, { recursive: true, force: true });
+      } catch {
+        // ignore cleanup errors
+      }
+    }
+    const snapshotsMediaDir = resolvePathInside(ctx.project.mediaDir, path.posix.join("_map_snapshots", String(cid)));
+    if (snapshotsMediaDir && fs.existsSync(snapshotsMediaDir)) {
+      try {
+        fs.rmSync(snapshotsMediaDir, { recursive: true, force: true });
       } catch {
         // ignore cleanup errors
       }

@@ -1,6 +1,7 @@
 import type { Cantiere, Giornata, UnitaStratigrafica } from "@shared/schema";
 import type { USThesaurusConfig } from "@shared/us_thesaurus";
 import { normalizeUsDefinizioneWithVocabulary, normalizeUsTipoWithVocabulary } from "@shared/us_thesaurus";
+import { normalizeUSCode, usCodeKey } from "@shared/normalize_us_code";
 import type { IStorage } from "./storage";
 import { inferMissingFields } from "./ai";
 import { parseJournalDocument, type GiornataData, type USData } from "./google_docs_parser";
@@ -108,11 +109,11 @@ export type GoogleSyncApplyResult = {
 };
 
 function normalizeCodeKey(value: string): string {
-  return value.trim().replace(/\s+/g, " ").toUpperCase();
+  return usCodeKey(value);
 }
 
 function formatUsCode(numero: number): string {
-  return `US ${numero}`;
+  return normalizeUSCode(`US ${numero}`);
 }
 
 function relationNumbersToJson(values?: number[]): string | null {

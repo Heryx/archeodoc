@@ -23,6 +23,13 @@ export type ProjectDefinition = {
   mediaDir: string;
   exportsDir: string;
   backupsDir: string;
+  schedeDir: string;
+  diarioDir: string;
+  planimetrieDir: string;
+  fotoDir: string;
+  documentiDir: string;
+  qgisDir: string;
+  aiConfigDir: string;
   documentationMode: DocumentationMode;
   schemaKey: string;
   exportMode: DocumentationExportMode;
@@ -148,6 +155,13 @@ function createProjectDefinition(
     mediaDir: path.join(projectRoot, "media"),
     exportsDir: path.join(projectRoot, "exports"),
     backupsDir: path.join(projectRoot, "backups"),
+    schedeDir: path.join(projectRoot, "schede"),
+    diarioDir: path.join(projectRoot, "diario"),
+    planimetrieDir: path.join(projectRoot, "planimetrie"),
+    fotoDir: path.join(projectRoot, "foto"),
+    documentiDir: path.join(projectRoot, "documenti"),
+    qgisDir: path.join(projectRoot, "qgis"),
+    aiConfigDir: path.join(projectRoot, "ai_config"),
     documentationMode: preset.documentationMode,
     schemaKey: preset.schemaKey,
     exportMode: preset.exportMode,
@@ -172,12 +186,36 @@ function ensureProjectSchemaFile(project: ProjectDefinition): void {
   writeProjectSchemaFile(project, getProjectSchemaDefinitionByKey(project.schemaKey));
 }
 
+function ensureDefaultAiConfigFiles(project: ProjectDefinition): void {
+  const defaults: Record<string, string> = {
+    "contesto.md": "Descrivi qui contesto del sito, cronologia e metodologia di scavo.\n",
+    "relazione.md": "Descrivi qui come impostare la relazione finale (struttura, stile, standard).\n",
+    "schede.md": "Descrivi qui regole e convenzioni per compilare le schede US.\n",
+    "stile.md": "Descrivi qui tono, lessico e convenzioni redazionali.\n",
+  };
+
+  for (const [file, content] of Object.entries(defaults)) {
+    const filePath = path.join(project.aiConfigDir, file);
+    if (!fs.existsSync(filePath)) {
+      fs.writeFileSync(filePath, content, "utf8");
+    }
+  }
+}
+
 function ensureProjectStructure(project: ProjectDefinition): void {
   ensureDirectory(project.projectRoot);
   ensureDirectory(project.mediaDir);
   ensureDirectory(project.exportsDir);
   ensureDirectory(project.backupsDir);
+  ensureDirectory(project.schedeDir);
+  ensureDirectory(project.diarioDir);
+  ensureDirectory(project.planimetrieDir);
+  ensureDirectory(project.fotoDir);
+  ensureDirectory(project.documentiDir);
+  ensureDirectory(project.qgisDir);
+  ensureDirectory(project.aiConfigDir);
   ensureProjectSchemaFile(project);
+  ensureDefaultAiConfigFiles(project);
 
   const metadataPath = path.join(project.projectRoot, "project.json");
   const metadata = {
@@ -227,6 +265,13 @@ function normalizeProjectDefinition(raw: unknown): ProjectDefinition | null {
   const mediaDir = typeof project.mediaDir === "string" ? project.mediaDir.trim() : "";
   const exportsDir = typeof project.exportsDir === "string" ? project.exportsDir.trim() : "";
   const backupsDir = typeof project.backupsDir === "string" ? project.backupsDir.trim() : "";
+  const schedeDir = typeof project.schedeDir === "string" ? project.schedeDir.trim() : "";
+  const diarioDir = typeof project.diarioDir === "string" ? project.diarioDir.trim() : "";
+  const planimetrieDir = typeof project.planimetrieDir === "string" ? project.planimetrieDir.trim() : "";
+  const fotoDir = typeof project.fotoDir === "string" ? project.fotoDir.trim() : "";
+  const documentiDir = typeof project.documentiDir === "string" ? project.documentiDir.trim() : "";
+  const qgisDir = typeof project.qgisDir === "string" ? project.qgisDir.trim() : "";
+  const aiConfigDir = typeof project.aiConfigDir === "string" ? project.aiConfigDir.trim() : "";
 
   if (!id || !name || !projectRoot || !dbPath || !mediaDir || !exportsDir || !backupsDir) {
     return null;
@@ -252,6 +297,13 @@ function normalizeProjectDefinition(raw: unknown): ProjectDefinition | null {
     mediaDir,
     exportsDir,
     backupsDir,
+    schedeDir: schedeDir || path.join(projectRoot, "schede"),
+    diarioDir: diarioDir || path.join(projectRoot, "diario"),
+    planimetrieDir: planimetrieDir || path.join(projectRoot, "planimetrie"),
+    fotoDir: fotoDir || path.join(projectRoot, "foto"),
+    documentiDir: documentiDir || path.join(projectRoot, "documenti"),
+    qgisDir: qgisDir || path.join(projectRoot, "qgis"),
+    aiConfigDir: aiConfigDir || path.join(projectRoot, "ai_config"),
     documentationMode,
     schemaKey,
     exportMode,

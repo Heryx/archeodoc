@@ -6,6 +6,7 @@ import Database from "better-sqlite3";
 import type { IStorage } from "./storage";
 import type { ProjectDefinition } from "./projects";
 import type { InsertAllegato, InsertUS } from "@shared/schema";
+import { normalizeUSCode, usCodeKey } from "@shared/normalize_us_code";
 
 const MAX_PREVIEW_CACHE = 24;
 const PREVIEW_TTL_MS = 1000 * 60 * 60 * 6; // 6h
@@ -159,17 +160,8 @@ function normalizeToken(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-function normalizeCode(value: unknown): string {
-  const raw = String(value ?? "").trim();
-  if (!raw) return "";
-  const cleaned = raw.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim().toUpperCase();
-  if (cleaned.startsWith("US ")) return cleaned;
-  if (cleaned.startsWith("US")) return `US ${cleaned.slice(2).trim()}`;
-  return `US ${cleaned}`;
-}
-
 function codeKey(value: unknown): string {
-  return normalizeCode(value).replace(/[^A-Z0-9]/g, "");
+  return usCodeKey(value);
 }
 
 function isEmptyValue(value: unknown): boolean {
@@ -346,7 +338,7 @@ function extractIncomingRecords(gpkgPath: string): IncomingUSRecord[] {
       const rows = db.prepare(`SELECT * FROM ${quoteIdent(tableName)}`).all() as Record<string, unknown>[];
       for (const row of rows) {
         const rawCode = row[codeColumn];
-        const normalized = normalizeCode(rawCode);
+        const normalized = normalizeUSCode(rawCode);
         const key = codeKey(normalized);
         if (!normalized || !key) continue;
 

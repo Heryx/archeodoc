@@ -8,6 +8,7 @@ import { createRequire } from "module";
 import type { IStorage } from "./storage";
 import type { USThesaurusConfig } from "@shared/us_thesaurus";
 import { normalizeUsDefinizioneWithVocabulary, normalizeUsTipoWithVocabulary } from "@shared/us_thesaurus";
+import { normalizeUSCode, usCodeKey } from "@shared/normalize_us_code";
 
 const require = createRequire(path.join(process.cwd(), "package.json"));
 
@@ -239,12 +240,8 @@ function parseRelationValues(raw: unknown): string[] {
     .filter(Boolean);
 }
 
-function normalizeUsCode(value: string): string {
-  return value.trim().replace(/\s+/g, " ");
-}
-
 function normalizedCodeKey(value: string): string {
-  return normalizeUsCode(value).toUpperCase();
+  return usCodeKey(value);
 }
 
 function relationFieldValue(raw: unknown): string | null {
@@ -883,7 +880,7 @@ export function importUSFromGeoPackage(input: GeoPackageImportInput): GeoPackage
           continue;
         }
 
-        const codiceUS = normalizeUsCode(rawCode);
+        const codiceUS = normalizeUSCode(rawCode);
         const codeKey = normalizedCodeKey(codiceUS);
 
         if (existingCodes.has(codeKey)) {

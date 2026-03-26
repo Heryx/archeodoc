@@ -14,6 +14,22 @@ type GitCommandResult = {
   message?: string;
 };
 
+const AI_CONFIG_DEFAULT_FILES = ["contesto.md", "relazione.md", "schede.md", "stile.md"];
+const AI_CONFIG_DEFAULT_CONTENT: Record<string, string> = {
+  "contesto.md": "Descrivi qui contesto del sito, cronologia e metodologia di scavo.\n",
+  "relazione.md": "Descrivi qui come impostare la relazione finale (struttura, stile, standard).\n",
+  "schede.md": "Descrivi qui regole e convenzioni per compilare le schede US.\n",
+  "stile.md": "Descrivi qui tono, lessico e convenzioni redazionali.\n",
+};
+
+function safeAiConfigFileName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const cleaned = value.trim().toLowerCase();
+  if (!cleaned) return null;
+  if (!/^[a-z0-9._-]+\.md$/.test(cleaned)) return null;
+  return cleaned;
+}
+
 function runGitCommand(args: string[], cwd: string): GitCommandResult {
   try {
     const result = spawnSync("git", args, {
@@ -352,6 +368,66 @@ export function registerSettingsRoutes(app: Express, withProject: WithProject) {
   });
 
   // ─── Log di sistema ────────────────────────────────────────────────────────
+  app.get("/api/settings/ai-config", withProject((ctx, _req, res) => {
+    fs.mkdirSync(ctx.project.aiConfigDir, { recursive: true });
+
+    const names = fs
+      .readdirSync(ctx.project.aiConfigDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".md"))
+      .map((entry) => entry.name)
+      .sort((a, b) => a.localeCompare(b, "it"));
+
+    for (const fallbackName of AI_CONFIG_DEFAULT_FILES) {
+      if (names.includes(fallbackName)) continue;
+      fs.writeFileSync(
+        path.join(ctx.project.aiConfigDir, fallbackName),
+        AI_CONFIG_DEFAULT_CONTENT[fallbackName] || "",
+        "utf-8",
+      );
+      names.push(fallbackName);
+    }
+
+    const files = names
+      .sort((a, b) => a.localeCompare(b, "it"))
+      .map((name) => {
+        const absolutePath = path.join(ctx.project.aiConfigDir, name);
+        const stat = fs.statSync(absolutePath);
+        return {
+          name,
+          content: fs.readFileSync(absolutePath, "utf-8"),
+          updatedAt: stat.mtime.toISOString(),
+          size: stat.size,
+        };
+      });
+
+    res.json({
+      projectId: ctx.project.id,
+      directory: ctx.project.aiConfigDir,
+      files,
+    });
+  }));
+
+  app.put("/api/settings/ai-config/:name", withProject((ctx, req, res) => {
+    const fileName = safeAiConfigFileName(req.params.name);
+    if (!fileName) return res.status(400).json({ error: "Nome file non valido" });
+
+    const content = typeof req.body?.content === "string" ? req.body.content : "";
+    const absolutePath = path.join(ctx.project.aiConfigDir, fileName);
+
+    fs.mkdirSync(ctx.project.aiConfigDir, { recursive: true });
+    fs.writeFileSync(absolutePath, content, "utf-8");
+
+    const stat = fs.statSync(absolutePath);
+    res.json({
+      ok: true,
+      file: {
+        name: fileName,
+        updatedAt: stat.mtime.toISOString(),
+        size: stat.size,
+      },
+    });
+  }));
+
   app.get("/api/logs", (_req, res) => {
     const logPath = getLogPath();
     if (!fs.existsSync(logPath)) return res.json({ lines: [], path: logPath, totalLines: 0 });

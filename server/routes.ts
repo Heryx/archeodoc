@@ -2,6 +2,7 @@
 import type { Server } from "http";
 import multer from "multer";
 import fs from "fs";
+import path from "path";
 import type { IStorage } from "./storage";
 import {
   getStorageForProject,
@@ -232,6 +233,7 @@ function transferCantiere(
   const sasList = sourceStorage.getSasRecords(sourceCantiereId);
   const raList = sourceStorage.getRaRecords(sourceCantiereId);
   const allegati = sourceStorage.getAllegati(sourceCantiereId);
+  const mapSnapshots = sourceStorage.getMapSnapshots(sourceCantiereId);
   const qcLogs = sourceStorage.getQcLogs(sourceCantiereId);
 
   const giornataIdMap = new Map<number, number>();
@@ -351,6 +353,35 @@ function transferCantiere(
       });
     }
 
+    for (const snapshot of mapSnapshots) {
+      const snapshotBaseName = path.basename(snapshot.percorso || `snapshot_${snapshot.id}.png`);
+      const targetRelativeCandidate = path.posix.join("_map_snapshots", String(createdCantiere.id), snapshotBaseName);
+      const targetRelativePath = ensureUniqueRelativePath(targetProject.mediaDir, targetRelativeCandidate);
+
+      const copied = copyAttachmentIfExists(sourceProject, targetProject, snapshot.percorso, targetRelativePath);
+      if (copied) {
+        filesCopied += 1;
+      } else {
+        filesMissing += 1;
+      }
+
+      targetStorage.createMapSnapshot({
+        cantiereId: createdCantiere.id,
+        titolo: snapshot.titolo,
+        didascalia: snapshot.didascalia,
+        tags: snapshot.tags,
+        percorso: targetRelativePath,
+        mimeType: snapshot.mimeType,
+        width: snapshot.width,
+        height: snapshot.height,
+        bounds: snapshot.bounds,
+        center: snapshot.center,
+        zoom: snapshot.zoom,
+        bearing: snapshot.bearing,
+        pitch: snapshot.pitch,
+      });
+    }
+
     for (const log of qcLogs) {
       const mappedGiornataId = log.giornataId != null ? (giornataIdMap.get(log.giornataId) ?? null) : null;
       const mappedUsId = log.usId != null ? (usIdMap.get(log.usId) ?? null) : null;
@@ -368,6 +399,7 @@ function transferCantiere(
     let sourceDeleted = false;
     if (mode === "move") {
       allegati.forEach((allegato) => removeAttachmentIfExists(sourceProject, allegato.percorso));
+      mapSnapshots.forEach((snapshot) => removeAttachmentIfExists(sourceProject, snapshot.percorso));
 
       const deleted = sourceStorage.deleteCantiere(sourceCantiereId);
       if (!deleted) {
@@ -462,6 +494,125 @@ const geopackageUpload = multer({
 });
 
 export async function registerRoutes(_httpServer: Server, app: Express): Promise<void> {
+  app.get("/api/map-proxy/wms", async (req, res) => {
+    const base = typeof req.query.base === "string" ? req.query.base.trim() : "";
+    const layers = typeof req.query.layers === "string" ? req.query.layers.trim() : "";
+    const bbox = typeof req.query.bbox === "string" ? req.query.bbox.trim() : "";
+    const width = typeof req.query.width === "string" ? req.query.width.trim() : "256";
+    const height = typeof req.query.height === "string" ? req.query.height.trim() : "256";
+    const format = typeof req.query.format === "string" ? req.query.format.trim() : "image/png";
+    const version = typeof req.query.version === "string" ? req.query.version.trim() : "1.1.1";
+    const srs = typeof req.query.srs === "string" ? req.query.srs.trim() : "EPSG:3857";
+    const transparent = typeof req.query.transparent === "string" ? req.query.transparent.trim() : "true";
+    const styles = typeof req.query.styles === "string" ? req.query.styles : "";
+
+    if (!base || !layers || !bbox) {
+      return res.status(400).json({ error: "Parametri WMS mancanti (base, layers, bbox)" });
+    }
+
+    let baseUrl: URL;
+    try {
+      baseUrl = new URL(base);
+    } catch {
+      return res.status(400).json({ error: "Parametro base non valido" });
+    }
+    if (baseUrl.protocol !== "http:" && baseUrl.protocol !== "https:") {
+      return res.status(400).json({ error: "Protocollo WMS non supportato" });
+    }
+
+    const target = new URL(baseUrl.toString());
+    target.searchParams.set("service", "WMS");
+    target.searchParams.set("request", "GetMap");
+    target.searchParams.set("version", version);
+    target.searchParams.set("layers", layers);
+    target.searchParams.set("styles", styles);
+    target.searchParams.set("format", format);
+    target.searchParams.set("transparent", transparent);
+    target.searchParams.set("width", width);
+    target.searchParams.set("height", height);
+    target.searchParams.set("bbox", bbox);
+    if (version === "1.3.0") {
+      target.searchParams.set("crs", srs);
+    } else {
+      target.searchParams.set("srs", srs);
+    }
+
+    try {
+      const response = await fetch(target.toString());
+      if (!response.ok) {
+        return res.status(response.status).send("Tile WMS non disponibile");
+      }
+      const contentType = response.headers.get("content-type") || format || "image/png";
+      const cacheControl = response.headers.get("cache-control") || "public, max-age=3600";
+      const buffer = Buffer.from(await response.arrayBuffer());
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Cache-Control", cacheControl);
+      res.send(buffer);
+    } catch {
+      res.status(502).send("Errore recupero tile WMS");
+    }
+  });
+
+  app.get("/api/map-tiles/osm/:z/:x/:y.png", async (req, res) => {
+    const { z, x, y } = req.params;
+    const targetUrl = `https://tile.openstreetmap.org/${encodeURIComponent(z)}/${encodeURIComponent(x)}/${encodeURIComponent(y)}.png`;
+    try {
+      const response = await fetch(targetUrl);
+      if (!response.ok) {
+        return res.status(response.status).send("Tile non disponibile");
+      }
+      const contentType = response.headers.get("content-type") || "image/png";
+      const cacheControl = response.headers.get("cache-control") || "public, max-age=3600";
+      const buffer = Buffer.from(await response.arrayBuffer());
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Cache-Control", cacheControl);
+      res.send(buffer);
+    } catch {
+      res.status(502).send("Errore recupero tile OSM");
+    }
+  });
+
+  app.get("/api/map-tiles/opentopo/:z/:x/:y.png", async (req, res) => {
+    const { z, x, y } = req.params;
+    const subdomains = ["a", "b", "c"];
+    const ix = Math.abs(Number(x) + Number(y)) % subdomains.length;
+    const subdomain = subdomains[Number.isFinite(ix) ? ix : 0];
+    const targetUrl = `https://${subdomain}.tile.opentopomap.org/${encodeURIComponent(z)}/${encodeURIComponent(x)}/${encodeURIComponent(y)}.png`;
+    try {
+      const response = await fetch(targetUrl);
+      if (!response.ok) {
+        return res.status(response.status).send("Tile non disponibile");
+      }
+      const contentType = response.headers.get("content-type") || "image/png";
+      const cacheControl = response.headers.get("cache-control") || "public, max-age=3600";
+      const buffer = Buffer.from(await response.arrayBuffer());
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Cache-Control", cacheControl);
+      res.send(buffer);
+    } catch {
+      res.status(502).send("Errore recupero tile OpenTopo");
+    }
+  });
+
+  app.get("/api/map-tiles/esri/:z/:y/:x", async (req, res) => {
+    const { z, x, y } = req.params;
+    const targetUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${encodeURIComponent(z)}/${encodeURIComponent(y)}/${encodeURIComponent(x)}`;
+    try {
+      const response = await fetch(targetUrl);
+      if (!response.ok) {
+        return res.status(response.status).send("Tile non disponibile");
+      }
+      const contentType = response.headers.get("content-type") || "image/jpeg";
+      const cacheControl = response.headers.get("cache-control") || "public, max-age=3600";
+      const buffer = Buffer.from(await response.arrayBuffer());
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Cache-Control", cacheControl);
+      res.send(buffer);
+    } catch {
+      res.status(502).send("Errore recupero tile Esri");
+    }
+  });
+
   // Static media serve: /uploads/<relative-path>?projectId=<id>
   app.use("/uploads", (req, res, next) => {
     const project = resolveProject(typeof req.query.projectId === "string" ? req.query.projectId : undefined);

@@ -8,7 +8,7 @@ export function TerrainPanel() {
   if (!state.modules.terrain) return null;
 
   return (
-    <div className="px-3 py-2 border-b border-border bg-card/70 flex flex-wrap items-end gap-3">
+    <div className="px-3 py-2 border-t border-border bg-card/70 flex flex-wrap items-end gap-3">
       <div className="space-y-1">
         <p className="text-[11px] text-muted-foreground">DEM source</p>
         <div className="flex items-center gap-1">

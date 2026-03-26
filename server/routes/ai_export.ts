@@ -400,9 +400,18 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
 
     const usList = ctx.storage.getUSList(giornata.cantiereId, id);
     const qcLogs = ctx.storage.getQcLogs(giornata.cantiereId, id);
+    const snapshotSummary = ctx.storage
+      .getMapSnapshots(giornata.cantiereId)
+      .slice(0, 20)
+      .map((snapshot) => {
+        const tags = snapshot.tags ? ` [tag: ${snapshot.tags}]` : "";
+        const didascalia = snapshot.didascalia ? ` - ${snapshot.didascalia}` : "";
+        return `- ${snapshot.titolo}${didascalia}${tags}`;
+      })
+      .join("\n");
 
     try {
-      const result = await analizzaTestoGiornata(giornata, usList, qcLogs);
+      const result = await analizzaTestoGiornata(giornata, usList, qcLogs, snapshotSummary);
       ctx.storage.updateGiornata(id, { aiReportText: result.reportFormattato });
       res.json(result);
     } catch (error: any) {

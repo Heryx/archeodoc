@@ -118,3 +118,14 @@
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { @apply bg-border rounded-full; }
+
+/* WebMap: evita oscuramenti da filtri globali/estensioni dark-mode sul canvas WebGL */
+.maplibregl-map,
+.maplibregl-canvas-container,
+.maplibregl-canvas {
+  background: transparent !important;
+  opacity: 1 !important;
+  filter: none !important;
+  mix-blend-mode: normal !important;
+  forced-color-adjust: none;
+}

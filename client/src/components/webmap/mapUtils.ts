@@ -2,48 +2,143 @@ import maplibregl from "maplibre-gl";
 import type { BasemapId, DemSource, FeatureCollection, MapLayer } from "./types";
 
 export const BASEMAP_STYLES: Record<BasemapId, object> = {
+  none: {
+    version: 8,
+    sources: {},
+    layers: [
+      { id: "bg", type: "background", paint: { "background-color": "#1f2937" } },
+    ],
+  },
   osm: {
     version: 8,
     sources: {
       osm: {
         type: "raster",
-        tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+        tiles: ["/api/map-tiles/osm/{z}/{x}/{y}.png"],
         tileSize: 256,
         attribution: "(c) OpenStreetMap contributors",
         maxzoom: 19,
       },
     },
-    layers: [{ id: "osm", type: "raster", source: "osm" }],
+    layers: [
+      { id: "bg", type: "background", paint: { "background-color": "#1f2937" } },
+      { id: "osm", type: "raster", source: "osm" },
+    ],
   },
   satellite_esri: {
     version: 8,
     sources: {
       satellite: {
         type: "raster",
-        tiles: [
-          "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        ],
+        tiles: ["/api/map-tiles/esri/{z}/{y}/{x}"],
         tileSize: 256,
         attribution: "(c) Esri",
         maxzoom: 19,
       },
     },
-    layers: [{ id: "satellite", type: "raster", source: "satellite" }],
+    layers: [
+      { id: "bg", type: "background", paint: { "background-color": "#111827" } },
+      { id: "satellite", type: "raster", source: "satellite" },
+    ],
   },
   topo: {
     version: 8,
     sources: {
       topo: {
         type: "raster",
-        tiles: ["https://tile.opentopomap.org/{z}/{x}/{y}.png"],
+        tiles: ["/api/map-tiles/opentopo/{z}/{x}/{y}.png"],
         tileSize: 256,
         attribution: "(c) OpenTopoMap contributors",
         maxzoom: 17,
       },
     },
-    layers: [{ id: "topo", type: "raster", source: "topo" }],
+    layers: [
+      { id: "bg", type: "background", paint: { "background-color": "#1f2937" } },
+      { id: "topo", type: "raster", source: "topo" },
+    ],
   },
 };
+
+const BASEMAP_META: Record<
+  BasemapId,
+  {
+    backgroundLayerId: string;
+    backgroundColor: string;
+    sourceId?: string;
+    rasterLayerId?: string;
+    tiles?: string[];
+    tileSize?: number;
+    attribution?: string;
+    maxzoom?: number;
+  }
+> = {
+  none: {
+    backgroundLayerId: "basemap-bg-none",
+    backgroundColor: "#1f2937",
+  },
+  osm: {
+    backgroundLayerId: "basemap-bg-osm",
+    backgroundColor: "#1f2937",
+    sourceId: "basemap-osm",
+    rasterLayerId: "basemap-raster-osm",
+    tiles: ["/api/map-tiles/osm/{z}/{x}/{y}.png"],
+    tileSize: 256,
+    attribution: "(c) OpenStreetMap contributors",
+    maxzoom: 19,
+  },
+  satellite_esri: {
+    backgroundLayerId: "basemap-bg-esri",
+    backgroundColor: "#111827",
+    sourceId: "basemap-esri",
+    rasterLayerId: "basemap-raster-esri",
+    tiles: ["/api/map-tiles/esri/{z}/{y}/{x}"],
+    tileSize: 256,
+    attribution: "(c) Esri",
+    maxzoom: 19,
+  },
+  topo: {
+    backgroundLayerId: "basemap-bg-topo",
+    backgroundColor: "#1f2937",
+    sourceId: "basemap-topo",
+    rasterLayerId: "basemap-raster-topo",
+    tiles: ["/api/map-tiles/opentopo/{z}/{x}/{y}.png"],
+    tileSize: 256,
+    attribution: "(c) OpenTopoMap contributors",
+    maxzoom: 17,
+  },
+};
+
+export function ensureBasemapLayer(map: maplibregl.Map, basemap: BasemapId) {
+  const meta = BASEMAP_META[basemap];
+  if (!meta) return;
+
+  if (meta.sourceId && meta.tiles && !map.getSource(meta.sourceId)) {
+    map.addSource(meta.sourceId, {
+      type: "raster",
+      tiles: meta.tiles,
+      tileSize: meta.tileSize || 256,
+      attribution: meta.attribution,
+      maxzoom: meta.maxzoom,
+    } as any);
+  }
+
+  if (!map.getLayer(meta.backgroundLayerId)) {
+    map.addLayer({
+      id: meta.backgroundLayerId,
+      type: "background",
+      paint: { "background-color": meta.backgroundColor },
+    } as any);
+  }
+
+  if (meta.rasterLayerId && meta.sourceId && !map.getLayer(meta.rasterLayerId)) {
+    map.addLayer({
+      id: meta.rasterLayerId,
+      type: "raster",
+      source: meta.sourceId,
+      paint: { "raster-opacity": 1 },
+    } as any);
+  }
+}
 
 const maptilerKey = (import.meta as any)?.env?.VITE_MAPTILER_KEY;
 
@@ -89,15 +184,44 @@ export function pointLayerId(layerId: string) {
   return `point-${layerId}`;
 }
 
+export function rasterLayerId(layerId: string) {
+  return `raster-${layerId}`;
+}
+
 export function interactiveLayerIds(layer: MapLayer): string[] {
+  if (layer.sourceKind === "raster") return [];
   return [fillLayerId(layer.id), lineLayerId(layer.id), pointLayerId(layer.id)];
 }
 
 export function addLayerToMap(map: maplibregl.Map, layer: MapLayer) {
   const sid = sourceId(layer.id);
+  const rid = rasterLayerId(layer.id);
   const fillId = fillLayerId(layer.id);
   const lineId = lineLayerId(layer.id);
   const pointId = pointLayerId(layer.id);
+
+  if (layer.sourceKind === "raster" && layer.rasterConfig) {
+    if (!map.getSource(sid)) {
+      map.addSource(sid, {
+        type: "raster",
+        tiles: layer.rasterConfig.tiles,
+        tileSize: layer.rasterConfig.tileSize || 256,
+        attribution: layer.rasterConfig.attribution,
+      } as any);
+    }
+
+    if (!map.getLayer(rid)) {
+      map.addLayer({
+        id: rid,
+        type: "raster",
+        source: sid,
+        paint: {
+          "raster-opacity": layer.opacity,
+        },
+      });
+    }
+    return;
+  }
 
   if (!map.getSource(sid)) {
     map.addSource(sid, { type: "geojson", data: layer.featureCollection as any });
@@ -163,7 +287,7 @@ export function addLayerToMap(map: maplibregl.Map, layer: MapLayer) {
 }
 
 export function removeLayerFromMap(map: maplibregl.Map, layerId: string) {
-  for (const lid of [fillLayerId(layerId), lineLayerId(layerId), pointLayerId(layerId)]) {
+  for (const lid of [rasterLayerId(layerId), fillLayerId(layerId), lineLayerId(layerId), pointLayerId(layerId)]) {
     if (map.getLayer(lid)) map.removeLayer(lid);
   }
   const sid = sourceId(layerId);
@@ -172,6 +296,13 @@ export function removeLayerFromMap(map: maplibregl.Map, layerId: string) {
 
 export function syncLayerVisibility(map: maplibregl.Map, layer: MapLayer) {
   const vis = layer.visible ? "visible" : "none";
+  if (layer.sourceKind === "raster") {
+    const rid = rasterLayerId(layer.id);
+    if (map.getLayer(rid)) {
+      map.setLayoutProperty(rid, "visibility", vis);
+    }
+    return;
+  }
   for (const lid of interactiveLayerIds(layer)) {
     if (map.getLayer(lid)) {
       map.setLayoutProperty(lid, "visibility", vis);
@@ -180,6 +311,14 @@ export function syncLayerVisibility(map: maplibregl.Map, layer: MapLayer) {
 }
 
 export function syncLayerStyle(map: maplibregl.Map, layer: MapLayer) {
+  if (layer.sourceKind === "raster") {
+    const rid = rasterLayerId(layer.id);
+    if (map.getLayer(rid)) {
+      map.setPaintProperty(rid, "raster-opacity", layer.opacity);
+    }
+    return;
+  }
+
   const fillId = fillLayerId(layer.id);
   const lineId = lineLayerId(layer.id);
   const pointId = pointLayerId(layer.id);
@@ -205,7 +344,10 @@ export function syncLayerOrder(map: maplibregl.Map, layers: MapLayer[]) {
   let beforeId: string | undefined;
   for (let i = layers.length - 1; i >= 0; i--) {
     const layer = layers[i];
-    for (const lid of [pointLayerId(layer.id), lineLayerId(layer.id), fillLayerId(layer.id)]) {
+    const orderIds = layer.sourceKind === "raster"
+      ? [rasterLayerId(layer.id)]
+      : [pointLayerId(layer.id), lineLayerId(layer.id), fillLayerId(layer.id)];
+    for (const lid of orderIds) {
       if (!map.getLayer(lid)) continue;
       if (beforeId && map.getLayer(beforeId)) {
         map.moveLayer(lid, beforeId);
@@ -229,6 +371,7 @@ export function syncActiveLayerHighlight(map: maplibregl.Map, layers: MapLayer[]
 
   const activeLayer = layers.find((layer) => layer.id === activeLayerId);
   if (!activeLayer || !activeLayer.visible) return;
+  if (activeLayer.sourceKind === "raster") return;
 
   const sid = sourceId(activeLayer.id);
   if (!map.getSource(sid)) return;

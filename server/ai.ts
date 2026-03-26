@@ -290,6 +290,7 @@ export async function analizzaTestoGiornata(
   giornata: Giornata,
   usList: UnitaStratigrafica[],
   qcIssues: { livello: string; messaggio: string }[],
+  mapSnapshotsSummary?: string,
 ): Promise<{ reportFormattato: string; campiMancanti: string[]; note: string }> {
   let operatori = "NON INSERITI";
   try {
@@ -312,6 +313,7 @@ NOTE OPERATIVE: ${giornata.note || "NON INSERITE"}
   const problemiQC = qcIssues.length > 0
     ? qcIssues.map(i => `[${i.livello.toUpperCase()}] ${i.messaggio}`).join("\n")
     : "Nessuna criticità rilevata";
+  const snapshotsText = mapSnapshotsSummary?.trim() || "Nessuno snapshot cartografico disponibile";
 
   let systemPrompt = "Sei un assistente specializzato in archeologia professionale.";
   let giornaleFormat = "";
@@ -333,6 +335,9 @@ ${usRiassunto}
 CRITICITÀ QC RILEVATE:
 ${problemiQC}
 
+SNAPSHOT CARTOGRAFICI DISPONIBILI:
+${snapshotsText}
+
 CAMPI ATTESI PER UNA GIORNATA DI SCAVO:
 ${CAMPI_OBBLIGATORI_GIORNATA.map((c, i) => `${i + 1}. ${c}`).join("\n")}
 
@@ -344,6 +349,7 @@ COMPITO:
    - INTESTAZIONE (data, cantiere, meteo, operatori)
    - ATTIVITÀ SVOLTE (descrivi le operazioni in modo fluido e tecnico, basandoti sulle note e sulle US documentate)
    - DOCUMENTAZIONE RACCOLTA (US documentate, materiali)
+   - SINTESI CARTOGRAFICA (integra gli snapshot WebMap disponibili, se presenti)
    - CRITICITÀ E PROBLEMATICHE (basato sui problemi QC)
    - PROGRAMMA LAVORI SUCCESSIVI (suggerisci in base allo stato corrente)
 

@@ -18,6 +18,9 @@ export function AttributeTable() {
   if (!activeLayer) {
     return <div className="border-t border-border px-3 py-2 text-xs text-muted-foreground">Seleziona un layer attivo.</div>;
   }
+  if (activeLayer.sourceKind === "raster") {
+    return <div className="border-t border-border px-3 py-2 text-xs text-muted-foreground">Layer raster: tabella attributi non disponibile.</div>;
+  }
 
   const total = activeLayer.featureCollection.features.length;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));

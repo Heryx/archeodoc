@@ -8,6 +8,7 @@ import {
   sasRecords,
   raRecords,
   allegati,
+  mapSnapshots,
   qcLogs,
   type Cantiere,
   type InsertCantiere,
@@ -21,6 +22,8 @@ import {
   type InsertRa,
   type Allegato,
   type InsertAllegato,
+  type MapSnapshot,
+  type InsertMapSnapshot,
   type QcLog,
   type InsertQcLog,
 } from "@shared/schema";
@@ -263,6 +266,26 @@ function migrate(sqlite: Database.Database) {
       FOREIGN KEY (us_id) REFERENCES unita_stratigrafiche(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS map_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cantiere_id INTEGER NOT NULL,
+      titolo TEXT NOT NULL,
+      didascalia TEXT,
+      tags TEXT,
+      percorso TEXT NOT NULL,
+      mime_type TEXT,
+      width INTEGER,
+      height INTEGER,
+      bounds TEXT,
+      center TEXT,
+      zoom REAL,
+      bearing REAL,
+      pitch REAL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (cantiere_id) REFERENCES cantieri(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS cantieri_geo (
       id INTEGER PRIMARY KEY,
       cantiere_id INTEGER NOT NULL UNIQUE,
@@ -347,6 +370,17 @@ function migrate(sqlite: Database.Database) {
   ensureColumn(sqlite, "unita_stratigrafiche", "responsabile_sabap", "responsabile_sabap TEXT");
   ensureColumn(sqlite, "unita_stratigrafiche", "responsabile_archeosistemi", "responsabile_archeosistemi TEXT");
   ensureColumn(sqlite, "unita_stratigrafiche", "quota_piano_campagna", "quota_piano_campagna REAL");
+  ensureColumn(sqlite, "map_snapshots", "didascalia", "didascalia TEXT");
+  ensureColumn(sqlite, "map_snapshots", "tags", "tags TEXT");
+  ensureColumn(sqlite, "map_snapshots", "mime_type", "mime_type TEXT");
+  ensureColumn(sqlite, "map_snapshots", "width", "width INTEGER");
+  ensureColumn(sqlite, "map_snapshots", "height", "height INTEGER");
+  ensureColumn(sqlite, "map_snapshots", "bounds", "bounds TEXT");
+  ensureColumn(sqlite, "map_snapshots", "center", "center TEXT");
+  ensureColumn(sqlite, "map_snapshots", "zoom", "zoom REAL");
+  ensureColumn(sqlite, "map_snapshots", "bearing", "bearing REAL");
+  ensureColumn(sqlite, "map_snapshots", "pitch", "pitch REAL");
+  ensureColumn(sqlite, "map_snapshots", "updated_at", "updated_at TEXT");
   ensureColumn(sqlite, "sas_records", "data", "data TEXT");
   ensureColumn(sqlite, "ra_records", "data", "data TEXT");
   ensureColumn(sqlite, "qc_logs", "dismissed", "dismissed INTEGER DEFAULT 0");
@@ -393,6 +427,13 @@ export interface IStorage {
   getAllegato(id: number): Allegato | undefined;
   createAllegato(data: InsertAllegato): Allegato;
   updateAllegato(id: number, data: Partial<InsertAllegato>): Allegato | undefined;
+
+  // Map snapshots
+  getMapSnapshots(cantiereId: number): MapSnapshot[];
+  getMapSnapshot(id: number): MapSnapshot | undefined;
+  createMapSnapshot(data: InsertMapSnapshot): MapSnapshot;
+  updateMapSnapshot(id: number, data: Partial<InsertMapSnapshot>): MapSnapshot | undefined;
+  deleteMapSnapshot(id: number): boolean;
 
   // QC logs
   getQcLogs(cantiereId: number, giornataId?: number): QcLog[];
@@ -442,6 +483,7 @@ class SQLiteStorage implements IStorage {
 
     this.db.transaction((tx) => {
       tx.delete(qcLogs).where(eq(qcLogs.cantiereId, id)).run();
+      tx.delete(mapSnapshots).where(eq(mapSnapshots.cantiereId, id)).run();
       tx.delete(allegati).where(eq(allegati.cantiereId, id)).run();
       tx.delete(raRecords).where(eq(raRecords.cantiereId, id)).run();
       tx.delete(sasRecords).where(eq(sasRecords.cantiereId, id)).run();
@@ -605,6 +647,44 @@ class SQLiteStorage implements IStorage {
 
   updateAllegato(id: number, data: Partial<InsertAllegato>) {
     return this.db.update(allegati).set(data).where(eq(allegati.id, id)).returning().get();
+  }
+
+  // Map snapshots
+  getMapSnapshots(cantiereId: number) {
+    return this.db
+      .select()
+      .from(mapSnapshots)
+      .where(eq(mapSnapshots.cantiereId, cantiereId))
+      .orderBy(desc(mapSnapshots.createdAt))
+      .all();
+  }
+
+  getMapSnapshot(id: number) {
+    return this.db.select().from(mapSnapshots).where(eq(mapSnapshots.id, id)).get();
+  }
+
+  createMapSnapshot(data: InsertMapSnapshot) {
+    return this.db
+      .insert(mapSnapshots)
+      .values({ ...data, createdAt: now(), updatedAt: now() })
+      .returning()
+      .get();
+  }
+
+  updateMapSnapshot(id: number, data: Partial<InsertMapSnapshot>) {
+    return this.db
+      .update(mapSnapshots)
+      .set({ ...data, updatedAt: now() })
+      .where(eq(mapSnapshots.id, id))
+      .returning()
+      .get();
+  }
+
+  deleteMapSnapshot(id: number) {
+    const existing = this.getMapSnapshot(id);
+    if (!existing) return false;
+    this.db.delete(mapSnapshots).where(eq(mapSnapshots.id, id)).run();
+    return true;
   }
 
   // QC logs

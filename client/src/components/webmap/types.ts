@@ -7,6 +7,15 @@ export type LayerStyle = {
   strokeWidth: number;
 };
 
+export type LayerSourceKind = "vector" | "raster";
+
+export type RasterLayerConfig = {
+  protocol: "xyz" | "wms" | "wmts";
+  tiles: string[];
+  tileSize?: number;
+  attribution?: string;
+};
+
 export type FeatureGeometry = {
   type: string;
   coordinates: unknown;
@@ -50,15 +59,18 @@ export type MapLayer = {
   id: string;
   sourceFileName: string;
   tableName: string;
+  sourceSrid?: number | null;
   rowCount: number;
   geometryKind: GeometryKind;
+  sourceKind: LayerSourceKind;
   visible: boolean;
   opacity: number;
   style: LayerStyle;
   featureCollection: FeatureCollection;
+  rasterConfig?: RasterLayerConfig;
 };
 
-export type BasemapId = "osm" | "satellite_esri" | "topo";
+export type BasemapId = "none" | "osm" | "satellite_esri" | "topo";
 export type DemSource = "jaxa" | "copernicus";
 export type StyleRendererMode = "simple" | "graduated";
 
@@ -104,3 +116,23 @@ export type WebMapAction =
   | { type: "SET_DEM_SOURCE"; source: DemSource }
   | { type: "SET_TERRAIN_EXAGGERATION"; value: number }
   | { type: "SET_STYLE_RENDERER"; config: StyleRendererConfig | null };
+
+export type MapSnapshotRecord = {
+  id: number;
+  cantiereId: number;
+  titolo: string;
+  didascalia: string | null;
+  tags: string | null;
+  percorso: string;
+  mimeType: string | null;
+  width: number | null;
+  height: number | null;
+  bounds: string | null;
+  center: string | null;
+  zoom: number | null;
+  bearing: number | null;
+  pitch: number | null;
+  createdAt: string;
+  updatedAt: string;
+  url: string;
+};

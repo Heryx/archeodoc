@@ -216,6 +216,34 @@ export const insertQcLogSchema = createInsertSchema(qcLogs).omit({ id: true, cre
 export type InsertQcLog = z.infer<typeof insertQcLogSchema>;
 export type QcLog = typeof qcLogs.$inferSelect;
 
+// Snapshot WebMap / planimetrie salvate
+export const mapSnapshots = sqliteTable("map_snapshots", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  cantiereId: integer("cantiere_id").notNull(),
+  titolo: text("titolo").notNull(),
+  didascalia: text("didascalia"),
+  tags: text("tags"),
+  percorso: text("percorso").notNull(),
+  mimeType: text("mime_type"),
+  width: integer("width"),
+  height: integer("height"),
+  bounds: text("bounds"),
+  center: text("center"),
+  zoom: real("zoom"),
+  bearing: real("bearing"),
+  pitch: real("pitch"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const insertMapSnapshotSchema = createInsertSchema(mapSnapshots).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type InsertMapSnapshot = z.infer<typeof insertMapSnapshotSchema>;
+export type MapSnapshot = typeof mapSnapshots.$inferSelect;
+
 // Impostazioni AI (prompt personalizzabili)
 export const aiSettings = sqliteTable("ai_settings", {
   id: integer("id").primaryKey({ autoIncrement: true }),

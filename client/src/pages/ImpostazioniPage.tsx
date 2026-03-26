@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { PromptEditor } from "@/components/PromptEditor";
 import { AIKeysCard } from "@/components/settings/AIKeysCard";
 import { AIStatusCard } from "@/components/settings/AIStatusCard";
+import { AiConfigCard, type AiConfigFile } from "@/components/settings/AiConfigCard";
 import { GoogleDocsCard } from "@/components/settings/GoogleDocsCard";
 import { LogsCard } from "@/components/settings/LogsCard";
 import type { AiPromptSetting, AiSettings, GoogleStatus } from "@/components/settings/types";
@@ -12,6 +13,12 @@ import { apiRequest } from "@/lib/queryClient";
 
 type ImpostazioniPageProps = {
   embedded?: boolean;
+};
+
+type AiConfigResponse = {
+  projectId: string;
+  directory: string;
+  files: AiConfigFile[];
 };
 
 export function ImpostazioniPage({ embedded = false }: ImpostazioniPageProps = {}) {
@@ -35,6 +42,10 @@ export function ImpostazioniPage({ embedded = false }: ImpostazioniPageProps = {
 
   const [aiPrompts, setAiPrompts] = useState<AiPromptSetting[]>([]);
   const [loadingPrompts, setLoadingPrompts] = useState(true);
+  const [aiConfigFiles, setAiConfigFiles] = useState<AiConfigFile[]>([]);
+  const [aiConfigLoading, setAiConfigLoading] = useState(true);
+  const [selectedAiConfigFile, setSelectedAiConfigFile] = useState("");
+  const [selectedAiConfigContent, setSelectedAiConfigContent] = useState("");
 
   const [logLines, setLogLines] = useState<string[]>([]);
   const [logPath, setLogPath] = useState("");
@@ -58,6 +69,33 @@ export function ImpostazioniPage({ embedded = false }: ImpostazioniPageProps = {
       .catch(() => undefined)
       .finally(() => setLoadingPrompts(false));
   }, []);
+
+  const fetchAiConfig = useCallback(() => {
+    setAiConfigLoading(true);
+    apiRequest("GET", "/api/settings/ai-config")
+      .then((response) => response.json() as Promise<AiConfigResponse>)
+      .then((data) => {
+        const files = data.files || [];
+        setAiConfigFiles(files);
+
+        if (files.length === 0) {
+          setSelectedAiConfigFile("");
+          setSelectedAiConfigContent("");
+          return;
+        }
+
+        const existing = files.find((file) => file.name === selectedAiConfigFile);
+        const selected = existing || files[0];
+        setSelectedAiConfigFile(selected.name);
+        setSelectedAiConfigContent(selected.content || "");
+      })
+      .catch(() => undefined)
+      .finally(() => setAiConfigLoading(false));
+  }, [selectedAiConfigFile]);
+
+  useEffect(() => {
+    fetchAiConfig();
+  }, [fetchAiConfig]);
 
   const fetchGoogleStatus = useCallback(() => {
     setGoogleLoading(true);
@@ -167,6 +205,28 @@ export function ImpostazioniPage({ embedded = false }: ImpostazioniPageProps = {
     },
   });
 
+  const saveAiConfigMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedAiConfigFile) {
+        throw new Error("Seleziona un file ai_config");
+      }
+      await apiRequest("PUT", `/api/settings/ai-config/${encodeURIComponent(selectedAiConfigFile)}`, {
+        content: selectedAiConfigContent,
+      });
+    },
+    onSuccess: () => {
+      toast({ title: "ai_config salvato" });
+      fetchAiConfig();
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Errore salvataggio ai_config",
+        description: error?.message || "Operazione non riuscita",
+        variant: "destructive",
+      });
+    },
+  });
+
   const aiKeysProps = useMemo(
     () => ({
       settings,
@@ -202,6 +262,12 @@ export function ImpostazioniPage({ embedded = false }: ImpostazioniPageProps = {
       clearKeyMutation,
     ],
   );
+
+  const handleSelectAiConfigFile = useCallback((fileName: string) => {
+    setSelectedAiConfigFile(fileName);
+    const selected = aiConfigFiles.find((file) => file.name === fileName);
+    setSelectedAiConfigContent(selected?.content || "");
+  }, [aiConfigFiles]);
 
   if (isLoading) {
     return (
@@ -248,6 +314,18 @@ export function ImpostazioniPage({ embedded = false }: ImpostazioniPageProps = {
           )}
         </CardContent>
       </Card>
+
+      <AiConfigCard
+        files={aiConfigFiles}
+        selectedFile={selectedAiConfigFile}
+        value={selectedAiConfigContent}
+        onSelectFile={handleSelectAiConfigFile}
+        onChangeValue={setSelectedAiConfigContent}
+        onReload={fetchAiConfig}
+        onSave={() => saveAiConfigMutation.mutate()}
+        loading={aiConfigLoading}
+        saving={saveAiConfigMutation.isPending}
+      />
 
       <GoogleDocsCard
         googleLoading={googleLoading}
