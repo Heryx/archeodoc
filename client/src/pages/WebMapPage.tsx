@@ -415,7 +415,7 @@ function WebMapContent() {
   };
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full min-h-0 flex flex-col">
       <div className="px-6 py-3 border-b border-border flex items-center gap-2">
         <MapIcon size={18} className="text-primary" />
         <h1 className="text-lg font-bold">WebMap GIS</h1>

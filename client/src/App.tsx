@@ -119,7 +119,7 @@ function AppShell() {
   return (
     <div className="flex h-screen bg-background overflow-hidden">
       <Sidebar />
-      <main className="flex-1 overflow-y-auto">
+      <main className="flex-1 min-h-0 overflow-y-auto">
         <Suspense fallback={<div className="p-8 text-sm text-muted-foreground">Caricamento pagina...</div>}>
           <Switch>
             <Route path="/" component={CantieriPage} />
