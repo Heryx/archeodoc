@@ -15,7 +15,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useWebMap } from "./store";
-import type { ActiveModules, BasemapId } from "./types";
+import type { ActiveModuleKey, BasemapId } from "./types";
 
 const BASEMAPS: Array<{ id: BasemapId; label: string }> = [
   { id: "none", label: "Nessuna" },
@@ -24,10 +24,8 @@ const BASEMAPS: Array<{ id: BasemapId; label: string }> = [
   { id: "topo", label: "Topo" },
 ];
 
-type ModuleKey = keyof Omit<ActiveModules, "demSource" | "terrainExaggeration">;
-
 const TOOLS: Array<{
-  key: ModuleKey;
+  key: ActiveModuleKey;
   label: string;
   icon: React.ReactNode;
   dividerBefore?: boolean;
@@ -48,7 +46,7 @@ export function ToolbarStrip({ children }: { children?: React.ReactNode }) {
   const { state, dispatch } = useWebMap();
   const { toast } = useToast();
 
-  const toggleModule = (module: ModuleKey) => {
+  const toggleModule = (module: ActiveModuleKey) => {
     dispatch({ type: "TOGGLE_MODULE", module });
     if (module === "measure" || module === "export") {
       toast({

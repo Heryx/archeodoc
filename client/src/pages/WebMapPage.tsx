@@ -37,7 +37,6 @@ import { useFeaturePopup } from "@/components/webmap/modules/FeaturePopup";
 import { LayerManager } from "@/components/webmap/modules/LayerManager";
 import { MapExporter } from "@/components/webmap/modules/MapExporter";
 import { PrintMap } from "@/components/webmap/modules/PrintMap";
-import { LayerPanel } from "@/components/webmap/LayerPanel";
 import { useWebMapLayers } from "@/components/webmap/hooks/useWebMapLayers";
 import { TerrainPanel } from "@/components/webmap/modules/TerrainModule";
 import { StyleRendererPanel } from "@/components/webmap/modules/StyleRenderer";
@@ -411,7 +410,7 @@ function WebMapContent() {
   const [scaleLabel, setScaleLabel] = useState<string>("1:?");
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelTab, setPanelTab] = useState<WebMapPanelTab>("geopackage");
-  const { layers: persistedLayers } = useWebMapLayers(mapRef, Number(cid), Boolean(cid));
+  const { layers: persistedLayers } = useWebMapLayers(mapRef, Number(cid), dispatch, Boolean(cid));
 
   useEffect(() => {
     stateRef.current = state;
@@ -1033,10 +1032,6 @@ function WebMapContent() {
       </ToolbarStrip>
 
       <div className="flex-1 overflow-hidden flex">
-        <aside className="w-72 border-r border-border bg-card/70">
-          <LayerPanel />
-        </aside>
-
         <section className="flex-1 min-w-0 flex flex-col">
           <div className="flex-1 relative min-h-[360px] overflow-hidden [&_.maplibregl-control-container]:hidden">
             <div ref={mapContainerRef} className="h-full w-full" />

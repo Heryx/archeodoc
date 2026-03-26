@@ -1,8 +1,14 @@
-import { useEffect, type MutableRefObject } from "react";
+import { useEffect, useRef, type Dispatch, type MutableRefObject } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type maplibregl from "maplibre-gl";
 import { getProjectHeader } from "@/lib/project";
-import type { WebMapLayer } from "@/components/webmap/types";
+import type {
+  FeatureCollection,
+  GeometryKind,
+  MapLayer,
+  WebMapAction,
+  WebMapLayer,
+} from "@/components/webmap/types";
 
 const SOURCE_PREFIX = "layer-";
 
@@ -39,6 +45,50 @@ function parseStyle(styleJson: string | null) {
   }
 }
 
+function toGeometryKind(geometryType: string | null): GeometryKind {
+  const normalized = String(geometryType || "").toLowerCase();
+  if (normalized.includes("polygon")) return "Polygon";
+  if (normalized.includes("line")) return "LineString";
+  if (normalized.includes("point")) return "Point";
+  if (normalized === "mixed") return "Mixed";
+  return "Unknown";
+}
+
+function withFeatureIds(collection: FeatureCollection): FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: (collection.features || []).map((feature, index) => ({
+      ...feature,
+      properties: {
+        ...(feature.properties || {}),
+        _fid: index,
+      },
+    })),
+  };
+}
+
+function mapDbLayerToStoreLayer(dbLayer: WebMapLayer, featureCollection?: FeatureCollection): MapLayer {
+  const style = parseStyle(dbLayer.styleJson);
+  return {
+    id: String(dbLayer.id),
+    sourceFileName: dbLayer.sourceFileName,
+    tableName: dbLayer.tableName,
+    sourceSrid: dbLayer.sridOriginal,
+    rowCount: dbLayer.featureCount,
+    geometryKind: toGeometryKind(dbLayer.geometryType),
+    sourceKind: "vector",
+    visible: dbLayer.visible,
+    opacity: style.fillOpacity,
+    style: {
+      fillColor: style.fillColor,
+      strokeColor: style.strokeColor,
+      fillOpacity: style.fillOpacity,
+      strokeWidth: style.weight,
+    },
+    featureCollection: featureCollection ?? { type: "FeatureCollection", features: [] },
+  };
+}
+
 function removePersistentLayers(map: maplibregl.Map) {
   const style = map.getStyle();
   if (!style) return;
@@ -70,6 +120,7 @@ async function renderPersistentLayers(
   layers: WebMapLayer[],
   runId: number,
   runRef: MutableRefObject<number>,
+  dispatch: Dispatch<WebMapAction>,
 ) {
   const ordered = [...layers]
     .filter((layer) => layer.visible)
@@ -91,6 +142,14 @@ async function renderPersistentLayers(
 
     const sid = sourceId(layer.id);
     map.addSource(sid, { type: "geojson", data: fc });
+
+    const normalizedCollection = withFeatureIds(
+      (fc && fc.type === "FeatureCollection" ? fc : { type: "FeatureCollection", features: [] }) as FeatureCollection,
+    );
+    dispatch({
+      type: "SYNC_LAYER",
+      layer: mapDbLayerToStoreLayer(layer, normalizedCollection),
+    });
 
     const style = parseStyle(layer.styleJson);
     const gtype = (layer.geometryType || "").toLowerCase();
@@ -148,8 +207,11 @@ async function renderPersistentLayers(
 export function useWebMapLayers(
   mapRef: MutableRefObject<maplibregl.Map | null>,
   cantiereId: number,
+  dispatch: Dispatch<WebMapAction>,
   enabled = true,
 ) {
+  const prevLayerIds = useRef<Set<string>>(new Set());
+
   const { data: layers = [] } = useQuery<WebMapLayer[]>({
     queryKey: ["webmap-layers", cantiereId],
     queryFn: async () => {
@@ -164,13 +226,32 @@ export function useWebMapLayers(
   });
 
   useEffect(() => {
+    const currentIds = new Set(layers.map((layer) => String(layer.id)));
+
+    prevLayerIds.current.forEach((oldId) => {
+      if (!currentIds.has(oldId)) {
+        dispatch({ type: "REMOVE_LAYER", id: oldId });
+      }
+    });
+
+    for (const dbLayer of layers) {
+      dispatch({
+        type: "SYNC_LAYER",
+        layer: mapDbLayerToStoreLayer(dbLayer),
+      });
+    }
+
+    prevLayerIds.current = currentIds;
+  }, [layers, dispatch]);
+
+  useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     const runRef = { current: Date.now() };
 
     const apply = () => {
       runRef.current += 1;
-      void renderPersistentLayers(map, cantiereId, layers, runRef.current, runRef);
+      void renderPersistentLayers(map, cantiereId, layers, runRef.current, runRef, dispatch);
     };
 
     if (map.isStyleLoaded()) apply();
@@ -183,7 +264,7 @@ export function useWebMapLayers(
         removePersistentLayers(map);
       }
     };
-  }, [mapRef, cantiereId, layers]);
+  }, [mapRef, cantiereId, layers, dispatch]);
 
   return { layers };
 }

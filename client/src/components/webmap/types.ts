@@ -97,6 +97,8 @@ export type ActiveModules = {
   layerManager: boolean;
 };
 
+export type ActiveModuleKey = keyof Omit<ActiveModules, "demSource" | "terrainExaggeration">;
+
 export type WebMapState = {
   layers: MapLayer[];
   activeLayerId: string | null;
@@ -108,6 +110,7 @@ export type WebMapState = {
 
 export type WebMapAction =
   | { type: "ADD_LAYER"; layer: MapLayer }
+  | { type: "SYNC_LAYER"; layer: MapLayer }
   | { type: "REMOVE_LAYER"; id: string }
   | { type: "SET_ACTIVE"; id: string | null }
   | { type: "SET_SELECTED_FEATURE"; id: number | null }
@@ -116,7 +119,7 @@ export type WebMapAction =
   | { type: "SET_STYLE"; id: string; style: Partial<LayerStyle> }
   | { type: "MOVE_LAYER"; fromIndex: number; toIndex: number }
   | { type: "SET_BASEMAP"; basemap: BasemapId }
-  | { type: "TOGGLE_MODULE"; module: keyof Omit<ActiveModules, "demSource" | "terrainExaggeration"> }
+  | { type: "TOGGLE_MODULE"; module: ActiveModuleKey }
   | { type: "SET_DEM_SOURCE"; source: DemSource }
   | { type: "SET_TERRAIN_EXAGGERATION"; value: number }
   | { type: "SET_STYLE_RENDERER"; config: StyleRendererConfig | null };

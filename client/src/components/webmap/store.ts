@@ -63,6 +63,37 @@ function reducer(state: WebMapState, action: WebMapAction): WebMapState {
         layers: [...state.layers, action.layer],
         activeLayerId: action.layer.id,
       };
+    case "SYNC_LAYER": {
+      const existing = state.layers.find((layer) => layer.id === action.layer.id);
+      if (existing) {
+        const hasIncomingFeatures =
+          Array.isArray(action.layer.featureCollection?.features) &&
+          action.layer.featureCollection.features.length > 0;
+        return {
+          ...state,
+          layers: state.layers.map((layer) =>
+            layer.id === action.layer.id
+              ? {
+                  ...layer,
+                  sourceFileName: action.layer.sourceFileName,
+                  tableName: action.layer.tableName,
+                  sourceSrid: action.layer.sourceSrid,
+                  geometryKind: action.layer.geometryKind,
+                  sourceKind: action.layer.sourceKind,
+                  visible: action.layer.visible,
+                  opacity: action.layer.opacity,
+                  style: action.layer.style,
+                  rowCount: action.layer.rowCount,
+                  featureCollection: hasIncomingFeatures
+                    ? action.layer.featureCollection
+                    : layer.featureCollection,
+                }
+              : layer,
+          ),
+        };
+      }
+      return { ...state, layers: [...state.layers, action.layer] };
+    }
     case "REMOVE_LAYER":
       return {
         ...state,
