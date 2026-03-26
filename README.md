@@ -47,20 +47,54 @@ ArcheoDoc e una web app TypeScript (Node.js + Express + SQLite + React) per gest
 - Opzione per importare attributi extra in `schedaData`.
 - WebMap dedicata per interrogare geometrie/attributi (`Analisi e strumenti > WebMap`),
   con lettura stile layer (`layer_styles` QML/SLD) quando disponibile.
+- Supporto CRS da GeoPackage in WebMap con gestione SRID per layer vettoriali.
 
-### 7) Google Docs
+### 7) WebMap GIS (QGIS-like)
+- Basemap selezionabile: `Nessuna`, `OSM`, `Satellite`, `Topo`.
+- Layer panel con:
+  - visibilita layer,
+  - opacita/stile per layer,
+  - zoom su layer,
+  - highlight del layer attivo.
+- SourceLoader da sidebar:
+  - XYZ / WMTS,
+  - WMS (via proxy server),
+  - WFS (GeoJSON),
+  - ArcGIS REST,
+  - import shapefile `.zip`.
+- Barra stato in basso con:
+  - stato mappa,
+  - probe tile OSM,
+  - zoom e scala visibilita,
+  - CRS del layer/progetto attivo.
+- Popup feature con attributi e lookup US normalizzato (`normalizeUSCode`).
+
+### 8) MapExporter e snapshot mappa
+- Modale dedicata `MapExporter` (toolbar WebMap) con:
+  - tab `Cattura` (anteprima + salvataggio),
+  - tab `Libreria` (lista snapshot salvati).
+- Overlay esportazione:
+  - titolo,
+  - didascalia,
+  - data/ora,
+  - freccia nord opzionale,
+  - barra scala opzionale.
+- Salvataggio snapshot per cantiere in media progetto (`_map_snapshots/<cid>/...`).
+- Metadati snapshot persistiti: extent, center, zoom, bearing, pitch, tags.
+
+### 9) Google Docs
 - Setup cantiere su Google Drive (`/api/cantieri/:id/google/setup`).
 - Sync in preview e applicazione (`/api/cantieri/:id/google/sync`).
 - Parsing strutturato + integrazione con normalizzazione thesaurus.
 
-### 8) QC e AI
+### 10) QC e AI
 - QC su nomenclatura, completezza, coerenza relazioni e allegati.
 - AI provider supportati:
   - Gemini
   - Claude
 - Selezione provider automatica o forzata da configurazione.
 
-### 9) Backup
+### 11) Backup
 - Backup manuale con endpoint `GET /api/backup`.
 - Backup giornaliero automatico per progetto (job periodico lato server).
 
@@ -198,6 +232,19 @@ Puoi cambiarlo con:
   - `POST /api/cantieri/:cid/import-geopackage/preview`
   - `POST /api/cantieri/:cid/geopackage/webmap-preview`
   - `POST /api/cantieri/:cid/import-geopackage`
+  - `POST /api/cantieri/:cid/webmap/sketches/export-geopackage`
+
+- WebMap tile/proxy
+  - `GET /api/map-proxy/wms`
+  - `GET /api/map-tiles/osm/:z/:x/:y.png`
+  - `GET /api/map-tiles/opentopo/:z/:x/:y.png`
+  - `GET /api/map-tiles/esri/:z/:y/:x`
+
+- Map snapshots
+  - `GET /api/cantieri/:cid/map-snapshots`
+  - `POST /api/cantieri/:cid/map-snapshots`
+  - `PATCH /api/map-snapshots/:id`
+  - `DELETE /api/map-snapshots/:id`
 
 - Google
   - `POST /api/cantieri/:id/google/setup`
