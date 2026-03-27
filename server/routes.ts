@@ -18,6 +18,7 @@ import { registerQCRoutes } from "./routes/qc";
 import { registerFieldworkRoutes } from "./routes/fieldwork";
 import { registerQFieldRoutes } from "./routes/qfield";
 import { registerWebMapRoutes } from "./routes/webmap_routes";
+import { registerDocumentazioniRoutes } from "./routes/documentazioni";
 import type { ProjectContext, ProjectHandler } from "./routes/types";
 import {
   buildTargetAttachmentRelativePath,
@@ -239,6 +240,9 @@ function transferCantiere(
 
   const giornataIdMap = new Map<number, number>();
   const usIdMap = new Map<number, number>();
+  const allegatoIdMap = new Map<number, number>();
+  const snapshotIdMap = new Map<number, number>();
+  const documentazioneIdMap = new Map<number, number>();
 
   let filesCopied = 0;
   let filesMissing = 0;
@@ -335,7 +339,7 @@ function transferCantiere(
         filesMissing += 1;
       }
 
-      targetStorage.createAllegato({
+      const createdAttachment = targetStorage.createAllegato({
         cantiereId: createdCantiere.id,
         giornataId: mappedGiornataId,
         usId: mappedUsId,
@@ -352,6 +356,7 @@ function transferCantiere(
         quota: allegato.quota,
         descrizionAi: allegato.descrizionAi,
       });
+      allegatoIdMap.set(allegato.id, createdAttachment.id);
     }
 
     for (const snapshot of mapSnapshots) {
@@ -366,7 +371,7 @@ function transferCantiere(
         filesMissing += 1;
       }
 
-      targetStorage.createMapSnapshot({
+      const createdSnapshot = targetStorage.createMapSnapshot({
         cantiereId: createdCantiere.id,
         titolo: snapshot.titolo,
         didascalia: snapshot.didascalia,
@@ -381,6 +386,40 @@ function transferCantiere(
         bearing: snapshot.bearing,
         pitch: snapshot.pitch,
       });
+      snapshotIdMap.set(snapshot.id, createdSnapshot.id);
+    }
+
+    const documentazioni = sourceStorage.getDocumentazioni(sourceCantiereId);
+    for (const documentazione of documentazioni) {
+      const mappedAttachmentId = documentazione.allegatoId != null
+        ? (allegatoIdMap.get(documentazione.allegatoId) ?? null)
+        : null;
+      const createdDocumentazione = targetStorage.createDocumentazione({
+        cantiereId: createdCantiere.id,
+        tipo: documentazione.tipo,
+        titolo: documentazione.titolo,
+        dataInizio: documentazione.dataInizio,
+        dataFine: documentazione.dataFine,
+        stato: documentazione.stato,
+        allegatoId: mappedAttachmentId,
+      });
+      documentazioneIdMap.set(documentazione.id, createdDocumentazione.id);
+    }
+
+    for (const documentazione of documentazioni) {
+      const mappedDocId = documentazioneIdMap.get(documentazione.id);
+      if (!mappedDocId) continue;
+
+      const links = sourceStorage.getDocumentazioneSnapshots(documentazione.id);
+      for (const link of links) {
+        const mappedSnapshotId = snapshotIdMap.get(link.snapshotId);
+        if (!mappedSnapshotId) continue;
+        targetStorage.addDocumentazioneSnapshot({
+          documentazioneId: mappedDocId,
+          snapshotId: mappedSnapshotId,
+          posizione: link.posizione,
+        });
+      }
     }
 
     for (const log of qcLogs) {
@@ -655,6 +694,10 @@ export async function registerRoutes(_httpServer: Server, app: Express): Promise
     cleanupUploadedTempFiles,
   });
   registerQCRoutes(app, withProject);
+  registerDocumentazioniRoutes(app, {
+    withProject,
+    resolvePathInside,
+  });
 
   registerSettingsRoutes(app, withProject);
 

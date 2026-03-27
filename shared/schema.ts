@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, primaryKey } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -243,6 +243,43 @@ export const insertMapSnapshotSchema = createInsertSchema(mapSnapshots).omit({
 });
 export type InsertMapSnapshot = z.infer<typeof insertMapSnapshotSchema>;
 export type MapSnapshot = typeof mapSnapshots.$inferSelect;
+
+export const documentazioni = sqliteTable("documentazioni", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  cantiereId: integer("cantiere_id").notNull(),
+  tipo: text("tipo", { enum: ["giornaliera", "settimanale", "fine_scavo"] }).notNull(),
+  titolo: text("titolo").notNull(),
+  dataInizio: text("data_inizio"),
+  dataFine: text("data_fine"),
+  stato: text("stato", { enum: ["bozza", "completata"] }).notNull().default("bozza"),
+  allegatoId: integer("allegato_id"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const insertDocumentazioneSchema = createInsertSchema(documentazioni).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type InsertDocumentazione = z.infer<typeof insertDocumentazioneSchema>;
+export type Documentazione = typeof documentazioni.$inferSelect;
+
+export const documentazioneSnapshots = sqliteTable(
+  "documentazione_snapshots",
+  {
+    documentazioneId: integer("documentazione_id").notNull(),
+    snapshotId: integer("snapshot_id").notNull(),
+    posizione: integer("posizione").notNull().default(0),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.documentazioneId, table.snapshotId] }),
+  }),
+);
+
+export const insertDocumentazioneSnapshotSchema = createInsertSchema(documentazioneSnapshots);
+export type InsertDocumentazioneSnapshot = z.infer<typeof insertDocumentazioneSnapshotSchema>;
+export type DocumentazioneSnapshot = typeof documentazioneSnapshots.$inferSelect;
 
 // Impostazioni AI (prompt personalizzabili)
 export const aiSettings = sqliteTable("ai_settings", {

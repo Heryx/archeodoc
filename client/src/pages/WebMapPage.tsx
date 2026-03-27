@@ -710,6 +710,7 @@ function WebMapContent() {
       center: [12.5, 41.9],
       zoom: 6,
       maxPitch: 60,
+      canvasContextAttributes: { preserveDrawingBuffer: true },
     });
     mapRef.current = map;
     const updateScaleStatus = () => {

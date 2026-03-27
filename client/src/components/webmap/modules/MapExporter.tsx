@@ -28,17 +28,26 @@ type MapExporterProps = {
   visibleLayerNames: string[];
 };
 
-type ExportTab = "capture" | "library" | "insert";
+type ExportTab = "capture" | "library" | "link";
 
-type AllegatoRecord = {
+type DocumentazioneTipo = "giornaliera" | "settimanale" | "fine_scavo";
+
+type DocumentazioneRecord = {
   id: number;
   cantiereId: number;
-  giornataId: number | null;
-  usId: number | null;
-  tipo: string;
-  nomeFile: string;
-  percorso: string;
-  mimeType: string | null;
+  tipo: DocumentazioneTipo;
+  titolo: string;
+  dataInizio: string | null;
+  dataFine: string | null;
+  stato: "bozza" | "completata";
+  allegatoId: number | null;
+  createdAt: string;
+  updatedAt: string;
+  allegato?: {
+    id: number;
+    nomeFile: string;
+    url: string;
+  } | null;
 };
 
 function drawNorthArrow(ctx: CanvasRenderingContext2D) {
@@ -199,11 +208,13 @@ export function MapExporter({
   const [showNorth, setShowNorth] = useState(true);
   const [previewDataUrl, setPreviewDataUrl] = useState<string | null>(null);
   const [selectedSnapshotId, setSelectedSnapshotId] = useState<number | null>(null);
-  const [selectedDocxId, setSelectedDocxId] = useState<number | null>(null);
-  const [insertWidthCm, setInsertWidthCm] = useState("14");
-  const [insertHeightCm, setInsertHeightCm] = useState("8");
-  const [insertAfterParagraph, setInsertAfterParagraph] = useState("");
-  const [insertedDocxUrl, setInsertedDocxUrl] = useState<string | null>(null);
+  const [selectedDocumentazioneId, setSelectedDocumentazioneId] = useState<number | null>(null);
+  const [newDocTipo, setNewDocTipo] = useState<DocumentazioneTipo>("giornaliera");
+  const [newDocTitolo, setNewDocTitolo] = useState("");
+  const [newDocDataInizio, setNewDocDataInizio] = useState("");
+  const [newDocDataFine, setNewDocDataFine] = useState("");
+  const [linkPosizione, setLinkPosizione] = useState("");
+  const [linkedDocMessage, setLinkedDocMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -233,21 +244,14 @@ export function MapExporter({
     staleTime: 10_000,
   });
 
-  const docxAttachmentsQuery = useQuery<AllegatoRecord[]>({
-    queryKey: ["/api/cantieri", String(cantiereId), "allegati", "docx"],
+  const documentazioniQuery = useQuery<{ documentazioni: DocumentazioneRecord[] }>({
+    queryKey: ["/api/cantieri", String(cantiereId), "documentazioni"],
     queryFn: async () => {
-      const response = await fetch(`/api/cantieri/${cantiereId}/allegati`, {
+      const response = await fetch(`/api/cantieri/${cantiereId}/documentazioni`, {
         headers: getProjectHeader(),
       });
-      if (!response.ok) throw new Error("Caricamento allegati fallito");
-      const items = (await response.json()) as AllegatoRecord[];
-      return items.filter((item) => {
-        const mime = String(item.mimeType || "").toLowerCase();
-        const byMime = mime.includes("wordprocessingml");
-        const byName = item.nomeFile?.toLowerCase().endsWith(".docx");
-        const byPath = item.percorso?.toLowerCase().endsWith(".docx");
-        return byMime || Boolean(byName) || Boolean(byPath);
-      });
+      if (!response.ok) throw new Error("Caricamento documentazioni fallito");
+      return response.json();
     },
     enabled: open,
     staleTime: 10_000,
@@ -336,7 +340,7 @@ export function MapExporter({
       await queryClient.invalidateQueries({ queryKey: [...queryKey] });
       if (selectedSnapshotId === deletedId) {
         setSelectedSnapshotId(null);
-        setInsertedDocxUrl(null);
+        setLinkedDocMessage(null);
       }
     },
     onError: (error: any) => {
@@ -348,44 +352,52 @@ export function MapExporter({
     },
   });
 
-  const insertIntoDocxMutation = useMutation({
+  const createDocumentazioneMutation = useMutation({
     mutationFn: async () => {
-      if (!selectedSnapshotId) throw new Error("Seleziona uno snapshot");
-      if (!selectedDocxId) throw new Error("Seleziona un documento DOCX");
-
-      const widthCm = Number(insertWidthCm);
-      const heightCm = Number(insertHeightCm);
-      const afterParagraphRaw = insertAfterParagraph.trim();
-      const afterParagraphIndexRaw = afterParagraphRaw === "" ? -1 : Number(afterParagraphRaw);
-      const payload = {
-        allegatoId: selectedDocxId,
-        widthCm: Number.isFinite(widthCm) && widthCm > 0 ? widthCm : 14,
-        heightCm: Number.isFinite(heightCm) && heightCm > 0 ? heightCm : 8,
-        afterParagraphIndex:
-          Number.isFinite(afterParagraphIndexRaw) && afterParagraphIndexRaw >= 0
-            ? Math.trunc(afterParagraphIndexRaw)
-            : -1,
-      };
-
-      return (await apiRequest(
-        "POST",
-        `/api/cantieri/${cantiereId}/map-snapshots/${selectedSnapshotId}/insert-into-docx`,
-        payload,
-      )).json();
+      const titolo = newDocTitolo.trim();
+      return (await apiRequest("POST", `/api/cantieri/${cantiereId}/documentazioni`, {
+        tipo: newDocTipo,
+        titolo: titolo || null,
+        dataInizio: newDocDataInizio || null,
+        dataFine: newDocDataFine || null,
+      })).json();
     },
     onSuccess: async (data: any) => {
-      setInsertedDocxUrl(data?.allegato?.url || null);
-      await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", String(cantiereId), "allegati", "docx"] });
-      toast({
-        title: "DOCX generato",
-        description: data?.warnings?.length
-          ? `Inserito con ${data.warnings.length} avviso/i`
-          : "Snapshot inserito nel documento",
-      });
+      await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", String(cantiereId), "documentazioni"] });
+      const createdId = Number(data?.documentazione?.id);
+      if (Number.isFinite(createdId)) {
+        setSelectedDocumentazioneId(createdId);
+      }
+      toast({ title: "Documentazione creata" });
     },
     onError: (error: any) => {
       toast({
-        title: "Errore inserimento DOCX",
+        title: "Errore creazione documentazione",
+        description: error?.message || "Operazione non riuscita",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const linkSnapshotMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedSnapshotId) throw new Error("Seleziona uno snapshot");
+      if (!selectedDocumentazioneId) throw new Error("Seleziona una documentazione");
+      const posizioneRaw = Number(linkPosizione);
+      return (await apiRequest("POST", `/api/documentazioni/${selectedDocumentazioneId}/snapshots`, {
+        snapshotId: selectedSnapshotId,
+        posizione: Number.isFinite(posizioneRaw) ? Math.trunc(posizioneRaw) : undefined,
+      })).json();
+    },
+    onSuccess: async () => {
+      const doc = documentazioni.find((item) => item.id === selectedDocumentazioneId);
+      setLinkedDocMessage(doc ? `Snapshot collegato a: ${doc.titolo}` : "Snapshot collegato");
+      await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", String(cantiereId), "documentazioni"] });
+      toast({ title: "Snapshot collegato alla documentazione" });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Errore collegamento snapshot",
         description: error?.message || "Operazione non riuscita",
         variant: "destructive",
       });
@@ -393,7 +405,7 @@ export function MapExporter({
   });
 
   const snapshots = snapshotsQuery.data?.snapshots || [];
-  const docxAttachments = docxAttachmentsQuery.data || [];
+  const documentazioni = documentazioniQuery.data?.documentazioni || [];
 
   useEffect(() => {
     if (!open) return;
@@ -404,10 +416,10 @@ export function MapExporter({
 
   useEffect(() => {
     if (!open) return;
-    if (!selectedDocxId && docxAttachments.length > 0) {
-      setSelectedDocxId(docxAttachments[0].id);
+    if (!selectedDocumentazioneId && documentazioni.length > 0) {
+      setSelectedDocumentazioneId(documentazioni[0].id);
     }
-  }, [open, docxAttachments[0]?.id, selectedDocxId]);
+  }, [open, documentazioni[0]?.id, selectedDocumentazioneId]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -437,13 +449,13 @@ export function MapExporter({
             Libreria ({snapshots.length})
           </Button>
           <Button
-            variant={tab === "insert" ? "default" : "outline"}
+            variant={tab === "link" ? "default" : "outline"}
             size="sm"
             className="h-7 gap-1"
-            onClick={() => setTab("insert")}
+            onClick={() => setTab("link")}
           >
             <FileText size={13} />
-            Inserisci in DOCX
+            Collega a documentazione
           </Button>
         </div>
 
@@ -575,17 +587,17 @@ export function MapExporter({
             </div>
           )}
 
-          {tab === "insert" && (
+          {tab === "link" && (
             <div className="h-full min-h-0 grid grid-cols-[340px_1fr]">
             <div className="border-r border-border p-4 space-y-3 overflow-y-auto">
               <div>
-                <Label>Snapshot da inserire</Label>
+                <Label>Snapshot da collegare</Label>
                 <select
                   className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
                   value={selectedSnapshotId ?? ""}
                   onChange={(event) => {
                     setSelectedSnapshotId(Number(event.target.value));
-                    setInsertedDocxUrl(null);
+                    setLinkedDocMessage(null);
                   }}
                 >
                   <option value="" disabled>
@@ -600,108 +612,132 @@ export function MapExporter({
               </div>
 
               <div>
-                <Label>Documento DOCX destinazione</Label>
+                <Label>Documentazione target</Label>
                 <select
                   className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
-                  value={selectedDocxId ?? ""}
+                  value={selectedDocumentazioneId ?? ""}
                   onChange={(event) => {
-                    setSelectedDocxId(Number(event.target.value));
-                    setInsertedDocxUrl(null);
+                    setSelectedDocumentazioneId(Number(event.target.value));
+                    setLinkedDocMessage(null);
                   }}
                 >
                   <option value="" disabled>
-                    Seleziona allegato DOCX...
+                    Seleziona documentazione...
                   </option>
-                  {docxAttachments.map((attachment) => (
-                    <option key={attachment.id} value={attachment.id}>
-                      {attachment.nomeFile}
+                  {documentazioni.map((doc) => (
+                    <option key={doc.id} value={doc.id}>
+                      {doc.titolo} ({doc.tipo})
                     </option>
                   ))}
                 </select>
-                {docxAttachmentsQuery.isLoading && (
-                  <div className="mt-1 text-xs text-muted-foreground">Caricamento documenti...</div>
+                {documentazioniQuery.isLoading && (
+                  <div className="mt-1 text-xs text-muted-foreground">Caricamento documentazioni...</div>
                 )}
-                {!docxAttachmentsQuery.isLoading && docxAttachments.length === 0 && (
+                {!documentazioniQuery.isLoading && documentazioni.length === 0 && (
                   <div className="mt-1 text-xs text-muted-foreground">
-                    Nessun `.docx` negli allegati del cantiere.
+                    Nessuna documentazione disponibile. Crea una nuova bozza qui sotto.
                   </div>
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-md border border-border p-3 space-y-2 bg-card/40">
+                <div className="text-xs font-medium">Crea nuova documentazione</div>
                 <div>
-                  <Label>Larghezza (cm)</Label>
-                  <Input
-                    value={insertWidthCm}
-                    onChange={(event) => setInsertWidthCm(event.target.value)}
-                    placeholder="14"
-                  />
+                  <Label>Tipo</Label>
+                  <select
+                    value={newDocTipo}
+                    onChange={(event) => setNewDocTipo(event.target.value as DocumentazioneTipo)}
+                    className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+                  >
+                    <option value="giornaliera">Giornaliera</option>
+                    <option value="settimanale">Settimanale</option>
+                    <option value="fine_scavo">Fine scavo</option>
+                  </select>
                 </div>
                 <div>
-                  <Label>Altezza (cm)</Label>
+                  <Label>Titolo (opzionale)</Label>
                   <Input
-                    value={insertHeightCm}
-                    onChange={(event) => setInsertHeightCm(event.target.value)}
-                    placeholder="8"
+                    value={newDocTitolo}
+                    onChange={(event) => setNewDocTitolo(event.target.value)}
+                    placeholder="Es. Giornata 2026-03-27"
                   />
                 </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <Label>Data inizio</Label>
+                    <Input type="date" value={newDocDataInizio} onChange={(event) => setNewDocDataInizio(event.target.value)} />
+                  </div>
+                  <div>
+                    <Label>Data fine</Label>
+                    <Input type="date" value={newDocDataFine} onChange={(event) => setNewDocDataFine(event.target.value)} />
+                  </div>
+                </div>
+                <Button
+                  variant="outline"
+                  className="gap-2 w-full"
+                  onClick={() => createDocumentazioneMutation.mutate()}
+                  disabled={createDocumentazioneMutation.isPending}
+                >
+                  {createDocumentazioneMutation.isPending ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <FileText size={14} />
+                  )}
+                  Crea documentazione
+                </Button>
               </div>
 
               <div>
-                <Label>Inserisci dopo paragrafo (opzionale)</Label>
+                <Label>Posizione (opzionale)</Label>
                 <Input
-                  value={insertAfterParagraph}
-                  onChange={(event) => setInsertAfterParagraph(event.target.value)}
-                  placeholder="-1 (fine documento)"
+                  value={linkPosizione}
+                  onChange={(event) => setLinkPosizione(event.target.value)}
+                  placeholder="10, 20, 30..."
                 />
                 <div className="mt-1 text-xs text-muted-foreground">
-                  Usa `-1` o lascia vuoto per inserire in fondo.
+                  Lascia vuoto per aggiungere lo snapshot in fondo.
                 </div>
               </div>
 
               <Button
                 className="gap-2 w-full"
-                onClick={() => insertIntoDocxMutation.mutate()}
+                onClick={() => linkSnapshotMutation.mutate()}
                 disabled={
-                  insertIntoDocxMutation.isPending ||
+                  linkSnapshotMutation.isPending ||
                   !selectedSnapshotId ||
-                  !selectedDocxId
+                  !selectedDocumentazioneId
                 }
               >
-                {insertIntoDocxMutation.isPending ? (
+                {linkSnapshotMutation.isPending ? (
                   <Loader2 size={14} className="animate-spin" />
                 ) : (
                   <FileText size={14} />
                 )}
-                Inserisci snapshot nel DOCX
+                Collega snapshot
               </Button>
             </div>
 
             <div className="p-4 overflow-y-auto space-y-3">
               <div className="text-sm font-medium">Output</div>
-              {insertedDocxUrl ? (
+              {linkedDocMessage ? (
                 <div className="rounded-md border border-border p-3 space-y-2 bg-card/40">
-                  <div className="text-sm">
-                    Documento creato con successo. E stato aggiunto anche agli allegati del cantiere.
-                  </div>
+                  <div className="text-sm">{linkedDocMessage}</div>
                   <a
-                    href={insertedDocxUrl}
-                    target="_blank"
-                    rel="noreferrer"
+                    href={`#/cantiere/${cantiereId}/documentazioni`}
                     className="inline-flex items-center gap-1 text-xs rounded border border-border px-2 py-1 hover:bg-muted"
                   >
                     <Download size={12} />
-                    Apri DOCX generato
+                    Apri pagina Documentazioni
                   </a>
                 </div>
               ) : (
                 <div className="text-sm text-muted-foreground">
-                  Seleziona snapshot e documento, poi avvia l'inserimento.
+                  Seleziona snapshot e documentazione, poi collega.
                 </div>
               )}
 
               <div className="text-xs text-muted-foreground">
-                L'originale non viene modificato: viene creato un nuovo `.docx` con suffisso `_snapshot_*`.
+                Il DOCX finale si genera dalla pagina Documentazioni, non qui.
               </div>
             </div>
             </div>

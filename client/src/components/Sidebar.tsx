@@ -246,6 +246,13 @@ export function Sidebar() {
           label: "Materiali (RA)",
           isActive: (path) => path === `/cantiere/${cid}/materiali` || path.startsWith(`/cantiere/${cid}/materiali/`),
         },
+        {
+          href: `/cantiere/${cid}/documentazioni`,
+          icon: FileText,
+          label: "Documentazioni",
+          isActive: (path) =>
+            path === `/cantiere/${cid}/documentazioni` || path.startsWith(`/cantiere/${cid}/documentazioni/`),
+        },
       ]
     : [];
 

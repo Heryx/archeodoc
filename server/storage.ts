@@ -1,6 +1,6 @@
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, asc } from "drizzle-orm";
 import {
   cantieri,
   giornate,
@@ -9,6 +9,8 @@ import {
   raRecords,
   allegati,
   mapSnapshots,
+  documentazioni,
+  documentazioneSnapshots,
   qcLogs,
   type Cantiere,
   type InsertCantiere,
@@ -24,6 +26,10 @@ import {
   type InsertAllegato,
   type MapSnapshot,
   type InsertMapSnapshot,
+  type Documentazione,
+  type InsertDocumentazione,
+  type DocumentazioneSnapshot,
+  type InsertDocumentazioneSnapshot,
   type QcLog,
   type InsertQcLog,
 } from "@shared/schema";
@@ -287,6 +293,36 @@ function migrate(sqlite: Database.Database) {
       FOREIGN KEY (cantiere_id) REFERENCES cantieri(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS documentazioni (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cantiere_id INTEGER NOT NULL,
+      tipo TEXT NOT NULL CHECK(tipo IN ('giornaliera','settimanale','fine_scavo')),
+      titolo TEXT NOT NULL,
+      data_inizio TEXT,
+      data_fine TEXT,
+      stato TEXT NOT NULL DEFAULT 'bozza' CHECK(stato IN ('bozza','completata')),
+      allegato_id INTEGER,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (cantiere_id) REFERENCES cantieri(id) ON DELETE CASCADE,
+      FOREIGN KEY (allegato_id) REFERENCES allegati(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_documentazioni_cantiere
+      ON documentazioni (cantiere_id, tipo, data_inizio);
+
+    CREATE TABLE IF NOT EXISTS documentazione_snapshots (
+      documentazione_id INTEGER NOT NULL,
+      snapshot_id INTEGER NOT NULL,
+      posizione INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (documentazione_id, snapshot_id),
+      FOREIGN KEY (documentazione_id) REFERENCES documentazioni(id) ON DELETE CASCADE,
+      FOREIGN KEY (snapshot_id) REFERENCES map_snapshots(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_documentazione_snapshots_posizione
+      ON documentazione_snapshots (documentazione_id, posizione);
+
     CREATE TABLE IF NOT EXISTS cantieri_geo (
       id INTEGER PRIMARY KEY,
       cantiere_id INTEGER NOT NULL UNIQUE,
@@ -382,6 +418,11 @@ function migrate(sqlite: Database.Database) {
   ensureColumn(sqlite, "map_snapshots", "bearing", "bearing REAL");
   ensureColumn(sqlite, "map_snapshots", "pitch", "pitch REAL");
   ensureColumn(sqlite, "map_snapshots", "updated_at", "updated_at TEXT");
+  ensureColumn(sqlite, "documentazioni", "data_inizio", "data_inizio TEXT");
+  ensureColumn(sqlite, "documentazioni", "data_fine", "data_fine TEXT");
+  ensureColumn(sqlite, "documentazioni", "stato", "stato TEXT NOT NULL DEFAULT 'bozza'");
+  ensureColumn(sqlite, "documentazioni", "allegato_id", "allegato_id INTEGER");
+  ensureColumn(sqlite, "documentazioni", "updated_at", "updated_at TEXT");
   ensureColumn(sqlite, "sas_records", "data", "data TEXT");
   ensureColumn(sqlite, "ra_records", "data", "data TEXT");
   ensureColumn(sqlite, "qc_logs", "dismissed", "dismissed INTEGER DEFAULT 0");
@@ -436,6 +477,18 @@ export interface IStorage {
   createMapSnapshot(data: InsertMapSnapshot): MapSnapshot;
   updateMapSnapshot(id: number, data: Partial<InsertMapSnapshot>): MapSnapshot | undefined;
   deleteMapSnapshot(id: number): boolean;
+
+  // Documentazioni
+  getDocumentazioni(cantiereId: number): Documentazione[];
+  getDocumentazione(id: number): Documentazione | undefined;
+  createDocumentazione(data: InsertDocumentazione): Documentazione;
+  updateDocumentazione(id: number, data: Partial<InsertDocumentazione>): Documentazione | undefined;
+  deleteDocumentazione(id: number): boolean;
+  getDocumentazioneSnapshots(documentazioneId: number): DocumentazioneSnapshot[];
+  getDocumentazioneSnapshot(documentazioneId: number, snapshotId: number): DocumentazioneSnapshot | undefined;
+  addDocumentazioneSnapshot(data: InsertDocumentazioneSnapshot): DocumentazioneSnapshot;
+  updateDocumentazioneSnapshotPosition(documentazioneId: number, snapshotId: number, posizione: number): DocumentazioneSnapshot | undefined;
+  removeDocumentazioneSnapshot(documentazioneId: number, snapshotId: number): boolean;
 
   // QC logs
   getQcLogs(cantiereId: number, giornataId?: number): QcLog[];
@@ -687,6 +740,104 @@ class SQLiteStorage implements IStorage {
     if (!existing) return false;
     this.db.delete(mapSnapshots).where(eq(mapSnapshots.id, id)).run();
     return true;
+  }
+
+  // Documentazioni
+  getDocumentazioni(cantiereId: number) {
+    return this.db
+      .select()
+      .from(documentazioni)
+      .where(eq(documentazioni.cantiereId, cantiereId))
+      .orderBy(desc(documentazioni.createdAt))
+      .all();
+  }
+
+  getDocumentazione(id: number) {
+    return this.db.select().from(documentazioni).where(eq(documentazioni.id, id)).get();
+  }
+
+  createDocumentazione(data: InsertDocumentazione) {
+    return this.db
+      .insert(documentazioni)
+      .values({ ...data, createdAt: now(), updatedAt: now() })
+      .returning()
+      .get();
+  }
+
+  updateDocumentazione(id: number, data: Partial<InsertDocumentazione>) {
+    return this.db
+      .update(documentazioni)
+      .set({ ...data, updatedAt: now() })
+      .where(eq(documentazioni.id, id))
+      .returning()
+      .get();
+  }
+
+  deleteDocumentazione(id: number) {
+    const existing = this.getDocumentazione(id);
+    if (!existing) return false;
+    this.db.delete(documentazioni).where(eq(documentazioni.id, id)).run();
+    return true;
+  }
+
+  getDocumentazioneSnapshots(documentazioneId: number) {
+    return this.db
+      .select()
+      .from(documentazioneSnapshots)
+      .where(eq(documentazioneSnapshots.documentazioneId, documentazioneId))
+      .orderBy(asc(documentazioneSnapshots.posizione))
+      .all();
+  }
+
+  getDocumentazioneSnapshot(documentazioneId: number, snapshotId: number) {
+    return this.db
+      .select()
+      .from(documentazioneSnapshots)
+      .where(
+        and(
+          eq(documentazioneSnapshots.documentazioneId, documentazioneId),
+          eq(documentazioneSnapshots.snapshotId, snapshotId),
+        ),
+      )
+      .get();
+  }
+
+  addDocumentazioneSnapshot(data: InsertDocumentazioneSnapshot) {
+    this.sqlite
+      .prepare(`
+        INSERT INTO documentazione_snapshots (documentazione_id, snapshot_id, posizione)
+        VALUES (?, ?, ?)
+        ON CONFLICT(documentazione_id, snapshot_id)
+        DO UPDATE SET posizione = excluded.posizione
+      `)
+      .run(data.documentazioneId, data.snapshotId, data.posizione ?? 0);
+
+    const created = this.getDocumentazioneSnapshot(data.documentazioneId, data.snapshotId);
+    if (!created) {
+      throw new Error("Impossibile creare collegamento snapshot-documentazione");
+    }
+    return created;
+  }
+
+  updateDocumentazioneSnapshotPosition(documentazioneId: number, snapshotId: number, posizione: number) {
+    this.sqlite
+      .prepare(`
+        UPDATE documentazione_snapshots
+        SET posizione = ?
+        WHERE documentazione_id = ? AND snapshot_id = ?
+      `)
+      .run(posizione, documentazioneId, snapshotId);
+    return this.getDocumentazioneSnapshot(documentazioneId, snapshotId);
+  }
+
+  removeDocumentazioneSnapshot(documentazioneId: number, snapshotId: number) {
+    const result = this.sqlite
+      .prepare(`
+        DELETE FROM documentazione_snapshots
+        WHERE documentazione_id = ? AND snapshot_id = ?
+      `)
+      .run(documentazioneId, snapshotId);
+    return (result.changes || 0) > 0;
   }
 
   // QC logs

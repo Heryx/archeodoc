@@ -61,6 +61,10 @@ const WebMapPage = lazy(async () => {
   const mod = await import("@/pages/WebMapPage");
   return { default: mod.WebMapPage };
 });
+const DocumentazioniPage = lazy(async () => {
+  const mod = await import("@/pages/DocumentazioniPage");
+  return { default: mod.DocumentazioniPage };
+});
 
 type SidePanel = "settings" | "qc" | "stats" | "thesaurus" | "report";
 
@@ -130,6 +134,7 @@ function AppShell() {
             <Route path="/cantiere/:cid/materiali" component={MaterialiPage} />
             <Route path="/cantiere/:cid/matrix" component={MatrixPage} />
             <Route path="/cantiere/:cid/webmap" component={WebMapPage} />
+            <Route path="/cantiere/:cid/documentazioni" component={DocumentazioniPage} />
             <Route path="/cantiere/:cid/upload" component={UploadPage} />
             <Route path="/cantiere/:cid/thesaurus">
               {() => <ThesaurusPage />}
