@@ -163,6 +163,7 @@ export const DEM_SOURCES: Record<
 };
 
 const DEM_SOURCE_ID = "terrain-dem-source";
+// Kept only for legacy cleanup when a pre-v5 style still contains a sky layer id.
 const SKY_LAYER_ID = "terrain-sky-layer";
 const ACTIVE_HIGHLIGHT_POLYGON_ID = "active-layer-highlight-polygon";
 const ACTIVE_HIGHLIGHT_LINE_ID = "active-layer-highlight-line";
@@ -437,6 +438,7 @@ export function enableTerrain(map: maplibregl.Map, demSource: DemSource, exagger
   const dem = DEM_SOURCES[demSource];
 
   map.setTerrain(null);
+  // Legacy cleanup: v5+ uses map.setSky instead of a style layer type "sky".
   if (map.getLayer(SKY_LAYER_ID)) map.removeLayer(SKY_LAYER_ID);
   if (map.getSource(DEM_SOURCE_ID)) map.removeSource(DEM_SOURCE_ID);
 
@@ -449,21 +451,17 @@ export function enableTerrain(map: maplibregl.Map, demSource: DemSource, exagger
   });
 
   map.setTerrain({ source: DEM_SOURCE_ID, exaggeration });
-  map.addLayer({
-    id: SKY_LAYER_ID,
-    type: "sky",
-    paint: {
-      "sky-type": "atmosphere",
-      "sky-atmosphere-sun": [0, 90],
-      "sky-atmosphere-sun-intensity": 12,
-    },
-  } as any);
+  map.setSky({
+    "atmosphere-blend": 0.85,
+  });
 }
 
 export function disableTerrain(map: maplibregl.Map) {
   map.setTerrain(null);
+  // Legacy cleanup for old runtime styles.
   if (map.getLayer(SKY_LAYER_ID)) map.removeLayer(SKY_LAYER_ID);
   if (map.getSource(DEM_SOURCE_ID)) map.removeSource(DEM_SOURCE_ID);
+  map.setSky({});
 }
 
 function walkBounds(value: unknown, bounds: { minX: number; minY: number; maxX: number; maxY: number }) {

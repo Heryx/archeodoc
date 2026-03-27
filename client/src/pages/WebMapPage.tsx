@@ -14,6 +14,7 @@ import {
   Layers3,
   Map as MapIcon,
   RefreshCcw,
+  Upload,
   Workflow,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -996,31 +997,9 @@ function WebMapContent() {
       <ToolbarStrip>
         <div className="px-3 py-1.5 border-t border-border bg-card flex items-center gap-2 flex-wrap">
           <div className="flex items-center gap-1">
-            <span className="text-[11px] text-muted-foreground mr-1">Dati</span>
-            <Button
-              variant={state.modules.layerManager ? "default" : "outline"}
-              size="sm"
-              className="h-7 gap-1.5"
-              onClick={() => dispatch({ type: "TOGGLE_MODULE", module: "layerManager" })}
-            >
-              <Layers size={13} />
-              Layer DB
-            </Button>
             <Button variant="outline" size="sm" className="h-7 gap-1.5" onClick={() => openPanel("geopackage")}>
-              <Layers3 size={13} />
-              GeoPackage
-            </Button>
-            <Button variant="outline" size="sm" className="h-7 gap-1.5" onClick={() => openPanel("shapefile")}>
-              <FileArchive size={13} />
-              Shapefile
-            </Button>
-          </div>
-          <span className="h-5 border-r border-border" />
-          <div className="flex items-center gap-1">
-            <span className="text-[11px] text-muted-foreground mr-1">Sorgenti</span>
-            <Button variant="outline" size="sm" className="h-7 gap-1.5" onClick={() => openPanel("sources")}>
-              <Workflow size={13} />
-              SourceLoader (WMS/XYZ)
+              <Upload size={13} />
+              Import
             </Button>
           </div>
           <span className="h-5 border-r border-border" />
@@ -1048,14 +1027,34 @@ function WebMapContent() {
             {state.modules.geocoder && (
               <Geocoder mapRef={mapRef} position="top-right" />
             )}
-            {state.modules.layerManager && (
-              <div className="absolute left-0 top-0 bottom-0 w-72 z-30 bg-background/95 backdrop-blur-sm border-r border-border shadow-xl">
-                <LayerManager
-                  cantiereId={Number(cid)}
-                  onClose={() => dispatch({ type: "TOGGLE_MODULE", module: "layerManager" })}
-                />
-              </div>
-            )}
+            <button
+              className={`absolute left-0 top-1/2 -translate-y-1/2 z-40 flex flex-col items-center gap-1
+                bg-background border border-l-0 border-border rounded-r-md px-1.5 py-3
+                shadow-md hover:bg-muted transition-colors
+                ${state.modules.layerManager ? "text-primary border-primary/40" : "text-muted-foreground"}`}
+              onClick={() => dispatch({ type: "TOGGLE_MODULE", module: "layerManager" })}
+              title="Layer DB"
+            >
+              <Layers size={14} />
+              <span
+                className="text-[9px] font-medium tracking-wide"
+                style={{ writingMode: "vertical-rl", textOrientation: "mixed" }}
+              >
+                Layers
+              </span>
+            </button>
+
+            <div
+              className={`absolute left-0 top-0 bottom-0 w-72 z-30
+                bg-background/95 backdrop-blur-sm border-r border-border shadow-xl
+                transition-transform duration-300 ease-in-out
+                ${state.modules.layerManager ? "translate-x-0" : "-translate-x-full"}`}
+            >
+              <LayerManager
+                cantiereId={Number(cid)}
+                onClose={() => dispatch({ type: "TOGGLE_MODULE", module: "layerManager" })}
+              />
+            </div>
             {mapUnsupported && (
               <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground bg-background/80">
                 WebGL non disponibile: impossibile visualizzare la mappa.
