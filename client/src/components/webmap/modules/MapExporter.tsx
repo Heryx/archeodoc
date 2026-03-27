@@ -131,7 +131,14 @@ async function buildSnapshotDataUrl(input: {
   });
 
   const sourceCanvas = map.getCanvas();
-  const rawDataUrl = sourceCanvas.toDataURL("image/png");
+  let rawDataUrl: string;
+  try {
+    rawDataUrl = sourceCanvas.toDataURL("image/png");
+  } catch {
+    throw new Error(
+      "Canvas bloccato da CORS: la basemap corrente non consente l'export. Passa a OSM o usa una basemap con CORS abilitato.",
+    );
+  }
   const overlayCanvas = document.createElement("canvas");
   overlayCanvas.width = sourceCanvas.width;
   overlayCanvas.height = sourceCanvas.height;
@@ -325,8 +332,12 @@ export function MapExporter({
     mutationFn: async (id: number) => {
       await apiRequest("DELETE", `/api/map-snapshots/${id}`);
     },
-    onSuccess: async () => {
+    onSuccess: async (_data, deletedId) => {
       await queryClient.invalidateQueries({ queryKey: [...queryKey] });
+      if (selectedSnapshotId === deletedId) {
+        setSelectedSnapshotId(null);
+        setInsertedDocxUrl(null);
+      }
     },
     onError: (error: any) => {
       toast({
@@ -344,7 +355,8 @@ export function MapExporter({
 
       const widthCm = Number(insertWidthCm);
       const heightCm = Number(insertHeightCm);
-      const afterParagraphIndexRaw = Number(insertAfterParagraph);
+      const afterParagraphRaw = insertAfterParagraph.trim();
+      const afterParagraphIndexRaw = afterParagraphRaw === "" ? -1 : Number(afterParagraphRaw);
       const payload = {
         allegatoId: selectedDocxId,
         widthCm: Number.isFinite(widthCm) && widthCm > 0 ? widthCm : 14,
@@ -388,18 +400,18 @@ export function MapExporter({
     if (!selectedSnapshotId && snapshots.length > 0) {
       setSelectedSnapshotId(snapshots[0].id);
     }
-  }, [open, snapshots, selectedSnapshotId]);
+  }, [open, snapshots[0]?.id, selectedSnapshotId]);
 
   useEffect(() => {
     if (!open) return;
     if (!selectedDocxId && docxAttachments.length > 0) {
       setSelectedDocxId(docxAttachments[0].id);
     }
-  }, [open, docxAttachments, selectedDocxId]);
+  }, [open, docxAttachments[0]?.id, selectedDocxId]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl h-[86vh] p-0 overflow-hidden">
+      <DialogContent className="max-w-5xl h-[86vh] p-0 overflow-hidden flex flex-col">
         <DialogHeader className="px-5 py-4 border-b border-border">
           <DialogTitle>MapExporter</DialogTitle>
           <DialogDescription>
@@ -435,8 +447,9 @@ export function MapExporter({
           </Button>
         </div>
 
-        {tab === "capture" && (
-          <div className="h-full min-h-0 grid grid-cols-[320px_1fr]">
+        <div className="flex-1 min-h-0 overflow-hidden">
+          {tab === "capture" && (
+            <div className="h-full min-h-0 grid grid-cols-[320px_1fr]">
             <div className="border-r border-border p-4 space-y-3 overflow-y-auto">
               <div>
                 <Label>Titolo *</Label>
@@ -514,11 +527,11 @@ export function MapExporter({
                 </div>
               )}
             </div>
-          </div>
-        )}
+            </div>
+          )}
 
-        {tab === "library" && (
-          <div className="h-full min-h-0 p-4 overflow-y-auto">
+          {tab === "library" && (
+            <div className="h-full min-h-0 p-4 overflow-y-auto">
             {snapshotsQuery.isLoading ? (
               <div className="text-sm text-muted-foreground">Caricamento libreria snapshot...</div>
             ) : snapshots.length === 0 ? (
@@ -559,11 +572,11 @@ export function MapExporter({
                 ))}
               </div>
             )}
-          </div>
-        )}
+            </div>
+          )}
 
-        {tab === "insert" && (
-          <div className="h-full min-h-0 grid grid-cols-[340px_1fr]">
+          {tab === "insert" && (
+            <div className="h-full min-h-0 grid grid-cols-[340px_1fr]">
             <div className="border-r border-border p-4 space-y-3 overflow-y-auto">
               <div>
                 <Label>Snapshot da inserire</Label>
@@ -691,8 +704,9 @@ export function MapExporter({
                 L'originale non viene modificato: viene creato un nuovo `.docx` con suffisso `_snapshot_*`.
               </div>
             </div>
-          </div>
-        )}
+            </div>
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   );

@@ -1,4 +1,5 @@
 import {
+  Building2,
   Camera,
   Download,
   Layers,
@@ -31,6 +32,7 @@ const TOOLS: Array<{
   dividerBefore?: boolean;
 }> = [
   { key: "terrain", label: "Terrain 3D", icon: <Mountain size={14} /> },
+  { key: "buildings3d", label: "Edifici 3D", icon: <Building2 size={14} /> },
   { key: "styleRenderer", label: "Renderer", icon: <Palette size={14} /> },
   { key: "measure", label: "Misura", icon: <Ruler size={14} /> },
   { key: "inspect", label: "Inspect feature", icon: <SearchCode size={14} /> },

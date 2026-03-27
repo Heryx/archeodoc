@@ -45,8 +45,10 @@ import { ToolbarStrip } from "@/components/webmap/ToolbarStrip";
 import {
   BASEMAP_STYLES,
   addLayerToMap,
+  disableBuildings3D,
   disableTerrain,
   ensureBasemapLayer,
+  enableBuildings3D,
   enableTerrain,
   fitToLayer,
   fillLayerId,
@@ -896,6 +898,12 @@ function WebMapContent() {
         disableTerrain(map);
       }
 
+      if (state.modules.buildings3d) {
+        enableBuildings3D(map);
+      } else {
+        disableBuildings3D(map);
+      }
+
       if (
         state.modules.styleRenderer &&
         state.styleRenderer &&
@@ -932,6 +940,7 @@ function WebMapContent() {
     state.modules.terrain,
     state.modules.demSource,
     state.modules.terrainExaggeration,
+    state.modules.buildings3d,
     state.modules.styleRenderer,
     state.styleRenderer,
     mapRef,

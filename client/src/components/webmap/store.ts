@@ -35,6 +35,7 @@ const initialState: WebMapState = {
     terrain: false,
     demSource: "jaxa",
     terrainExaggeration: 1.5,
+    buildings3d: false,
     measure: false,
     export: false,
     inspect: false,

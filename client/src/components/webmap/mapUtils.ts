@@ -514,3 +514,114 @@ export function fitToLayer(map: maplibregl.Map, fc: FeatureCollection) {
     },
   );
 }
+
+const OFM_BUILDINGS_SOURCE = "ofm-buildings";
+const OFM_BUILDINGS_LAYER = "ofm-buildings-3d";
+const OFM_BUILDINGS_SOURCE_LAYER = "building";
+const buildingsSourceListeners = new WeakMap<maplibregl.Map, (event: maplibregl.MapSourceDataEvent) => void>();
+
+export function enableBuildings3D(map: maplibregl.Map) {
+  const labelLayerId = map
+    .getStyle()
+    ?.layers?.find((layer) => layer.type === "symbol" && !!(layer.layout as any)?.["text-field"])?.id;
+
+  if (!map.getSource(OFM_BUILDINGS_SOURCE)) {
+    map.addSource(OFM_BUILDINGS_SOURCE, {
+      type: "vector",
+      url: "https://tiles.openfreemap.org/planet",
+    } as any);
+  }
+
+  const numericHeightExpr: any = [
+    "coalesce",
+    ["to-number", ["get", "render_height"]],
+    ["to-number", ["get", "height"]],
+    0,
+  ];
+  const numericBaseExpr: any = [
+    "coalesce",
+    ["to-number", ["get", "render_min_height"]],
+    0,
+  ];
+
+  const addBuildingLayer = () => {
+    if (map.getLayer(OFM_BUILDINGS_LAYER)) return;
+    map.addLayer(
+      {
+        id: OFM_BUILDINGS_LAYER,
+        source: OFM_BUILDINGS_SOURCE,
+        "source-layer": OFM_BUILDINGS_SOURCE_LAYER,
+        type: "fill-extrusion",
+        minzoom: 14,
+        filter: ["!=", ["get", "hide_3d"], true],
+        paint: {
+          "fill-extrusion-color": [
+            "interpolate",
+            ["linear"],
+            numericHeightExpr,
+            0,
+            "#94a3b8",
+            50,
+            "#64748b",
+            200,
+            "#334155",
+          ],
+          "fill-extrusion-height": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            14,
+            0,
+            15,
+            ["coalesce", numericHeightExpr, 5],
+          ],
+          "fill-extrusion-base": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            14,
+            0,
+            15,
+            numericBaseExpr,
+          ],
+          "fill-extrusion-opacity": 0.85,
+        },
+      } as any,
+      labelLayerId,
+    );
+  };
+
+  if (map.isSourceLoaded(OFM_BUILDINGS_SOURCE)) {
+    addBuildingLayer();
+  } else if (!buildingsSourceListeners.has(map)) {
+    const onSourceData = (event: maplibregl.MapSourceDataEvent) => {
+      if (event.sourceId === OFM_BUILDINGS_SOURCE && event.isSourceLoaded) {
+        addBuildingLayer();
+        map.off("sourcedata", onSourceData);
+        buildingsSourceListeners.delete(map);
+      }
+    };
+    buildingsSourceListeners.set(map, onSourceData);
+    map.on("sourcedata", onSourceData);
+  }
+
+  if (map.getPitch() < 20) {
+    map.easeTo({ pitch: 45, duration: 600 });
+  }
+}
+
+export function disableBuildings3D(map: maplibregl.Map) {
+  const listener = buildingsSourceListeners.get(map);
+  if (listener) {
+    map.off("sourcedata", listener);
+    buildingsSourceListeners.delete(map);
+  }
+
+  const hadLayer = !!map.getLayer(OFM_BUILDINGS_LAYER);
+  const hadSource = !!map.getSource(OFM_BUILDINGS_SOURCE);
+  if (hadLayer) map.removeLayer(OFM_BUILDINGS_LAYER);
+  if (hadSource) map.removeSource(OFM_BUILDINGS_SOURCE);
+  if (hadLayer && map.getPitch() > 0) {
+    map.easeTo({ pitch: 0, duration: 400 });
+  }
+}

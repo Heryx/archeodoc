@@ -86,6 +86,7 @@ export type ActiveModules = {
   terrain: boolean;
   demSource: DemSource;
   terrainExaggeration: number;
+  buildings3d: boolean;
   measure: boolean;
   export: boolean;
   inspect: boolean;
