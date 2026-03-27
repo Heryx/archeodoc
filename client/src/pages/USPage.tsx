@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useParams } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
@@ -29,7 +29,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Download, GitBranch, Package, Plus, Settings2 } from "lucide-react";
+import { Download, Filter, GitBranch, Package, Plus, Settings2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { buildProjectUrl, getCurrentProjectId, getProjectHeader } from "@/lib/project";
 import { BASE_US_MODEL_KEY, BUILTIN_US_MODELS, type USModelDefinition, type USModelField } from "@shared/us_models";
@@ -670,6 +670,10 @@ export function USPage() {
   const linkedGoogleDocUrl = linkedGoogleDocId
     ? `https://docs.google.com/document/d/${linkedGoogleDocId}/edit`
     : "";
+  const giornataFiltrata =
+    filterGiornata !== "all"
+      ? giornate.find((g: any) => String(g.id) === String(filterGiornata))
+      : null;
   const isAiSourceSubmitting =
     requestAiFill.isPending || requestAiFillDocx.isPending || requestAiFillGoogle.isPending;
 
@@ -823,6 +827,23 @@ export function USPage() {
           </Button>
         </div>
       </div>
+
+      {filterGiornata !== "all" && (
+        <div className="mb-4 flex items-center gap-2 rounded-md border border-primary/30 bg-primary/10 px-3 py-2 text-xs text-primary">
+          <Filter size={12} />
+          Mostrando solo le US della giornata {giornataFiltrata?.data || filterGiornata}.
+          <button
+            type="button"
+            className="ml-auto underline"
+            onClick={() => {
+              setFilterGiornata("all");
+              navigate(`/cantiere/${cid}/us`);
+            }}
+          >
+            Mostra tutte
+          </button>
+        </div>
+      )}
 
       <USModelDialog
         open={openModelDialog}

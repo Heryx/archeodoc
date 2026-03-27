@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
@@ -39,6 +39,7 @@ import {
   type GoogleSyncDecisionState,
   type GoogleSyncPreview,
 } from "@/components/giornata/types";
+import { useGiornatePerSettimana } from "@/hooks/useGiornatePerSettimana";
 
 export function GiornataPage() {
   const { cid, gid } = useParams<{ cid: string; gid?: string }>();
@@ -77,6 +78,29 @@ export function GiornataPage() {
     staleTime: 0,
     refetchOnMount: true,
   });
+
+  const {
+    settimane,
+    selectedWeek,
+    selectWeek,
+    giornateDellaSettimana,
+    selectedGiornataId,
+    setSelectedGiornataId,
+  } = useGiornatePerSettimana(
+    (giornate || []).map((g: any) => ({
+      ...g,
+      id: Number(g.id),
+      data: String(g.data || ""),
+      settore: g.settore || null,
+    })),
+  );
+
+  useEffect(() => {
+    if (!gid) return;
+    const id = Number(gid);
+    if (!Number.isFinite(id)) return;
+    setSelectedGiornataId(id);
+  }, [gid, setSelectedGiornataId]);
 
   function setGoogleDecisionAction(itemKey: string, action: "confirm" | "skip" | "edit") {
     setGoogleDecisions((prev) => withGoogleDecisionAction(prev, itemKey, action));
@@ -277,6 +301,13 @@ export function GiornataPage() {
 
   const lastSyncSummary = parseLastSyncSummary(cantiere?.lastSyncReport);
   const giornataSelezionata = gid ? giornate.find((g: any) => String(g.id) === String(gid)) : null;
+  const weekCorrente = useMemo(
+    () => settimane.find((week) => week.weekNumber === selectedWeek),
+    [settimane, selectedWeek],
+  );
+  const giornateVisibili = settimane.length > 0 ? giornateDellaSettimana : giornate;
+  const gidAttivo = gid && giornateVisibili.some((g: any) => String(g.id) === String(gid)) ? gid : undefined;
+  const giornataUsTarget = selectedGiornataId || (gid ? Number(gid) : null);
 
   return (
     <div className="p-8 max-w-4xl mx-auto">
@@ -288,7 +319,15 @@ export function GiornataPage() {
             <Button
               variant="outline"
               className="gap-2"
-              onClick={() => navigate(`/cantiere/${cid}/us${gid ? `?giornataId=${gid}` : ""}`)}
+              onClick={() =>
+                navigate(
+                  `/cantiere/${cid}/us${
+                    giornataUsTarget && Number.isFinite(giornataUsTarget)
+                      ? `?giornataId=${giornataUsTarget}`
+                      : ""
+                  }`,
+                )
+              }
             >
               <Layers size={15} /> Vai alle US
             </Button>
@@ -420,14 +459,52 @@ export function GiornataPage() {
         />
       )}
 
+      {settimane.length > 0 && (
+        <div className="mb-4 space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-muted-foreground font-medium">Settimana:</span>
+            {settimane.map((week) => (
+              <button
+                key={week.weekNumber}
+                type="button"
+                onClick={() => {
+                  selectWeek(week.weekNumber);
+                  if (gid) navigate(`/cantiere/${cid}`);
+                }}
+                className={`rounded-full px-3 py-1 text-xs font-semibold border transition-colors ${
+                  selectedWeek === week.weekNumber
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-background border-border text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                W{week.weekNumber}
+                <span className="ml-1.5 opacity-70 font-normal">({week.giornateIds.length}gg)</span>
+              </button>
+            ))}
+          </div>
+          {weekCorrente && (
+            <div className="text-xs text-muted-foreground">
+              {weekCorrente.label} | {giornateVisibili.length} giornata/e
+            </div>
+          )}
+        </div>
+      )}
+
       <GiornataList
         cid={String(cid)}
-        gid={gid}
-        giornate={giornate}
+        gid={gidAttivo}
+        giornate={giornateVisibili}
         isLoading={isLoading}
         runQcPending={runQc.isPending}
         deletePending={deleteGiornata.isPending}
-        onNavigate={navigate}
+        onNavigate={(path) => {
+          const match = path.match(/\/giornata\/(\d+)/);
+          if (match) {
+            const id = Number(match[1]);
+            if (Number.isFinite(id)) setSelectedGiornataId(id);
+          }
+          navigate(path);
+        }}
         onRunQc={(id) => runQc.mutate(id)}
         onEdit={openEditDialog}
         onDelete={(g) => {
@@ -437,3 +514,4 @@ export function GiornataPage() {
     </div>
   );
 }
+

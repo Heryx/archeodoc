@@ -23,6 +23,7 @@ import {
   matrixExportFileBase,
   type HarrisMatrixMode,
 } from "../matrix_export";
+import { calcolaSettimaneProgetto } from "@shared/weekUtils";
 
 function parseMatrixMode(raw: unknown): HarrisMatrixMode {
   if (raw === "fisica" || raw === "stratigrafica" || raw === "all") return raw;
@@ -77,6 +78,23 @@ function parseIsoDateOnly(value: unknown): Date | null {
   return parsed;
 }
 
+function parsePositiveInteger(value: unknown): number | null {
+  const numeric = typeof value === "string" ? Number(value.trim()) : Number(value);
+  if (!Number.isInteger(numeric) || numeric <= 0) return null;
+  return numeric;
+}
+
+function parsePositiveIntegerArray(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  return Array.from(
+    new Set(
+      value
+        .map((item) => parsePositiveInteger(item))
+        .filter((item): item is number => item != null),
+    ),
+  );
+}
+
 function toIsoDateOnly(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -102,6 +120,50 @@ function isDateInRange(date: Date, start: Date, end: Date): boolean {
   const startIso = toIsoDateOnly(start);
   const endIso = toIsoDateOnly(end);
   return dateIso >= startIso && dateIso <= endIso;
+}
+
+function parseIsoWeek(value: unknown): { year: number; week: number } | null {
+  const text = parseOptionalText(value);
+  const match = text.match(/^(\d{4})-W(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const week = Number(match[2]);
+  if (!Number.isInteger(year) || !Number.isInteger(week) || week < 1 || week > 53) return null;
+  return { year, week };
+}
+
+function startOfIsoWeekMonday(year: number, week: number): Date {
+  const simple = new Date(Date.UTC(year, 0, 1 + (week - 1) * 7));
+  const dow = simple.getUTCDay() || 7;
+  const monday = new Date(simple);
+  if (dow <= 4) {
+    monday.setUTCDate(simple.getUTCDate() - dow + 1);
+  } else {
+    monday.setUTCDate(simple.getUTCDate() + (8 - dow));
+  }
+  return monday;
+}
+
+function rangeForIsoWeekKey(isoWeek: string): { start: Date; end: Date; startIso: string; endIso: string } | null {
+  const parsed = parseIsoWeek(isoWeek);
+  if (!parsed) return null;
+  const start = startOfIsoWeekMonday(parsed.year, parsed.week);
+  const end = new Date(start);
+  end.setUTCDate(start.getUTCDate() + 6);
+  return {
+    start,
+    end,
+    startIso: toIsoDateOnly(start),
+    endIso: toIsoDateOnly(end),
+  };
+}
+
+function isoWeekKeyFromDate(date: Date): string {
+  const utc = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  utc.setUTCDate(utc.getUTCDate() + 4 - (utc.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
+  const week = Math.ceil((((utc.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return `${utc.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
 }
 
 const aiFillDocxUpload = multer({
@@ -535,7 +597,7 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     }
   }));
 
-  // ─── Statistiche cantiere ──────────────────────────────────────────
+  // â”€â”€â”€ Statistiche cantiere â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   app.get("/api/cantieri/:id/statistiche", withProject(async (ctx, req, res) => {
     const id = Number(req.params.id);
     const cantiere = ctx.storage.getCantiere(id);
@@ -583,7 +645,7 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     });
   }));
 
-  // ─── Export ZIP cantiere completo ──────────────────────────────────
+  // â”€â”€â”€ Export ZIP cantiere completo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   app.get("/api/cantieri/:id/matrix/export-docx", withProject(async (ctx, req, res) => {
     const id = Number(req.params.id);
     const cantiere = ctx.storage.getCantiere(id);
@@ -670,7 +732,7 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     // README.txt con info cantiere
     folder.file(
       "README.txt",
-      `Archivio ArcheoDoc — ${cantiere.nome}\n` +
+      `Archivio ArcheoDoc â€” ${cantiere.nome}\n` +
         `Tipo export: ${includeDiari ? "completo" : "solo schede US"}\n` +
         `Codice: ${cantiere.codice}\n` +
         `Localit\u00e0: ${cantiere.localita}\n` +
@@ -762,6 +824,183 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
       res.send(buf);
     } catch (error: any) {
       res.status(500).json({ error: error?.message || "Errore export giornale settimanale DOCX" });
+    }
+  }));
+
+  app.post("/api/cantieri/:cid/report/export-settimana", withProject(async (ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const cantiere = ctx.storage.getCantiere(cid);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const weekNumber = parsePositiveInteger(req.body?.weekNumber);
+    if (!weekNumber) {
+      return res.status(400).json({ error: "weekNumber non valido: usa un intero positivo (W1, W2, ...)" });
+    }
+
+    const giornateOrdinate = ctx.storage
+      .getGiornate(cid)
+      .filter((giornata) => !!parseIsoDateOnly(giornata.data))
+      .sort((a, b) => String(a.data || "").localeCompare(String(b.data || "")));
+
+    const settimaneProgetto = calcolaSettimaneProgetto(
+      giornateOrdinate.map((giornata) => ({
+        id: Number(giornata.id),
+        data: String(giornata.data || ""),
+      })),
+    );
+    const settimanaTarget = settimaneProgetto.find((week) => week.weekNumber === weekNumber);
+    if (!settimanaTarget) {
+      return res.status(404).json({ error: `Settimana W${weekNumber} non trovata nel cantiere` });
+    }
+
+    const idsSettimana = new Set(settimanaTarget.giornateIds);
+
+    const giornateWithReport = giornateOrdinate
+      .filter((giornata) => {
+        if (!giornata.aiReportText) return false;
+        return idsSettimana.has(Number(giornata.id));
+      })
+      .sort((a, b) => String(a.data || "").localeCompare(String(b.data || "")));
+
+    if (giornateWithReport.length === 0) {
+      return res.status(404).json({
+        error: `Nessun report giornaliero disponibile nella settimana W${weekNumber}`,
+      });
+    }
+
+    try {
+      const entries = giornateWithReport.map((giornata) => {
+        const qcLogs = ctx.storage.getQcLogs(cid, giornata.id);
+        const campiMancanti = qcLogs.filter((log) => log.livello === "error").map((log) => log.messaggio);
+        return {
+          giornata,
+          reportFormattato: giornata.aiReportText || "",
+          campiMancanti,
+        };
+      });
+
+      const buf = await exportReportSettimanaleDocx({
+        cantiere,
+        weekStart: settimanaTarget.dataInizio,
+        weekEnd: settimanaTarget.dataFine,
+        entries,
+      });
+      const filename = `Diario_settimanale_W${weekNumber}_${settimanaTarget.dataInizio}_${settimanaTarget.dataFine}.docx`;
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(buf);
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Errore export settimanale DOCX" });
+    }
+  }));
+
+  app.post("/api/cantieri/:cid/report/export-multi-settimane", withProject(async (ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const cantiere = ctx.storage.getCantiere(cid);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const weekNumbers = parsePositiveIntegerArray(req.body?.weekNumbers);
+
+    if (weekNumbers.length === 0) {
+      return res.status(400).json({ error: "weekNumbers non valido: seleziona almeno una settimana (W1, W2, ...)" });
+    }
+
+    const giornateOrdinate = ctx.storage
+      .getGiornate(cid)
+      .filter((giornata) => !!parseIsoDateOnly(giornata.data))
+      .sort((a, b) => String(a.data || "").localeCompare(String(b.data || "")));
+
+    const settimaneProgetto = calcolaSettimaneProgetto(
+      giornateOrdinate.map((giornata) => ({
+        id: Number(giornata.id),
+        data: String(giornata.data || ""),
+      })),
+    );
+    const weekSet = new Set(weekNumbers);
+    const settimaneSelezionate = settimaneProgetto
+      .filter((week) => weekSet.has(week.weekNumber))
+      .sort((a, b) => a.weekNumber - b.weekNumber);
+
+    if (settimaneSelezionate.length === 0) {
+      return res.status(404).json({ error: "Nessuna settimana valida trovata tra quelle selezionate" });
+    }
+
+    const giornataIds = new Set<number>(settimaneSelezionate.flatMap((week) => week.giornateIds));
+    const giornateWithReport = giornateOrdinate
+      .filter((giornata) => Boolean(giornata.aiReportText) && giornataIds.has(Number(giornata.id)))
+      .sort((a, b) => String(a.data || "").localeCompare(String(b.data || "")));
+
+    if (giornateWithReport.length === 0) {
+      return res.status(404).json({ error: "Nessun report giornaliero disponibile per le settimane selezionate" });
+    }
+
+    try {
+      const entries = giornateWithReport.map((giornata) => {
+        const qcLogs = ctx.storage.getQcLogs(cid, giornata.id);
+        const campiMancanti = qcLogs.filter((log) => log.livello === "error").map((log) => log.messaggio);
+        return {
+          giornata,
+          reportFormattato: giornata.aiReportText || "",
+          campiMancanti,
+        };
+      });
+
+      const startIso = settimaneSelezionate[0].dataInizio;
+      const endIso = settimaneSelezionate[settimaneSelezionate.length - 1].dataFine;
+      const buf = await exportReportSettimanaleDocx({
+        cantiere,
+        weekStart: startIso,
+        weekEnd: endIso,
+        entries,
+      });
+      const filename = `Diario_multi_settimane_${startIso}_${endIso}.docx`;
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(buf);
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Errore export multi-settimane DOCX" });
+    }
+  }));
+
+  app.post("/api/cantieri/:cid/report/export-diario-completo", withProject(async (ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const cantiere = ctx.storage.getCantiere(cid);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const giornateWithReport = ctx.storage
+      .getGiornate(cid)
+      .filter((giornata) => Boolean(giornata.aiReportText))
+      .sort((a, b) => String(a.data || "").localeCompare(String(b.data || "")));
+
+    if (giornateWithReport.length === 0) {
+      return res.status(404).json({ error: "Nessun report giornaliero disponibile nel cantiere" });
+    }
+
+    try {
+      const entries = giornateWithReport.map((giornata) => {
+        const qcLogs = ctx.storage.getQcLogs(cid, giornata.id);
+        const campiMancanti = qcLogs.filter((log) => log.livello === "error").map((log) => log.messaggio);
+        return {
+          giornata,
+          reportFormattato: giornata.aiReportText || "",
+          campiMancanti,
+        };
+      });
+
+      const startIso = entries[0].giornata.data;
+      const endIso = entries[entries.length - 1].giornata.data;
+      const buf = await exportReportSettimanaleDocx({
+        cantiere,
+        weekStart: startIso,
+        weekEnd: endIso,
+        entries,
+      });
+      const filename = `Diario_completo_${startIso}_${endIso}.docx`;
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(buf);
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Errore export diario completo DOCX" });
     }
   }));
 }
