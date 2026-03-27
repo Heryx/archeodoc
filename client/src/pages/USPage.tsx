@@ -38,9 +38,11 @@ import { getUsTopLevelThesaurusFromSchema } from "@shared/us_schema_thesaurus";
 import { USCard } from "@/components/us/USCard";
 import { USAllegatiImpact } from "@/components/us/USAllegati";
 import { AiFillPanel } from "@/components/us/AiFillPanel";
+import { DuplicateUSBanner } from "@/components/us/DuplicateUSBanner";
 import { DiarioSourceDialog } from "@/components/us/DiarioSourceDialog";
 import { USFormDialog } from "@/components/us/USFormDialog";
 import { USModelDialog } from "@/components/us/USModelDialog";
+import { findPotentialDuplicateUS, useDuplicateUSCheck } from "@/hooks/useDuplicateUSCheck";
 import {
   emptyUSForm,
   mapUsToForm,
@@ -71,6 +73,11 @@ type CantiereLiteResponse = {
 };
 
 type USSaveMode = "draft" | "final";
+type CreateUSVariables = { data: USForm; saveMode: USSaveMode; force?: boolean };
+type DuplicateWarningPayload = {
+  message: string;
+  duplicates: Array<{ id: number; codiceUS: string }>;
+};
 const AUTO_GIORNATA_DATE_KEYS = ["dataCompilazione", "dataRilevamentoCampo", "giorno", "dataScheda"] as const;
 
 function giornataFilterFromLocation(location: string): string {
@@ -129,6 +136,27 @@ function extractApiErrorDescription(error: unknown): string {
   }
 }
 
+function parseDuplicateWarning(error: unknown): DuplicateWarningPayload | null {
+  const raw = String((error as any)?.message || "");
+  if (!raw.startsWith("409:")) return null;
+
+  try {
+    const body = JSON.parse(raw.replace(/^\d+:\s*/, ""));
+    if (body?.warning !== "duplicate_suspected" || !Array.isArray(body?.duplicates)) return null;
+    return {
+      message: typeof body?.message === "string" ? body.message : "Possibile duplicato rilevato",
+      duplicates: body.duplicates
+        .map((item: any) => ({
+          id: Number(item?.id),
+          codiceUS: String(item?.codiceUS || ""),
+        }))
+        .filter((item: { id: number; codiceUS: string }) => Number.isFinite(item.id) && item.codiceUS.trim().length > 0),
+    };
+  } catch {
+    return null;
+  }
+}
+
 const US_TOP_LEVEL_FORM_KEYS = new Set<string>([
   "codiceUS",
   "tipo",
@@ -177,6 +205,9 @@ export function USPage() {
   const [customModelName, setCustomModelName] = useState("");
   const [customModelDescription, setCustomModelDescription] = useState("");
   const [customModelFieldsRaw, setCustomModelFieldsRaw] = useState("");
+  const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
+  const [duplicateWarning, setDuplicateWarning] = useState<DuplicateWarningPayload | null>(null);
+  const [pendingDuplicateSave, setPendingDuplicateSave] = useState<CreateUSVariables | null>(null);
 
   const { data: giornate = [] } = useQuery<any[]>({
     queryKey: ["/api/cantieri", cid, "giornate", activeProjectId],
@@ -196,6 +227,11 @@ export function USPage() {
       const query = filterGiornata !== "all" ? `?giornataId=${filterGiornata}` : "";
       return (await apiRequest("GET", `/api/cantieri/${cid}/us${query}`)).json();
     },
+    enabled: !!cid,
+  });
+  const { data: usListAll = [] } = useQuery<any[]>({
+    queryKey: ["/api/cantieri", cid, "us", "all", activeProjectId],
+    queryFn: async () => (await apiRequest("GET", `/api/cantieri/${cid}/us`)).json(),
     enabled: !!cid,
   });
   const {
@@ -442,8 +478,9 @@ export function USPage() {
   };
 
   const createUS = useMutation({
-    mutationFn: async ({ data, saveMode }: { data: USForm; saveMode: USSaveMode }) => {
-      const r = await apiRequest("POST", `/api/cantieri/${cid}/us`, {
+    mutationFn: async ({ data, saveMode, force }: CreateUSVariables) => {
+      const endpoint = `/api/cantieri/${cid}/us${force ? "?force=true" : ""}`;
+      const r = await apiRequest("POST", endpoint, {
         ...usPayload(data, usThesaurus),
         saveMode,
       });
@@ -452,7 +489,11 @@ export function USPage() {
     onSuccess: (_result, variables) => {
       qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
       qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", filterGiornata, activeProjectId] });
+      qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", "all", activeProjectId] });
       setOpenCreate(false);
+      setDuplicateDialogOpen(false);
+      setDuplicateWarning(null);
+      setPendingDuplicateSave(null);
       setCreateForm({
         ...emptyUSForm,
         giornataId: filterGiornata !== "all" ? filterGiornata : "",
@@ -460,7 +501,14 @@ export function USPage() {
       });
       toast({ title: variables.saveMode === "draft" ? "US salvata in bozza" : "US registrata come completa" });
     },
-    onError: (err: any) => {
+    onError: (err: any, variables) => {
+      const duplicate = parseDuplicateWarning(err);
+      if (duplicate && !variables.force) {
+        setDuplicateWarning(duplicate);
+        setPendingDuplicateSave(variables);
+        setDuplicateDialogOpen(true);
+        return;
+      }
       const desc = extractApiErrorDescription(err);
       toast({ title: "Errore nella creazione", description: desc || undefined, variant: "destructive" });
     },
@@ -477,6 +525,7 @@ export function USPage() {
     onSuccess: (_result, variables) => {
       qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
       qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", filterGiornata, activeProjectId] });
+      qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", "all", activeProjectId] });
       setOpenEdit(false);
       setEditingId(null);
       toast({ title: variables.saveMode === "draft" ? "Bozza US aggiornata" : "US aggiornata come completa" });
@@ -620,6 +669,28 @@ export function USPage() {
 
   const currentDraftModel = availableModels.find((m) => m.key === modelDraftKey);
   const canDeleteDraftModel = !!currentDraftModel && currentDraftModel.source === "custom";
+  const usListAllLite = useMemo(
+    () =>
+      usListAll.map((item: any) => ({
+        id: Number(item.id),
+        codiceUS: String(item.codiceUS || ""),
+      })),
+    [usListAll],
+  );
+  const duplicateGroups = useDuplicateUSCheck(usListAllLite);
+  const createPotentialDuplicate = useMemo(
+    () => findPotentialDuplicateUS(createForm.codiceUS, usListAllLite),
+    [createForm.codiceUS, usListAllLite],
+  );
+  const editPotentialDuplicate = useMemo(
+    () =>
+      findPotentialDuplicateUS(
+        editForm.codiceUS,
+        usListAllLite,
+        editingId || undefined,
+      ),
+    [editForm.codiceUS, usListAllLite, editingId],
+  );
 
   const createMissingRequiredModel = missingRequiredModelFields(createForm, activeModel);
   const editMissingRequiredModel = missingRequiredModelFields(editForm, editModel);
@@ -740,6 +811,12 @@ export function USPage() {
     );
   };
 
+  const openUSById = (id: number) => {
+    const target = usListAll.find((item: any) => Number(item.id) === Number(id));
+    if (!target) return;
+    openEditDialog(target);
+  };
+
   return (
     <div className="p-8 max-w-4xl mx-auto">
       <div className="mb-6 flex items-start justify-between gap-3">
@@ -845,6 +922,8 @@ export function USPage() {
         </div>
       )}
 
+      <DuplicateUSBanner duplicates={duplicateGroups} onGoToUS={openUSById} />
+
       <USModelDialog
         open={openModelDialog}
         onOpenChange={setOpenModelDialog}
@@ -894,6 +973,8 @@ export function USPage() {
         onImportedAiTextNotice={() => {
           toast({ title: "Testo importato - clicca Analisi AI per compilare i campi" });
         }}
+        potentialDuplicate={createPotentialDuplicate}
+        onOpenDuplicate={openUSById}
       />
 
       <USFormDialog
@@ -925,6 +1006,8 @@ export function USPage() {
         onImportedAiTextNotice={() => {
           toast({ title: "Testo importato - clicca Analisi AI per compilare i campi" });
         }}
+        potentialDuplicate={editPotentialDuplicate}
+        onOpenDuplicate={openUSById}
         onTriggerAiAnalysis={() => {
           if (editingId) {
             // Save as draft first, then trigger AI fill for field suggestions
@@ -971,6 +1054,58 @@ export function USPage() {
               }}
             >
               {deleteUS.isPending ? "Eliminazione..." : "Elimina US"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={duplicateDialogOpen}
+        onOpenChange={(value) => {
+          setDuplicateDialogOpen(value);
+          if (!value && !createUS.isPending) {
+            setDuplicateWarning(null);
+            setPendingDuplicateSave(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Possibili duplicati trovati</AlertDialogTitle>
+            <AlertDialogDescription>
+              {duplicateWarning?.message || "Il codice potrebbe coincidere con una US gia esistente."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          {duplicateWarning && duplicateWarning.duplicates.length > 0 && (
+            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200 space-y-2">
+              <p className="font-medium text-amber-100">US potenzialmente duplicate:</p>
+              <div className="flex flex-wrap gap-2">
+                {duplicateWarning.duplicates.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="inline-flex items-center rounded border border-amber-400/40 px-2 py-0.5 hover:bg-amber-400/10"
+                    onClick={() => openUSById(item.id)}
+                  >
+                    {item.codiceUS}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={createUS.isPending}>Annulla</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!pendingDuplicateSave || createUS.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                if (!pendingDuplicateSave) return;
+                createUS.mutate({ ...pendingDuplicateSave, force: true });
+              }}
+            >
+              {createUS.isPending ? "Salvataggio..." : "Salva comunque"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

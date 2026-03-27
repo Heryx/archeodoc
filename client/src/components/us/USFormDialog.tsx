@@ -34,6 +34,8 @@ type USFormDialogProps = {
   draftDisabled: boolean;
   onImportedAiTextNotice: () => void;
   onTriggerAiAnalysis?: (text: string) => void;
+  potentialDuplicate?: { id: number; codiceUS: string } | null;
+  onOpenDuplicate?: (id: number) => void;
 };
 
 export function USFormDialog({
@@ -57,6 +59,8 @@ export function USFormDialog({
   draftDisabled,
   onImportedAiTextNotice,
   onTriggerAiAnalysis,
+  potentialDuplicate,
+  onOpenDuplicate,
 }: USFormDialogProps) {
   const [showAiHint, setShowAiHint] = useState(false);
 
@@ -99,6 +103,8 @@ export function USFormDialog({
               giornate={giornate}
               usThesaurus={usThesaurus}
               activeModel={activeModel}
+              potentialDuplicate={potentialDuplicate}
+              onOpenDuplicate={onOpenDuplicate}
             />
           </div>
         </div>

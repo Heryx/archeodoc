@@ -15,6 +15,7 @@ import { BASE_US_MODEL_KEY } from "@shared/us_models";
 import { buildEntityZodSchema } from "@shared/validation/buildZodSchema";
 import { getUsTopLevelThesaurusFromSchema } from "@shared/us_schema_thesaurus";
 import { normalizeUsDefinizioneWithVocabulary, normalizeUsTipoWithVocabulary } from "@shared/us_thesaurus";
+import { normalizeUSCode, usCodeKey } from "@shared/normalize_us_code";
 import {
   importUSFromGeoPackage,
   previewGeoPackage,
@@ -827,6 +828,27 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
             codiceUS: ["Codice US obbligatorio"],
           },
         });
+      }
+
+      const normalizedCodeKey = usCodeKey(codiceUS);
+      if (normalizedCodeKey) {
+        const duplicates = ctx.storage
+          .getUSList(cid)
+          .filter((item) => usCodeKey(item.codiceUS) === normalizedCodeKey)
+          .map((item) => ({
+            id: item.id,
+            codiceUS: item.codiceUS,
+          }));
+
+        const force = parseBooleanLike(req.query.force);
+        if (duplicates.length > 0 && !force) {
+          return res.status(409).json({
+            warning: "duplicate_suspected",
+            message: `Il codice "${codiceUS}" potrebbe coincidere con US gia esistenti.`,
+            normalizedCode: normalizeUSCode(codiceUS),
+            duplicates,
+          });
+        }
       }
 
       const us = ctx.storage.createUS({

@@ -1,5 +1,5 @@
 import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
-import { BookOpen, ChevronDown, ChevronUp } from "lucide-react";
+import { AlertTriangle, BookOpen, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -18,6 +18,8 @@ type USFormFieldsProps = {
   giornate: any[];
   usThesaurus?: USThesaurusConfig;
   activeModel?: USModelDefinition;
+  potentialDuplicate?: { id: number; codiceUS: string } | null;
+  onOpenDuplicate?: (id: number) => void;
 };
 
 function setFieldValue(
@@ -62,7 +64,15 @@ function setMultiSelectValue(
   setFieldValue(setForm, fieldKey, normalized.length > 0 ? JSON.stringify(normalized) : "");
 }
 
-export function USFormFields({ form, setForm, giornate, usThesaurus, activeModel }: USFormFieldsProps) {
+export function USFormFields({
+  form,
+  setForm,
+  giornate,
+  usThesaurus,
+  activeModel,
+  potentialDuplicate,
+  onOpenDuplicate,
+}: USFormFieldsProps) {
   const [showGuide, setShowGuide] = useState(false);
   const tipoNormalized = normalizeUsTipo(form.tipo);
   const tipoOptions = useMemo(
@@ -128,6 +138,23 @@ export function USFormFields({ form, setForm, giornate, usThesaurus, activeModel
               value={form.codiceUS}
               onChange={(e) => setForm((f) => ({ ...f, codiceUS: e.target.value }))}
             />
+            {potentialDuplicate && (
+              <div className="mt-1 flex items-start gap-1.5 text-xs text-amber-600">
+                <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                <div>
+                  Attenzione: <strong>{potentialDuplicate.codiceUS}</strong> esiste gia e potrebbe coincidere con questo codice.
+                  {onOpenDuplicate && (
+                    <button
+                      type="button"
+                      className="ml-1 underline"
+                      onClick={() => onOpenDuplicate(potentialDuplicate.id)}
+                    >
+                      Vai alla scheda
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
           <div>
             <Label>Tipo</Label>
