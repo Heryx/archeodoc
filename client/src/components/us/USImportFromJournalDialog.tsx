@@ -65,6 +65,7 @@ export function USImportFromJournalDialog({
   const [googleUrl, setGoogleUrl] = useState(buildDefaultGoogleUrl(linkedGoogleDocId));
   const [selectedDocx, setSelectedDocx] = useState<File | null>(null);
   const [preview, setPreview] = useState<USImportPreview | null>(null);
+  const [previewMeta, setPreviewMeta] = useState("");
   const [selectedMap, setSelectedMap] = useState<Record<string, boolean>>({});
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
@@ -76,6 +77,7 @@ export function USImportFromJournalDialog({
     setGoogleUrl(buildDefaultGoogleUrl(linkedGoogleDocId));
     setSelectedDocx(null);
     setPreview(null);
+    setPreviewMeta("");
     setSelectedMap({});
   }, [open, linkedGoogleDocId]);
 
@@ -113,6 +115,13 @@ export function USImportFromJournalDialog({
             : await previewUsImportFromGiornataText(cantiereId, giornataId, manualText.trim() || undefined);
 
       setPreview(payload.preview);
+      if (payload.preview.source === "docx" && payload.filename) {
+        setPreviewMeta(`File: ${payload.filename}`);
+      } else if (payload.preview.source === "google-doc" && payload.googleDocTitle) {
+        setPreviewMeta(`Documento: ${payload.googleDocTitle}`);
+      } else {
+        setPreviewMeta("");
+      }
       initializeSelection(payload.preview);
       toast({
         title: "Anteprima US pronta",
@@ -244,7 +253,7 @@ export function USImportFromJournalDialog({
         <div className="flex items-center justify-between rounded-md border px-3 py-2">
           <div className="text-xs text-muted-foreground">
             {preview
-              ? `Sorgente: ${formatPreviewSource(preview.source)} • Testo: ${preview.textLength} caratteri • Estratte: ${preview.items.length}`
+              ? `Sorgente: ${formatPreviewSource(preview.source)} • Testo: ${preview.textLength} caratteri • Estratte: ${preview.items.length}${previewMeta ? ` • ${previewMeta}` : ""}`
               : "Genera prima l'anteprima per vedere le US dedotte."}
           </div>
           <Button onClick={handlePreview} disabled={!canRunPreview || isLoadingPreview || isApplying}>
@@ -328,4 +337,3 @@ export function USImportFromJournalDialog({
     </Dialog>
   );
 }
-

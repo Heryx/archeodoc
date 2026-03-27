@@ -529,3 +529,146 @@ export async function exportReportGiornalieroDocx(
   });
   return Buffer.from(await Packer.toBuffer(doc));
 }
+
+export async function exportReportSettimanaleDocx(input: {
+  cantiere: Cantiere | undefined;
+  weekStart: string;
+  weekEnd: string;
+  entries: Array<{
+    giornata: Giornata;
+    reportFormattato: string;
+    campiMancanti: string[];
+  }>;
+}): Promise<Buffer> {
+  const mp = (text: string, bold = false, size = SIZE_NORMAL, color?: string): Paragraph =>
+    new Paragraph({
+      children: [new TextRun({ text, bold, size, font: FONT, color })],
+      spacing: { after: 80 },
+    });
+  const sep = (): Paragraph => new Paragraph({
+    border: { bottom: { style: BorderStyle.SINGLE, size: 1, color: "C8B89A" } },
+    spacing: { after: 120 },
+    text: "",
+  });
+
+  const children: Paragraph[] = [
+    new Paragraph({
+      children: [new TextRun({ text: "GIORNALE DI SCAVO SETTIMANALE", bold: true, size: 32, font: FONT, allCaps: true })],
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 80 },
+    }),
+    new Paragraph({
+      children: [new TextRun({ text: input.cantiere?.nome || "-", size: 24, font: FONT, color: "6B5B45" })],
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 40 },
+    }),
+    new Paragraph({
+      children: [
+        new TextRun({
+          text: `${input.cantiere?.localita || ""} - ${input.cantiere?.codice || ""}`,
+          size: 20,
+          font: FONT,
+          italics: true,
+          color: "8B7355",
+        }),
+      ],
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 60 },
+    }),
+    new Paragraph({
+      children: [
+        new TextRun({
+          text: `Settimana: ${input.weekStart} - ${input.weekEnd}`,
+          size: 20,
+          font: FONT,
+          bold: true,
+        }),
+      ],
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 180 },
+    }),
+    sep(),
+  ];
+
+  for (const entry of input.entries) {
+    let operatori = "-";
+    try {
+      const ops = JSON.parse(entry.giornata.operatori || "[]");
+      operatori = Array.isArray(ops) && ops.length > 0 ? ops.join(", ") : entry.giornata.operatori || "-";
+    } catch {
+      operatori = entry.giornata.operatori || "-";
+    }
+
+    children.push(
+      mp(`Giornata ${entry.giornata.data}`, true, 24, "2C4A7C"),
+      mp(`Operatori: ${operatori}`),
+      mp(`Condizioni meteo: ${entry.giornata.condMeteo || "-"}`),
+      mp(`Settore: ${entry.giornata.settore || "-"}`),
+    );
+
+    if (entry.campiMancanti.length > 0) {
+      children.push(mp("Campi mancanti", true, 20, "C0392B"));
+      for (const campo of entry.campiMancanti) {
+        children.push(
+          new Paragraph({
+            children: [
+              new TextRun({ text: "- ", bold: true, color: "C0392B", size: SIZE_NORMAL, font: FONT }),
+              new TextRun({ text: campo, size: SIZE_NORMAL, color: "C0392B", font: FONT }),
+            ],
+            spacing: { after: 60 },
+          }),
+        );
+      }
+    }
+
+    children.push(mp("Diario", true, 20));
+    for (const line of String(entry.reportFormattato || "").split("\n")) {
+      const isHdr = line.match(/^[A-Z][A-Z\s]+:?\s*$/) || line.match(/^\d+\./);
+      children.push(
+        new Paragraph({
+          children: [new TextRun({ text: line || " ", bold: !!isHdr, size: isHdr ? 22 : SIZE_NORMAL, font: FONT })],
+          spacing: { after: isHdr ? 100 : 60 },
+        }),
+      );
+    }
+
+    children.push(sep());
+  }
+
+  children.push(
+    new Paragraph({
+      children: [
+        new TextRun({
+          text: `Documento generato il ${new Date().toLocaleDateString("it-IT")} - ArcheoDoc`,
+          size: 14,
+          color: "999999",
+          italics: true,
+          font: FONT,
+        }),
+      ],
+      alignment: AlignmentType.RIGHT,
+      spacing: { before: 200 },
+    }),
+  );
+
+  const doc = new Document({
+    creator: "ArcheoDoc",
+    title: `Giornale settimanale ${input.weekStart} - ${input.weekEnd}`,
+    description: `Report settimanale di scavo ${input.weekStart} - ${input.weekEnd}`,
+    styles: { default: { document: { run: { font: FONT, size: SIZE_NORMAL } } } },
+    sections: [{
+      properties: {
+        page: {
+          margin: {
+            top: convertInchesToTwip(1),
+            bottom: convertInchesToTwip(1),
+            left: convertInchesToTwip(1.2),
+            right: convertInchesToTwip(1.2),
+          },
+        },
+      },
+      children,
+    }],
+  });
+  return Buffer.from(await Packer.toBuffer(doc));
+}

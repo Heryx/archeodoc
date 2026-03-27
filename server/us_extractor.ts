@@ -1,8 +1,13 @@
 import type { InsertUS, UnitaStratigrafica } from "@shared/schema";
+import { BASE_US_MODEL_KEY, type USModelDefinition } from "@shared/us_models";
+import { getUsTopLevelThesaurusFromSchema } from "@shared/us_schema_thesaurus";
+import { normalizeUsDefinizioneWithVocabulary, normalizeUsTipoWithVocabulary } from "@shared/us_thesaurus";
 import type { IStorage } from "./storage";
 import { generateWithGemini } from "./gemini";
 import { logger } from "./logger";
+import { getProjectById, getProjectSchemaDefinition } from "./projects";
 import { buildUsExtractPrompt } from "./prompts/us_extract_prompt";
+import { getUSModel } from "./us_models";
 
 type AiProvider = "gemini" | "openai" | "claude" | "none";
 type AiConfidence = "alta" | "media" | "bassa";
@@ -114,6 +119,19 @@ export type USImportApplyResult = {
   createdCodes: string[];
 };
 
+type NormalizedModelField = {
+  key: string;
+  type: "select" | "multiselect";
+  options: string[];
+};
+
+type ImportNormalizationContext = {
+  modelKey: string;
+  modelFields: Map<string, NormalizedModelField>;
+  tipoVocabulary: string[];
+  definizioneVocabulary: string[];
+};
+
 function resolveProvider(): AiProvider {
   const envProvider = String(process.env.AI_PROVIDER || "").trim().toLowerCase();
   const hasGemini = !!String(process.env.GEMINI_API_KEY || "").trim();
@@ -209,6 +227,155 @@ function normalizeConfidence(value: unknown): AiConfidence {
 
 function normalizeCode(value: string): string {
   return value.trim().replace(/\s+/g, " ").toUpperCase();
+}
+
+function normalizeTextToken(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeTextTokenCompact(value: string): string {
+  return normalizeTextToken(value).replace(/\s+/g, "");
+}
+
+function parseMultiValueText(raw: string): string[] {
+  const trimmed = String(raw || "").trim();
+  if (!trimmed) return [];
+
+  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.map((item) => String(item || "").trim()).filter(Boolean);
+      }
+    } catch {
+      // fallback below
+    }
+  }
+
+  return trimmed.split(/[|,;\n]+/g).map((item) => item.trim()).filter(Boolean);
+}
+
+function matchOption(rawValue: string, options: string[]): string | null {
+  const token = normalizeTextToken(rawValue);
+  if (!token) return null;
+
+  const direct = options.find((option) => normalizeTextToken(option) === token);
+  if (direct) return direct;
+
+  const compact = normalizeTextTokenCompact(rawValue);
+  const compactMatch = options.find((option) => normalizeTextTokenCompact(option) === compact);
+  if (compactMatch) return compactMatch;
+
+  const includesMatches = options.filter((option) => {
+    const optionToken = normalizeTextToken(option);
+    return optionToken.includes(token) || token.includes(optionToken);
+  });
+  if (includesMatches.length === 1) return includesMatches[0];
+
+  return null;
+}
+
+function collectModelFields(model: USModelDefinition): Map<string, NormalizedModelField> {
+  const out = new Map<string, NormalizedModelField>();
+  for (const field of model.fields || []) {
+    if (!field || typeof field.key !== "string") continue;
+    if ((field.type !== "select" && field.type !== "multiselect") || !Array.isArray(field.options)) continue;
+    const options = field.options.map((option) => String(option || "").trim()).filter(Boolean);
+    if (options.length === 0) continue;
+    out.set(field.key, {
+      key: field.key,
+      type: field.type,
+      options,
+    });
+  }
+  return out;
+}
+
+function buildImportNormalizationContext(input: {
+  projectId?: string | null;
+  modelKey?: string | null;
+}): ImportNormalizationContext | null {
+  const projectId = String(input.projectId || "").trim();
+  if (!projectId) return null;
+
+  const project = getProjectById(projectId);
+  if (!project) return null;
+
+  try {
+    const schema = getProjectSchemaDefinition(projectId);
+    const usThesaurus = getUsTopLevelThesaurusFromSchema(schema);
+    const modelKey = String(input.modelKey || "").trim() || BASE_US_MODEL_KEY;
+    const model = getUSModel(project, modelKey);
+    return {
+      modelKey: model.key,
+      modelFields: collectModelFields(model),
+      tipoVocabulary: usThesaurus.tipo || [],
+      definizioneVocabulary: usThesaurus.definizione || [],
+    };
+  } catch (error) {
+    logger.error("Impossibile costruire contesto normalizzazione import US", {
+      projectId,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+function normalizeSchedaDataWithModel(
+  schedaData: Record<string, string>,
+  context: ImportNormalizationContext | null,
+): Record<string, string> {
+  if (!context) return schedaData;
+
+  const out: Record<string, string> = {};
+  for (const [key, rawValue] of Object.entries(schedaData)) {
+    const text = String(rawValue || "").trim();
+    if (!text) continue;
+
+    const modelField = context.modelFields.get(key);
+    if (!modelField) {
+      out[key] = text;
+      continue;
+    }
+
+    if (modelField.type === "select") {
+      out[key] = matchOption(text, modelField.options) || text;
+      continue;
+    }
+
+    const normalizedValues = parseMultiValueText(text)
+      .map((item) => matchOption(item, modelField.options))
+      .filter((item): item is string => !!item);
+    const unique = Array.from(new Set(normalizedValues));
+    out[key] = unique.length > 0 ? JSON.stringify(unique) : text;
+  }
+
+  return out;
+}
+
+function normalizeImportItem(
+  item: USImportPreviewItem,
+  context: ImportNormalizationContext | null,
+): USImportPreviewItem {
+  const tipo = normalizeUsTipoWithVocabulary(item.tipo, context?.tipoVocabulary || []);
+  const definizione = normalizeUsDefinizioneWithVocabulary(
+    item.definizione,
+    tipo || item.tipo,
+    context?.definizioneVocabulary || [],
+  );
+
+  return {
+    ...item,
+    tipo,
+    definizione,
+    schedaData: normalizeSchedaDataWithModel(item.schedaData, context),
+  };
 }
 
 function extractUsNumberFromCode(code: string): number | null {
@@ -417,6 +584,8 @@ export async function buildUSImportPreview(input: {
   source: "text" | "docx" | "google-doc";
   text: string;
   existingUs: UnitaStratigrafica[];
+  projectId?: string | null;
+  modelKey?: string | null;
 }): Promise<USImportPreview> {
   const text = String(input.text || "").trim();
   if (!text) {
@@ -483,7 +652,13 @@ export async function buildUSImportPreview(input: {
   }
 
   const normalizedItems = Array.from(byCode.values()).sort(sortByCode);
-  const items = normalizedItems.map((item, index) => toPreviewItem(item, existingCodes, index));
+  const normalizationContext = buildImportNormalizationContext({
+    projectId: input.projectId,
+    modelKey: input.modelKey,
+  });
+  const items = normalizedItems.map((item, index) =>
+    normalizeImportItem(toPreviewItem(item, existingCodes, index), normalizationContext),
+  );
 
   return {
     source: input.source,
@@ -532,7 +707,7 @@ function buildCreatePayload(
   item: USImportPreviewItem,
   cantiereId: number,
   giornataId: number,
-  modelKey: string | null | undefined,
+  context: ImportNormalizationContext | null,
 ): InsertUS {
   const hasSchedaData = Object.keys(item.schedaData).length > 0;
   return {
@@ -554,7 +729,7 @@ function buildCreatePayload(
     periodoFinale: item.periodoFinale,
     materialiRinvenuti: item.materialiRinvenuti,
     campioni: item.campioni,
-    schedaModelKey: modelKey || "base-us",
+    schedaModelKey: context?.modelKey || BASE_US_MODEL_KEY,
     schedaData: hasSchedaData ? JSON.stringify(item.schedaData) : null,
   };
 }
@@ -565,6 +740,7 @@ export function applyUSImportPreview(
     cantiereId: number;
     giornataId: number;
     items: unknown[];
+    projectId?: string | null;
     modelKey?: string | null;
   },
 ): USImportApplyResult {
@@ -578,9 +754,14 @@ export function applyUSImportPreview(
     errors: [],
     createdCodes: [],
   };
+  const normalizationContext = buildImportNormalizationContext({
+    projectId: input.projectId,
+    modelKey: input.modelKey,
+  });
 
   for (const rawItem of input.items) {
-    const parsed = sanitizeApplyItem(rawItem as USImportApplyInputItem);
+    const sanitized = sanitizeApplyItem(rawItem as USImportApplyInputItem);
+    const parsed = sanitized ? normalizeImportItem(sanitized, normalizationContext) : null;
     if (!parsed) {
       result.skipped += 1;
       continue;
@@ -594,7 +775,7 @@ export function applyUSImportPreview(
 
     try {
       input.storage.createUS(
-        buildCreatePayload(parsed, input.cantiereId, input.giornataId, input.modelKey),
+        buildCreatePayload(parsed, input.cantiereId, input.giornataId, normalizationContext),
       );
       existingCodes.add(codeKey);
       result.created += 1;
@@ -608,4 +789,3 @@ export function applyUSImportPreview(
 
   return result;
 }
-

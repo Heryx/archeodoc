@@ -5,7 +5,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Wand2, Download, ChevronDown, ChevronUp, Loader2, FileText, KeyRound } from "lucide-react";
+import { Wand2, Download, CalendarRange, ChevronDown, ChevronUp, Loader2, FileText, KeyRound } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { buildProjectUrl, getCurrentProjectId, getProjectHeader } from "@/lib/project";
 
@@ -64,6 +64,34 @@ export function ReportPage({ cidOverride, embedded = false }: ReportPageProps = 
       URL.revokeObjectURL(url);
     } catch {
       toast({ title: "Errore download", variant: "destructive" });
+    }
+  };
+
+  const handleWeeklyDownload = async (referenceDate: string) => {
+    try {
+      const endpoint = buildProjectUrl(
+        `/api/cantieri/${cid}/giornale/export-weekly-docx?date=${encodeURIComponent(referenceDate)}`,
+      );
+      const res = await fetch(endpoint, { headers: getProjectHeader() });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        toast({
+          title: "Export settimanale non disponibile",
+          description: String(payload?.error || "Nessun report nella settimana selezionata"),
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Diario_settimanale_${referenceDate}.docx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast({ title: "Errore download settimanale", variant: "destructive" });
     }
   };
 
@@ -173,6 +201,15 @@ export function ReportPage({ cidOverride, embedded = false }: ReportPageProps = 
                           onClick={() => handleDownload(g.id, g.data)}
                         >
                           <Download size={12} /> Scarica .docx
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="gap-1 text-xs"
+                          data-testid={`button-download-weekly-docx-${g.id}`}
+                          onClick={() => handleWeeklyDownload(g.data)}
+                        >
+                          <CalendarRange size={12} /> Scarica settimana
                         </Button>
                       </>
                     )}

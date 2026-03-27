@@ -5,7 +5,11 @@ import { analizzaTestoUS, analizzaTestoGiornata } from "../ai";
 import { logger } from "../logger";
 import { applyAiFieldsToUS, buildUSAiFillSuggestions } from "../ai_fill";
 import { extractTextFromDocxBuffer } from "../docx_extract";
-import { exportSchedaUSDocx, exportReportGiornalieroDocx } from "../docx_export";
+import {
+  exportSchedaUSDocx,
+  exportReportGiornalieroDocx,
+  exportReportSettimanaleDocx,
+} from "../docx_export";
 import { getDocumentText } from "../google_docs";
 import { applyUSImportPreview, buildUSImportPreview } from "../us_extractor";
 import {
@@ -65,6 +69,41 @@ function parseArray(value: unknown): unknown[] {
   return [];
 }
 
+function parseIsoDateOnly(value: unknown): Date | null {
+  const text = parseOptionalText(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+  const parsed = new Date(`${text}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+}
+
+function toIsoDateOnly(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function startOfWeekMonday(date: Date): Date {
+  const day = (date.getDay() + 6) % 7;
+  const start = new Date(date);
+  start.setDate(start.getDate() - day);
+  return start;
+}
+
+function endOfWeekSunday(date: Date): Date {
+  const end = new Date(date);
+  end.setDate(end.getDate() + 6);
+  return end;
+}
+
+function isDateInRange(date: Date, start: Date, end: Date): boolean {
+  const dateIso = toIsoDateOnly(date);
+  const startIso = toIsoDateOnly(start);
+  const endIso = toIsoDateOnly(end);
+  return dateIso >= startIso && dateIso <= endIso;
+}
+
 const aiFillDocxUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024 },
@@ -95,6 +134,7 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
         cantiereId: cid,
         giornataId: gid,
         items,
+        projectId: ctx.project.id,
         modelKey: cantiere.usModelKey,
       });
       return res.json({ mode: "applied", ...applied });
@@ -106,6 +146,8 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
         source: "text",
         text: sourceText,
         existingUs: ctx.storage.getUSList(cid),
+        projectId: ctx.project.id,
+        modelKey: cantiere.usModelKey,
       });
       return res.json({ mode: "preview", preview });
     } catch (error: any) {
@@ -137,6 +179,7 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
         cantiereId: cid,
         giornataId: gid,
         items,
+        projectId: ctx.project.id,
         modelKey: cantiere.usModelKey,
       });
       return res.json({ mode: "applied", ...applied });
@@ -154,6 +197,8 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
         source: "docx",
         text,
         existingUs: ctx.storage.getUSList(cid),
+        projectId: ctx.project.id,
+        modelKey: cantiere.usModelKey,
       });
       return res.json({ mode: "preview", preview, filename: file.originalname });
     } catch (error: any) {
@@ -185,6 +230,7 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
         cantiereId: cid,
         giornataId: gid,
         items,
+        projectId: ctx.project.id,
         modelKey: cantiere.usModelKey,
       });
       return res.json({ mode: "applied", ...applied });
@@ -205,6 +251,8 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
         source: "google-doc",
         text: doc.text || "",
         existingUs: ctx.storage.getUSList(cid),
+        projectId: ctx.project.id,
+        modelKey: cantiere.usModelKey,
       });
       return res.json({
         mode: "preview",
@@ -660,6 +708,60 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
       res.send(buf);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  }));
+
+  // Export giornale settimanale DOCX
+  app.get("/api/cantieri/:cid/giornale/export-weekly-docx", withProject(async (ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const cantiere = ctx.storage.getCantiere(cid);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const weekRef = parseIsoDateOnly(req.query.date) || new Date();
+    const weekStart = startOfWeekMonday(weekRef);
+    const weekEnd = endOfWeekSunday(weekStart);
+    const weekStartIso = toIsoDateOnly(weekStart);
+    const weekEndIso = toIsoDateOnly(weekEnd);
+
+    const giornateWithReport = ctx.storage
+      .getGiornate(cid)
+      .filter((giornata) => {
+        if (!giornata.aiReportText) return false;
+        const dayDate = parseIsoDateOnly(giornata.data);
+        if (!dayDate) return false;
+        return isDateInRange(dayDate, weekStart, weekEnd);
+      })
+      .sort((a, b) => String(a.data || "").localeCompare(String(b.data || "")));
+
+    if (giornateWithReport.length === 0) {
+      return res.status(404).json({
+        error: `Nessun report giornaliero disponibile nella settimana ${weekStartIso} - ${weekEndIso}`,
+      });
+    }
+
+    try {
+      const entries = giornateWithReport.map((giornata) => {
+        const qcLogs = ctx.storage.getQcLogs(cid, giornata.id);
+        const campiMancanti = qcLogs.filter((log) => log.livello === "error").map((log) => log.messaggio);
+        return {
+          giornata,
+          reportFormattato: giornata.aiReportText || "",
+          campiMancanti,
+        };
+      });
+
+      const buf = await exportReportSettimanaleDocx({
+        cantiere,
+        weekStart: weekStartIso,
+        weekEnd: weekEndIso,
+        entries,
+      });
+      const filename = `Diario_settimanale_${weekStartIso}_${weekEndIso}.docx`;
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(buf);
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Errore export giornale settimanale DOCX" });
     }
   }));
 }
