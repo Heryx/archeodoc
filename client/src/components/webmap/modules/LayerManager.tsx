@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Eye,
@@ -7,12 +7,10 @@ import {
   Layers,
   Loader2,
   Palette,
-  Plus,
   Trash2,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { getProjectHeader } from "@/lib/project";
@@ -236,10 +234,7 @@ export function LayerManager({
   onClose: () => void;
   onLayersChange?: (layers: WebMapLayer[]) => void;
 }) {
-  const { toast } = useToast();
   const queryClient = useQueryClient();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [displayName, setDisplayName] = useState("");
   const [dragId, setDragId] = useState<number | null>(null);
 
   const { data: layers = [], isLoading } = useQuery<WebMapLayer[]>({
@@ -254,42 +249,6 @@ export function LayerManager({
       return data;
     },
   });
-
-  const uploadMutation = useMutation({
-    mutationFn: async (file: File) => {
-      const formData = new FormData();
-      formData.append("file", file);
-      if (displayName.trim()) formData.append("displayName", displayName.trim());
-      const response = await fetch(`/api/cantieri/${cantiereId}/webmap/layers`, {
-        method: "POST",
-        body: formData,
-        headers: getProjectHeader(),
-      });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error(body?.error || "Upload layer fallito");
-      }
-      return response.json() as Promise<{ layer: WebMapLayer; warnings?: string[] }>;
-    },
-    onSuccess: async (data) => {
-      await queryClient.invalidateQueries({ queryKey: ["webmap-layers", cantiereId] });
-      setDisplayName("");
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      const warningsCount = data.warnings?.length || 0;
-      toast({
-        title: "Layer importato",
-        description: `${data.layer?.featureCount ?? 0} feature${warningsCount ? ` · ${warningsCount} avvisi` : ""}`,
-      });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Errore import layer",
-        description: error?.message || "Operazione non riuscita",
-        variant: "destructive",
-      });
-    },
-  });
-
   const reorderMutation = useMutation({
     mutationFn: async (payload: { id: number; zIndex: number }) => {
       const response = await fetch(`/api/cantieri/${cantiereId}/webmap/layers/${payload.id}/zindex`, {
@@ -327,35 +286,6 @@ export function LayerManager({
         </Button>
       </div>
 
-      <div className="px-3 py-3 border-b border-border/50 space-y-2 shrink-0">
-        <Input
-          placeholder="Nome visualizzato (opzionale)"
-          value={displayName}
-          onChange={(event) => setDisplayName(event.target.value)}
-          className="h-7 text-xs"
-        />
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".gpkg,.geojson,.json"
-          className="hidden"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) uploadMutation.mutate(file);
-          }}
-        />
-        <Button
-          size="sm"
-          variant="outline"
-          className="w-full gap-1.5 h-7 text-xs"
-          disabled={uploadMutation.isPending}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          {uploadMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
-          Aggiungi layer (.gpkg / .geojson)
-        </Button>
-      </div>
-
       <div className="flex-1 overflow-auto px-3 py-2 space-y-1.5">
         {isLoading ? (
           <div className="flex justify-center py-6">
@@ -382,3 +312,6 @@ export function LayerManager({
     </div>
   );
 }
+
+
+
