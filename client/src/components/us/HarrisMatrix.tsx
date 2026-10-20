@@ -18,6 +18,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { formatUsCode, type TombaCodeStyle } from "@shared/us_code";
 import { useProjectCodeSettings } from "@/hooks/useProjectCodeSettings";
+import { layoutHarrisMatrix } from "@shared/matrix_layout";
 
 export type HarrisMatrixMode = "all" | "fisica" | "stratigrafica";
 
@@ -261,51 +262,6 @@ function buildGraph(
   };
 }
 
-function computeLayers(nodes: GraphNode[], edges: GraphEdge[]): Map<string, number> {
-  const layers = new Map<string, number>();
-  for (const node of nodes) {
-    layers.set(node.key, 0);
-  }
-
-  const directedEdges = edges.filter((edge) => edge.directed);
-  const maxIterations = Math.max(nodes.length * 2, 1);
-
-  // Longest-path layering: ogni US sta subito sotto la piu profonda che la copre.
-  for (let i = 0; i < maxIterations; i += 1) {
-    let changed = false;
-
-    for (const edge of directedEdges) {
-      const fromLayer = layers.get(edge.from) ?? 0;
-      const toLayer = layers.get(edge.to) ?? 0;
-      if (fromLayer + 1 > toLayer) {
-        layers.set(edge.to, fromLayer + 1);
-        changed = true;
-      }
-    }
-
-    if (!changed) break;
-  }
-
-  // Compattazione: tira ogni nodo verso il basso, appena sopra il suo figlio
-  // piu alto, cosi le US senza copertura non restano tutte sulla prima riga.
-  const childrenLayers = new Map<string, number[]>();
-  for (const edge of directedEdges) {
-    const list = childrenLayers.get(edge.from) ?? [];
-    list.push(layers.get(edge.to) ?? 0);
-    childrenLayers.set(edge.from, list);
-  }
-  for (const node of nodes) {
-    const kids = childrenLayers.get(node.key);
-    if (!kids || kids.length === 0) continue;
-    const target = Math.min(...kids) - 1;
-    if (target > (layers.get(node.key) ?? 0)) {
-      layers.set(node.key, target);
-    }
-  }
-
-  return layers;
-}
-
 function statusFill(status?: string | null): string {
   if (status === "error") return "#fee2e2";
   if (status === "warning") return "#fef3c7";
@@ -384,135 +340,26 @@ export function HarrisMatrix({
       return { layout: null, isolated: isolatedNodes };
     }
 
-    const layers = computeLayers(connectedNodes, graph.edges);
-    const byLayer = new Map<number, GraphNode[]>();
-    for (const node of connectedNodes) {
-      const layer = layers.get(node.key) ?? 0;
-      const current = byLayer.get(layer) ?? [];
-      current.push(node);
-      byLayer.set(layer, current);
-    }
-
-    const layerKeys = Array.from(byLayer.keys()).sort((a, b) => a - b);
-    for (const layer of layerKeys) {
-      byLayer.get(layer)!.sort((a, b) => compareLabels(a.label, b.label));
-    }
-
-    // Adiacenze (dirette + equivalenze) per il riordino baricentrico.
-    const adjacency = new Map<string, string[]>();
-    const pushAdj = (a: string, b: string) => {
-      const list = adjacency.get(a) ?? [];
-      list.push(b);
-      adjacency.set(a, list);
-    };
-    for (const edge of graph.edges) {
-      pushAdj(edge.from, edge.to);
-      pushAdj(edge.to, edge.from);
-    }
-
-    const posOf = new Map<string, number>();
-    const reindex = () => {
-      for (const layer of layerKeys) {
-        byLayer.get(layer)!.forEach((node, index) => posOf.set(node.key, index));
-      }
-    };
-    reindex();
-
-    // Alcune passate di ordinamento baricentrico per ridurre gli incroci.
-    for (let iteration = 0; iteration < 6; iteration += 1) {
-      const order = iteration % 2 === 0 ? layerKeys : [...layerKeys].reverse();
-      for (const layer of order) {
-        const layerNodes = byLayer.get(layer)!;
-        const bary = new Map<string, number>();
-        for (const node of layerNodes) {
-          const neighbours = adjacency.get(node.key) ?? [];
-          const values = neighbours
-            .map((key) => posOf.get(key))
-            .filter((value): value is number => value !== undefined);
-          bary.set(
-            node.key,
-            values.length
-              ? values.reduce((sum, value) => sum + value, 0) / values.length
-              : posOf.get(node.key) ?? 0,
-          );
-        }
-        layerNodes.sort(
-          (a, b) =>
-            (bary.get(a.key)! - bary.get(b.key)!) || compareLabels(a.label, b.label),
-        );
-        reindex();
-      }
-    }
-
-    // Assegnazione delle x: ogni riga resta compatta (nodi a passo fisso) e
-    // viene fatta scorrere in orizzontale per allinearsi ai nodi collegati.
-    // La riga piu popolosa fa da ancora e non si sposta.
-    const minGap = NODE_WIDTH + X_GAP;
-    const xPos = new Map<string, number>();
-    for (const layer of layerKeys) {
-      byLayer.get(layer)!.forEach((node, index) => xPos.set(node.key, index * minGap));
-    }
-
-    let anchorLayer = layerKeys[0];
-    for (const layer of layerKeys) {
-      if (byLayer.get(layer)!.length > byLayer.get(anchorLayer)!.length) {
-        anchorLayer = layer;
-      }
-    }
-
-    for (let pass = 0; pass < 8; pass += 1) {
-      const order = pass % 2 === 0 ? layerKeys : [...layerKeys].reverse();
-      for (const layer of order) {
-        if (layer === anchorLayer) continue;
-        const layerNodes = byLayer.get(layer)!;
-        let shiftSum = 0;
-        let shiftCount = 0;
-        for (const node of layerNodes) {
-          const neighbours = (adjacency.get(node.key) ?? [])
-            .map((key) => xPos.get(key))
-            .filter((value): value is number => value !== undefined);
-          if (!neighbours.length) continue;
-          const target =
-            neighbours.reduce((sum, value) => sum + value, 0) / neighbours.length;
-          shiftSum += target - xPos.get(node.key)!;
-          shiftCount += 1;
-        }
-        if (!shiftCount) continue;
-        const shift = shiftSum / shiftCount;
-        for (const node of layerNodes) {
-          xPos.set(node.key, xPos.get(node.key)! + shift);
-        }
-      }
-    }
-
-    const minX = Math.min(...Array.from(xPos.values()));
-    xPos.forEach((value, key) => xPos.set(key, value - minX + MARGIN));
-
-    const positionedNodes: PositionedNode[] = [];
-    layerKeys.forEach((layer, rowIndex) => {
-      for (const node of byLayer.get(layer)!) {
-        positionedNodes.push({
-          ...node,
-          x: xPos.get(node.key)!,
-          y: MARGIN + rowIndex * (NODE_HEIGHT + Y_GAP),
-        });
-      }
+    // Layout condiviso con l'export PDF/SVG (shared/matrix_layout).
+    const result = layoutHarrisMatrix(connectedNodes, graph.edges, {
+      nodeWidth: NODE_WIDTH,
+      nodeHeight: NODE_HEIGHT,
+      xGap: X_GAP,
+      yGap: Y_GAP,
+      margin: MARGIN,
     });
 
-    const width =
-      Math.max(...positionedNodes.map((node) => node.x)) + NODE_WIDTH + MARGIN;
-    const height =
-      MARGIN * 2 +
-      layerKeys.length * NODE_HEIGHT +
-      Math.max(layerKeys.length - 1, 0) * Y_GAP;
-
+    const positionedNodes: PositionedNode[] = connectedNodes.map((node) => {
+      const pos = result.positions.get(node.key)!;
+      return { ...node, x: pos.x, y: pos.y };
+    });
     const positions = new Map<string, PositionedNode>();
     for (const node of positionedNodes) {
       positions.set(node.key, node);
     }
 
     return {
-      layout: { nodes: positionedNodes, positions, width, height },
+      layout: { nodes: positionedNodes, positions, width: result.width, height: result.height },
       isolated: isolatedNodes,
     };
   }, [graph.edges, graph.nodes]);

@@ -35,6 +35,7 @@ import {
   exportHarrisMatrixPdf,
   exportHarrisMatrixSvg,
   matrixExportFileBase,
+  parseMatrixPdfPage,
   type HarrisMatrixMode,
 } from "../matrix_export";
 import { calcolaSettimaneProgetto } from "@shared/weekUtils";
@@ -799,8 +800,11 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     const usList = ctx.storage.getUSList(id);
 
     try {
-      const buf = await exportHarrisMatrixPdf(cantiere, usList, mode);
-      const filename = `${matrixExportFileBase(cantiere, String(id))}_${mode}.pdf`;
+      const buf = await exportHarrisMatrixPdf(cantiere, usList, mode, {
+        page: parseMatrixPdfPage(req.query.page),
+      });
+      const pageSuffix = req.query.page === "a4-portrait" ? "_A4v" : req.query.page === "a4-landscape" ? "_A4o" : "";
+      const filename = `${matrixExportFileBase(cantiere, String(id))}_${mode}${pageSuffix}.pdf`;
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
       res.send(buf);

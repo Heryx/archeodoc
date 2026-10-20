@@ -8,8 +8,9 @@ import {
   Paragraph,
   TextRun,
 } from "docx";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb, type PDFPage } from "pdf-lib";
 import type { Cantiere, UnitaStratigrafica } from "@shared/schema";
+import { layoutHarrisMatrix } from "@shared/matrix_layout";
 
 export type HarrisMatrixMode = "all" | "fisica" | "stratigrafica";
 
@@ -310,40 +311,25 @@ export function buildMatrixEdges(
   });
 }
 
-/** Livello verticale via longest-path: per un arco from -> to, "to" sta sotto "from". */
-function assignLevels(nodeKeys: string[], directedEdges: MatrixEdge[]): Map<string, number> {
-  const level = new Map<string, number>();
-  for (const key of nodeKeys) level.set(key, 0);
-
-  const maxIterations = nodeKeys.length + 1;
-  for (let i = 0; i < maxIterations; i += 1) {
-    let changed = false;
-    for (const edge of directedEdges) {
-      const fromLevel = level.get(edge.from) ?? 0;
-      const toLevel = level.get(edge.to) ?? 0;
-      if (toLevel < fromLevel + 1) {
-        level.set(edge.to, fromLevel + 1);
-        changed = true;
-      }
-    }
-    if (!changed) break;
-  }
-
-  return level;
-}
-
 const GRAPH_NODE_W = 108;
 const GRAPH_NODE_H = 40;
 const GRAPH_GAP_X = 26;
 const GRAPH_GAP_Y = 60;
 
+export type MatrixLayoutOptions = {
+  /** Numero massimo di nodi per riga; i livelli piu' larghi si spezzano in piu' righe. */
+  maxCols?: number;
+};
+
 /**
  * Costruisce il grafo completo della Harris Matrix: nodi (con forma e coordinate
  * di layout) e archi. Le US che coprono altre US stanno piu' in alto (y minore).
+ * Il layout e' quello condiviso con la vista a schermo (shared/matrix_layout).
  */
 export function buildMatrixGraph(
   usList: UnitaStratigrafica[],
   mode: HarrisMatrixMode,
+  layoutOptions: MatrixLayoutOptions = {},
 ): MatrixGraph {
   const edges = buildMatrixEdges(usList, mode);
 
@@ -380,33 +366,23 @@ export function buildMatrixGraph(
     }
   }
 
-  const keys = Array.from(nodes.keys());
-  const level = assignLevels(keys, edges.filter((edge) => edge.directed));
-
-  const byLevel = new Map<number, MatrixNode[]>();
-  keys.forEach((key) => {
-    const node = nodes.get(key)!;
-    node.level = level.get(key) ?? 0;
-    const bucket = byLevel.get(node.level) ?? [];
-    bucket.push(node);
-    byLevel.set(node.level, bucket);
-  });
-
-  const levels = Array.from(byLevel.keys()).sort((a, b) => a - b);
-  const maxPerRow = Math.max(1, ...levels.map((lvl) => byLevel.get(lvl)!.length));
-  const rowWidth = maxPerRow * GRAPH_NODE_W + (maxPerRow - 1) * GRAPH_GAP_X;
-
-  levels.forEach((lvl, rowIndex) => {
-    const rowNodes = byLevel
-      .get(lvl)!
-      .sort((a, b) => a.label.localeCompare(b.label, "it", { numeric: true }));
-    const totalWidth =
-      rowNodes.length * GRAPH_NODE_W + (rowNodes.length - 1) * GRAPH_GAP_X;
-    const startX = (rowWidth - totalWidth) / 2;
-    rowNodes.forEach((node, colIndex) => {
-      node.x = startX + colIndex * (GRAPH_NODE_W + GRAPH_GAP_X);
-      node.y = rowIndex * (GRAPH_NODE_H + GRAPH_GAP_Y);
-    });
+  const layout = layoutHarrisMatrix(
+    Array.from(nodes.values()).map((node) => ({ key: node.key, label: node.label })),
+    edges.map((edge) => ({ from: edge.from, to: edge.to, directed: edge.directed })),
+    {
+      nodeWidth: GRAPH_NODE_W,
+      nodeHeight: GRAPH_NODE_H,
+      xGap: GRAPH_GAP_X,
+      yGap: GRAPH_GAP_Y,
+      maxCols: layoutOptions.maxCols,
+    },
+  );
+  nodes.forEach((node, key) => {
+    const pos = layout.positions.get(key);
+    if (!pos) return;
+    node.x = pos.x;
+    node.y = pos.y;
+    node.level = pos.level;
   });
 
   const orderedNodes = Array.from(nodes.values()).sort(
@@ -611,12 +587,41 @@ export async function exportHarrisMatrixDocx(
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Export PDF â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+export type MatrixPdfPage = "libero" | "a4-portrait" | "a4-landscape";
+
+export type MatrixPdfOptions = {
+  /** libero = una pagina grande quanto il disegno; a4-* = pagine A4 con il disegno spezzato. */
+  page?: MatrixPdfPage;
+};
+
+export function parseMatrixPdfPage(value: unknown): MatrixPdfPage {
+  return value === "a4-portrait" || value === "a4-landscape" ? value : "libero";
+}
+
+/** Scala target dei nodi su A4: ne deriva il numero massimo di colonne per riga. */
+const A4_TARGET_NODE_SCALE = 0.8;
+
 export async function exportHarrisMatrixPdf(
   cantiere: Cantiere | undefined,
   usList: UnitaStratigrafica[],
   mode: HarrisMatrixMode,
+  options: MatrixPdfOptions = {},
 ): Promise<Buffer> {
-  const { nodes, edges } = buildMatrixGraph(usList, mode);
+  const pageFormat = options.page ?? "libero";
+  const a4 = pageFormat !== "libero";
+  const a4Size: [number, number] =
+    pageFormat === "a4-landscape" ? [841.89, 595.28] : [595.28, 841.89];
+  const a4Margin = 30;
+  const maxCols = a4
+    ? Math.max(
+        1,
+        Math.floor(
+          ((a4Size[0] - a4Margin * 2) / A4_TARGET_NODE_SCALE + GRAPH_GAP_X) /
+            (GRAPH_NODE_W + GRAPH_GAP_X),
+        ),
+      )
+    : undefined;
+  const { nodes, edges } = buildMatrixGraph(usList, mode, { maxCols });
   const forme = contaForme(nodes);
   const referenziateMancanti = nodes.filter((node) => node.missing).length;
 
@@ -638,9 +643,18 @@ export async function exportHarrisMatrixPdf(
   }
 
   // â”€â”€ Pagina 1: il disegno della matrix â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const outerMargin = 36;
-  const cartHeight = 132;
+  const outerMargin = a4 ? a4Margin : 36;
   const MAX_SIDE = 13000;
+  const TAG_SPACE = 18;
+  const HEADER_STRIP = 16;
+
+  // Legenda: nell'A4 le voci vanno a capo, nel formato libero restano su una riga.
+  const legendPerRow = a4
+    ? Math.max(1, Math.floor((a4Size[0] - outerMargin * 2 - 78) / 104))
+    : Number.POSITIVE_INFINITY;
+  const formeRows = a4 ? Math.max(1, Math.ceil(formePresenti.length / legendPerRow)) : 1;
+  const relRows = a4 ? Math.max(1, Math.ceil(relazioniPresenti.length / legendPerRow)) : 1;
+  const cartHeight = 132 + (formeRows - 1) * 14 + (relRows - 1) * 14;
 
   const graphW = nodes.length
     ? Math.max(GRAPH_NODE_W, ...nodes.map((node) => node.x + GRAPH_NODE_W))
@@ -649,102 +663,154 @@ export async function exportHarrisMatrixPdf(
     ? Math.max(...nodes.map((node) => node.y + GRAPH_NODE_H))
     : GRAPH_NODE_H;
 
-  const drawScale = Math.min(
-    1,
-    (MAX_SIDE - outerMargin * 2) / graphW,
-    (MAX_SIDE - outerMargin * 2 - cartHeight) / graphH,
-  );
+  const availW = a4 ? a4Size[0] - outerMargin * 2 : MAX_SIDE - outerMargin * 2;
+  const drawScale = a4
+    ? Math.min(1, availW / graphW)
+    : Math.min(
+        1,
+        (MAX_SIDE - outerMargin * 2) / graphW,
+        (MAX_SIDE - outerMargin * 2 - cartHeight) / graphH,
+      );
+  const gxOffset = a4 ? (availW - graphW * drawScale) / 2 : 0;
 
-  const pageW = Math.max(560, graphW * drawScale + outerMargin * 2);
-  const pageH = Math.max(320, graphH * drawScale + cartHeight + outerMargin * 2);
-  const diagram = pdf.addPage([pageW, pageH]);
+  // Righe del disegno (nodi con la stessa y) e loro ripartizione in pagine.
+  const rowYs = Array.from(new Set(nodes.map((node) => node.y))).sort((a, b) => a - b);
+  const rowIndexOf = new Map<number, number>(rowYs.map((y, index) => [y, index]));
+  const nodeRow = (node: MatrixNode) => rowIndexOf.get(node.y) ?? 0;
+  const nodeByKey = new Map<string, MatrixNode>(nodes.map((node) => [node.key, node]));
+  const rowPitchG = GRAPH_NODE_H + GRAPH_GAP_Y;
 
-  const gx = (x: number) => outerMargin + x * drawScale;
-  const gyTop = (y: number) => pageH - outerMargin - cartHeight - y * drawScale;
+  /** Archi che attraversano un taglio tra la riga cut-1 e la riga cut. */
+  const crossingAt = (cut: number) =>
+    edges.filter((edge) => {
+      const a = nodeByKey.get(edge.from);
+      const b = nodeByKey.get(edge.to);
+      if (!a || !b) return false;
+      const ra = nodeRow(a);
+      const rb = nodeRow(b);
+      return Math.min(ra, rb) < cut && Math.max(ra, rb) >= cut;
+    }).length;
 
-  // Cartiglio
-  let ty = pageH - outerMargin;
-  diagram.drawText("HARRIS MATRIX", { x: outerMargin, y: ty - 18, size: 20, font: bold, color: ink });
-  diagram.drawText(`Cantiere ${code}   -   ${modeLabel(mode)}`, {
-    x: outerMargin,
-    y: ty - 35,
-    size: 10,
-    font,
-    color: slate,
+  const pagePlan: Array<{ from: number; to: number }> = [];
+  if (!a4 || rowYs.length === 0) {
+    pagePlan.push({ from: 0, to: rowYs.length });
+  } else {
+    const rowsFit = (availH: number) =>
+      Math.max(1, Math.floor((availH / drawScale + GRAPH_GAP_Y) / rowPitchG));
+    let start = 0;
+    while (start < rowYs.length) {
+      const availH =
+        a4Size[1] -
+        outerMargin * 2 -
+        TAG_SPACE * 2 -
+        (start === 0 ? cartHeight : HEADER_STRIP);
+      const fit = rowsFit(availH);
+      if (start + fit >= rowYs.length) {
+        pagePlan.push({ from: start, to: rowYs.length });
+        break;
+      }
+      // Taglio nel punto con meno archi attraversanti, nelle ultime righe utili.
+      let bestCut = start + fit;
+      let bestCrossing = crossingAt(bestCut);
+      for (let cut = start + fit - 1; cut > start && cut >= start + fit - 3; cut -= 1) {
+        const crossing = crossingAt(cut);
+        if (crossing < bestCrossing) {
+          bestCrossing = crossing;
+          bestCut = cut;
+        }
+      }
+      pagePlan.push({ from: start, to: bestCut });
+      start = bestCut;
+    }
+  }
+  const pageOfRow = new Map<number, number>();
+  pagePlan.forEach((plan, index) => {
+    for (let r = plan.from; r < plan.to; r += 1) pageOfRow.set(r, index + 1);
   });
-  diagram.drawText(
-    `US: ${usList.length}    Relazioni: ${edges.length}    Generato ${generato}`,
-    { x: outerMargin, y: ty - 49, size: 10, font, color: slate },
-  );
-  diagram.drawText(formeSummaryLine(forme), {
-    x: outerMargin,
-    y: ty - 63,
-    size: 9,
-    font,
-    color: slate,
-  });
+  const totalPages = pagePlan.length;
 
-  const lyForme = ty - 84;
-  diagram.drawText("FORME US", { x: outerMargin, y: lyForme, size: 9, font: bold, color: ink });
-  formePresenti.forEach((forma, index) => {
-    const lx = outerMargin + 78 + index * 104;
-    diagram.drawRectangle({
-      x: lx,
-      y: lyForme - 1,
-      width: 10,
-      height: 10,
-      color: hexRgb(formaFill(forma)),
-      borderColor: ink,
-      borderWidth: 0.75,
-    });
-    diagram.drawText(formaLabel(forma), { x: lx + 15, y: lyForme, size: 8, font, color: slate });
-  });
-
-  const lyRel = ty - 102;
-  diagram.drawText("RELAZIONI", { x: outerMargin, y: lyRel, size: 9, font: bold, color: ink });
-  relazioniPresenti.forEach((type, index) => {
-    const lx = outerMargin + 78 + index * 104;
-    diagram.drawLine({
-      start: { x: lx, y: lyRel + 3 },
-      end: { x: lx + 20, y: lyRel + 3 },
-      thickness: 2,
-      color: hexRgb(edgeStroke(type)),
-      dashArray: type === "equivalenza" ? [3, 2] : undefined,
-    });
-    diagram.drawText(edgeLabel(type), { x: lx + 26, y: lyRel, size: 8, font, color: slate });
-  });
-
-  diagram.drawLine({
-    start: { x: outerMargin, y: pageH - outerMargin - cartHeight + 10 },
-    end: { x: pageW - outerMargin, y: pageH - outerMargin - cartHeight + 10 },
-    thickness: 0.75,
-    color: hexRgb("#e2e8f0"),
-  });
-
-  if (nodes.length === 0) {
-    diagram.drawText("Nessuna US disponibile.", {
+  const drawCartouche = (page: PDFPage, topY: number, pageW: number) => {
+    page.drawText("HARRIS MATRIX", { x: outerMargin, y: topY - 18, size: 20, font: bold, color: ink });
+    page.drawText(`Cantiere ${code}   -   ${modeLabel(mode)}`, {
       x: outerMargin,
-      y: gyTop(0) - 16,
-      size: 12,
+      y: topY - 35,
+      size: 10,
       font,
       color: slate,
     });
-  } else {
-    const nodeByKey = new Map<string, MatrixNode>();
-    for (const node of nodes) nodeByKey.set(node.key, node);
+    page.drawText(
+      `US: ${usList.length}    Relazioni: ${edges.length}    Generato ${generato}`,
+      { x: outerMargin, y: topY - 49, size: 10, font, color: slate },
+    );
+    page.drawText(formeSummaryLine(forme), {
+      x: outerMargin,
+      y: topY - 63,
+      size: 9,
+      font,
+      color: slate,
+    });
 
+    const lyForme = topY - 84;
+    page.drawText("FORME US", { x: outerMargin, y: lyForme, size: 9, font: bold, color: ink });
+    formePresenti.forEach((forma, index) => {
+      const lx = outerMargin + 78 + (index % legendPerRow) * 104;
+      const ly = lyForme - Math.floor(index / legendPerRow) * 14;
+      page.drawRectangle({
+        x: lx,
+        y: ly - 1,
+        width: 10,
+        height: 10,
+        color: hexRgb(formaFill(forma)),
+        borderColor: ink,
+        borderWidth: 0.75,
+      });
+      page.drawText(formaLabel(forma), { x: lx + 15, y: ly, size: 8, font, color: slate });
+    });
+
+    const lyRel = topY - 102 - (formeRows - 1) * 14;
+    page.drawText("RELAZIONI", { x: outerMargin, y: lyRel, size: 9, font: bold, color: ink });
+    relazioniPresenti.forEach((type, index) => {
+      const lx = outerMargin + 78 + (index % legendPerRow) * 104;
+      const ly = lyRel - Math.floor(index / legendPerRow) * 14;
+      page.drawLine({
+        start: { x: lx, y: ly + 3 },
+        end: { x: lx + 20, y: ly + 3 },
+        thickness: 2,
+        color: hexRgb(edgeStroke(type)),
+        dashArray: type === "equivalenza" ? [3, 2] : undefined,
+      });
+      page.drawText(edgeLabel(type), { x: lx + 26, y: ly, size: 8, font, color: slate });
+    });
+
+    page.drawLine({
+      start: { x: outerMargin, y: topY - cartHeight + 10 },
+      end: { x: pageW - outerMargin, y: topY - cartHeight + 10 },
+      thickness: 0.75,
+      color: hexRgb("#e2e8f0"),
+    });
+  };
+
+  /** Disegna le righe [from, to) del grafo con il bordo superiore a topPdfY. */
+  const drawSlice = (page: PDFPage, from: number, to: number, topPdfY: number) => {
+    const inSlice = (node: MatrixNode) => {
+      const r = nodeRow(node);
+      return r >= from && r < to;
+    };
+    const originY = rowYs[from] ?? 0;
+    const gx = (x: number) => outerMargin + gxOffset + x * drawScale;
+    const gyTop = (y: number) => topPdfY - (y - originY) * drawScale;
     const nodeW = GRAPH_NODE_W * drawScale;
     const nodeH = GRAPH_NODE_H * drawScale;
 
-    // Archi
+    // Archi interni alla pagina
     for (const edge of edges) {
       const a = nodeByKey.get(edge.from);
       const b = nodeByKey.get(edge.to);
-      if (!a || !b) continue;
+      if (!a || !b || !inSlice(a) || !inSlice(b)) continue;
       const color = hexRgb(edgeStroke(edge.type));
 
       if (!edge.directed) {
-        diagram.drawLine({
+        page.drawLine({
           start: { x: gx(a.x + GRAPH_NODE_W / 2), y: gyTop(a.y) - nodeH / 2 },
           end: { x: gx(b.x + GRAPH_NODE_W / 2), y: gyTop(b.y) - nodeH / 2 },
           thickness: 1.1,
@@ -762,19 +828,20 @@ export async function exportHarrisMatrixPdf(
       const y2 = gyTop(lower.y);
       const midY = (y1 + y2) / 2;
 
-      diagram.drawLine({ start: { x: x1, y: y1 }, end: { x: x1, y: midY }, thickness: 1.1, color });
-      diagram.drawLine({ start: { x: x1, y: midY }, end: { x: x2, y: midY }, thickness: 1.1, color });
-      diagram.drawLine({ start: { x: x2, y: midY }, end: { x: x2, y: y2 }, thickness: 1.1, color });
-      diagram.drawLine({ start: { x: x2, y: y2 }, end: { x: x2 - 3.5, y: y2 + 6 }, thickness: 1.1, color });
-      diagram.drawLine({ start: { x: x2, y: y2 }, end: { x: x2 + 3.5, y: y2 + 6 }, thickness: 1.1, color });
+      page.drawLine({ start: { x: x1, y: y1 }, end: { x: x1, y: midY }, thickness: 1.1, color });
+      page.drawLine({ start: { x: x1, y: midY }, end: { x: x2, y: midY }, thickness: 1.1, color });
+      page.drawLine({ start: { x: x2, y: midY }, end: { x: x2, y: y2 }, thickness: 1.1, color });
+      page.drawLine({ start: { x: x2, y: y2 }, end: { x: x2 - 3.5, y: y2 + 6 }, thickness: 1.1, color });
+      page.drawLine({ start: { x: x2, y: y2 }, end: { x: x2 + 3.5, y: y2 + 6 }, thickness: 1.1, color });
     }
 
     // Nodi
     const labelSize = Math.max(6, Math.min(11, 12 * drawScale));
     for (const node of nodes) {
+      if (!inSlice(node)) continue;
       const rx = gx(node.x);
       const rTop = gyTop(node.y);
-      diagram.drawRectangle({
+      page.drawRectangle({
         x: rx,
         y: rTop - nodeH,
         width: nodeW,
@@ -784,7 +851,7 @@ export async function exportHarrisMatrixPdf(
         borderWidth: 0.9,
       });
       const textWidth = bold.widthOfTextAtSize(node.label, labelSize);
-      diagram.drawText(node.label, {
+      page.drawText(node.label, {
         x: rx + Math.max(2, (nodeW - textWidth) / 2),
         y: rTop - nodeH / 2 - labelSize * 0.34,
         size: labelSize,
@@ -792,9 +859,133 @@ export async function exportHarrisMatrixPdf(
         color: ink,
       });
     }
-  }
 
-  // â”€â”€ Pagine successive: elenco testuale delle relazioni â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    if (totalPages <= 1) return;
+
+    // Connettori di continuazione: archi che escono dalla pagina.
+    type LinkMap = Map<string, Map<number, string[]>>;
+    const below: LinkMap = new Map();
+    const above: LinkMap = new Map();
+    const addLink = (target: LinkMap, near: MatrixNode, far: MatrixNode) => {
+      const byPage = target.get(near.key) ?? new Map<number, string[]>();
+      const pageOfFar = pageOfRow.get(nodeRow(far)) ?? 0;
+      const labels = byPage.get(pageOfFar) ?? [];
+      if (!labels.includes(far.label)) labels.push(far.label);
+      byPage.set(pageOfFar, labels);
+      target.set(near.key, byPage);
+    };
+    for (const edge of edges) {
+      const a = nodeByKey.get(edge.from);
+      const b = nodeByKey.get(edge.to);
+      if (!a || !b) continue;
+      const aIn = inSlice(a);
+      const bIn = inSlice(b);
+      if (aIn === bIn) continue;
+      const near = aIn ? a : b;
+      const far = aIn ? b : a;
+      addLink(nodeRow(far) > nodeRow(near) ? below : above, near, far);
+    }
+
+    const tagSize = 6.5;
+    const tagColor = hexRgb("#b45309");
+    const maxTagW = (GRAPH_NODE_W + GRAPH_GAP_X) * drawScale - 4;
+    const fitText = (text: string) => {
+      if (font.widthOfTextAtSize(text, tagSize) <= maxTagW) return text;
+      let cut = text;
+      while (cut.length > 3 && font.widthOfTextAtSize(`${cut}..`, tagSize) > maxTagW) {
+        cut = cut.slice(0, -1);
+      }
+      return `${cut}..`;
+    };
+    const drawTags = (map: LinkMap, isBelow: boolean) => {
+      map.forEach((byPage, key) => {
+        const node = nodeByKey.get(key);
+        if (!node) return;
+        const text = fitText(
+          Array.from(byPage.entries())
+            .sort((x, y) => x[0] - y[0])
+            .map(([p, labels]) => `p.${p}: ${labels.join(", ")}`)
+            .join("; "),
+        );
+        const cx = gx(node.x + GRAPH_NODE_W / 2);
+        const edgeY = isBelow ? gyTop(node.y) - nodeH : gyTop(node.y);
+        const dir = isBelow ? -1 : 1;
+        page.drawLine({
+          start: { x: cx, y: edgeY },
+          end: { x: cx, y: edgeY + dir * 6 },
+          thickness: 0.9,
+          color: tagColor,
+          dashArray: [2, 1.5],
+        });
+        const tw = font.widthOfTextAtSize(text, tagSize);
+        page.drawText(text, {
+          x: cx - tw / 2,
+          y: isBelow ? edgeY - 6 - tagSize : edgeY + 8,
+          size: tagSize,
+          font,
+          color: tagColor,
+        });
+      });
+    };
+    drawTags(below, true);
+    drawTags(above, false);
+  };
+
+  // Disegno della matrix (una o piu' pagine)
+  pagePlan.forEach((plan, index) => {
+    const pageNo = index + 1;
+    let page: PDFPage;
+    let topPdfY: number;
+
+    if (a4) {
+      page = pdf.addPage(a4Size);
+      const pageTop = a4Size[1] - outerMargin;
+      if (index === 0) {
+        drawCartouche(page, pageTop, a4Size[0]);
+        topPdfY = pageTop - cartHeight - TAG_SPACE;
+      } else {
+        page.drawText(`Harris Matrix - Cantiere ${code}`, {
+          x: outerMargin,
+          y: pageTop - 10,
+          size: 9,
+          font: bold,
+          color: slate,
+        });
+        topPdfY = pageTop - HEADER_STRIP - TAG_SPACE;
+      }
+      if (totalPages > 1) {
+        const label = `pag. ${pageNo}/${totalPages}`;
+        page.drawText(label, {
+          x: a4Size[0] - outerMargin - font.widthOfTextAtSize(label, 9),
+          y: pageTop - 10,
+          size: 9,
+          font,
+          color: slate,
+        });
+      }
+    } else {
+      const pageW = Math.max(560, graphW * drawScale + outerMargin * 2);
+      const pageH = Math.max(320, graphH * drawScale + cartHeight + outerMargin * 2);
+      page = pdf.addPage([pageW, pageH]);
+      drawCartouche(page, pageH - outerMargin, pageW);
+      topPdfY = pageH - outerMargin - cartHeight;
+    }
+
+    if (nodes.length === 0) {
+      page.drawText("Nessuna US disponibile.", {
+        x: outerMargin,
+        y: topPdfY - 16,
+        size: 12,
+        font,
+        color: slate,
+      });
+      return;
+    }
+    drawSlice(page, plan.from, plan.to, topPdfY);
+  });
+
+  // Pagine successive: elenco testuale delle relazioni
+
   const pageSize: [number, number] = [595.28, 841.89]; // A4
   const margin = 46;
   const bodySize = 10;

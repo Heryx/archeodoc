@@ -19,6 +19,7 @@ export function MatrixPage() {
   const [, navigate] = useLocation();
   const [mode, setMode] = useState<HarrisMatrixMode>("all");
   const [downloadKind, setDownloadKind] = useState<"docx" | "pdf" | null>(null);
+  const [pdfPage, setPdfPage] = useState<"libero" | "a4-portrait" | "a4-landscape">("libero");
   const { toast } = useToast();
 
   const { data: usList = [], isLoading } = useQuery<any[]>({
@@ -31,7 +32,9 @@ export function MatrixPage() {
     if (!cid) return;
     setDownloadKind(format);
     try {
-      const endpoint = buildProjectUrl(`/api/cantieri/${cid}/matrix/export-${format}?mode=${mode}`);
+      const endpoint = buildProjectUrl(`/api/cantieri/${cid}/matrix/export-${format}?mode=${mode}${
+          format === "pdf" ? `&page=${pdfPage}` : ""
+        }`);
       const response = await fetch(endpoint, { headers: getProjectHeader() });
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
@@ -42,7 +45,8 @@ export function MatrixPage() {
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = `Harris_Matrix_${cid}_${mode}.${format}`;
+      const pageTag = format === "pdf" && pdfPage !== "libero" ? `_${pdfPage}` : "";
+      anchor.download = `Harris_Matrix_${cid}_${mode}${pageTag}.${format}`;
       anchor.click();
       URL.revokeObjectURL(url);
 
@@ -79,6 +83,17 @@ export function MatrixPage() {
             <FileSpreadsheet size={15} />
             {downloadKind === "docx" ? "Esporto..." : "Esporta DOCX"}
           </Button>
+          <select
+            aria-label="Formato pagina PDF"
+            className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+            value={pdfPage}
+            onChange={(e) => setPdfPage(e.target.value as typeof pdfPage)}
+            disabled={downloadKind !== null}
+          >
+            <option value="libero">PDF: pagina unica (libero)</option>
+            <option value="a4-portrait">PDF: A4 verticale</option>
+            <option value="a4-landscape">PDF: A4 orizzontale</option>
+          </select>
           <Button
             variant="outline"
             className="gap-2"
