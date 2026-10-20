@@ -39,3 +39,26 @@ test("us_schema_thesaurus: ritorna thesaurus top-level", () => {
   assert.deepEqual(thesaurus.tipo, ["strato", "interfaccia"]);
   assert.deepEqual(thesaurus.definizione, ["strato di riporto"]);
 });
+
+test("us_schema_thesaurus: usa vocabularies dello schema per chiavi senza campo di paragrafo", () => {
+  // Tipico dello schema ICCD: "tipo" non e un campo di paragrafo, il vocabolario
+  // e salvato nella mappa dedicata dello schema.
+  const iccdSchema: SchemaDefinition = {
+    key: "iccd-us-2021-v1",
+    label: "ICCD",
+    version: "1",
+    mode: "iccd",
+    exportMode: "iccd_strict",
+    usModelKey: "iccd-us-2021",
+    modules: {
+      us: [{ acronym: "US", label: "Unita", fields: [{ key: "naturaUs", label: "Natura", type: "select" }] }],
+      sas: [],
+      ra: [],
+    },
+    paragraphs: [],
+    vocabularies: { tipo: ["strato", "struttura", "crollo"] },
+  };
+
+  assert.deepEqual(getUsFieldVocabulary(iccdSchema, "tipo"), ["strato", "struttura", "crollo"]);
+  assert.deepEqual(getUsTopLevelThesaurusFromSchema(iccdSchema).tipo, ["strato", "struttura", "crollo"]);
+});

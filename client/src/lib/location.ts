@@ -80,6 +80,17 @@ export function extractPathFromLocation(location: string): string {
   return normalizePath(window.location.pathname || "/");
 }
 
+// Costruisce l'href per aprire un pannello laterale (es. ?panel=thesaurus) sopra la pagina
+// corrente, preservando path e query esistenti. Vedi AppShell in App.tsx per il consumo.
+export function buildPanelHref(location: string, panel: string): string {
+  const cleanPath = extractPathFromLocation(location);
+  const search = extractSearchFromLocation(location);
+  const next = new URLSearchParams(search);
+  next.set("panel", panel);
+  const query = next.toString();
+  return `#${cleanPath}${query ? `?${query}` : ""}`;
+}
+
 // Hash router hook that exposes only the path to wouter route-matching.
 // Query params in hash (e.g. #/cantiere/1/giornata/3?panel=qc) stay available
 // through extractSearchFromLocation(), but do not pollute route params like :gid.

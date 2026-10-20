@@ -75,7 +75,7 @@ export function registerAIAssistantRoutes(app: Express, withProject: WithProject
     const edits = Array.isArray(req.body?.edits) ? req.body.edits : null;
     if (!edits) return res.status(400).json({ error: "Campo 'edits' mancante o non array" });
 
-    const { byKey } = assistantFieldDictionary(ctx.project, cantiere);
+    const { byKey } = assistantFieldDictionary(ctx.project, cantiere, ctx.storage.getUSList(cid));
 
     const conversationId = typeof req.body?.conversationId === "string" ? req.body.conversationId.slice(0, 64) : null;
     const snapshots: Array<{ id: number; field: string; newValue: string; before: unknown }> = [];

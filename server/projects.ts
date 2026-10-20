@@ -9,11 +9,15 @@ import {
   getProjectSchemaPresetForMode,
   normalizeDocumentationSchemaDefinition,
   listProjectSchemaPresets,
+  type DocumentationEntityType,
   type DocumentationExportMode,
   type DocumentationMode,
+  type DocumentationParagraphDefinition,
   type DocumentationSchemaDefinition,
+  type DocumentationSchemaModules,
   type ProjectSchemaPresetSummary,
 } from "@shared/documentation_schema";
+import { resolveProjectCodeSettings, type ProjectCodeSettings } from "@shared/us_code";
 
 export type ProjectDefinition = {
   id: string;
@@ -30,10 +34,13 @@ export type ProjectDefinition = {
   documentiDir: string;
   qgisDir: string;
   aiConfigDir: string;
+  imgDir: string;
+  templatesDir: string;
   documentationMode: DocumentationMode;
   schemaKey: string;
   exportMode: DocumentationExportMode;
   defaultUsModelKey: string;
+  codeSettings?: ProjectCodeSettings;
   createdAt: string;
   updatedAt: string;
 };
@@ -162,6 +169,8 @@ function createProjectDefinition(
     documentiDir: path.join(projectRoot, "documenti"),
     qgisDir: path.join(projectRoot, "qgis"),
     aiConfigDir: path.join(projectRoot, "ai_config"),
+    imgDir: path.join(projectRoot, "img"),
+    templatesDir: path.join(projectRoot, "templates"),
     documentationMode: preset.documentationMode,
     schemaKey: preset.schemaKey,
     exportMode: preset.exportMode,
@@ -214,6 +223,8 @@ function ensureProjectStructure(project: ProjectDefinition): void {
   ensureDirectory(project.documentiDir);
   ensureDirectory(project.qgisDir);
   ensureDirectory(project.aiConfigDir);
+  ensureDirectory(project.imgDir);
+  ensureDirectory(project.templatesDir);
   ensureProjectSchemaFile(project);
   ensureDefaultAiConfigFiles(project);
 
@@ -272,6 +283,8 @@ function normalizeProjectDefinition(raw: unknown): ProjectDefinition | null {
   const documentiDir = typeof project.documentiDir === "string" ? project.documentiDir.trim() : "";
   const qgisDir = typeof project.qgisDir === "string" ? project.qgisDir.trim() : "";
   const aiConfigDir = typeof project.aiConfigDir === "string" ? project.aiConfigDir.trim() : "";
+  const imgDir = typeof project.imgDir === "string" ? project.imgDir.trim() : "";
+  const templatesDir = typeof project.templatesDir === "string" ? project.templatesDir.trim() : "";
 
   if (!id || !name || !projectRoot || !dbPath || !mediaDir || !exportsDir || !backupsDir) {
     return null;
@@ -304,6 +317,8 @@ function normalizeProjectDefinition(raw: unknown): ProjectDefinition | null {
     documentiDir: documentiDir || path.join(projectRoot, "documenti"),
     qgisDir: qgisDir || path.join(projectRoot, "qgis"),
     aiConfigDir: aiConfigDir || path.join(projectRoot, "ai_config"),
+    imgDir: imgDir || path.join(projectRoot, "img"),
+    templatesDir: templatesDir || path.join(projectRoot, "templates"),
     documentationMode,
     schemaKey,
     exportMode,
@@ -502,6 +517,26 @@ export function getProjectSchemaDefinition(projectId: string): DocumentationSche
   return normalized;
 }
 
+export function getProjectCodeSettings(project: ProjectDefinition): ProjectCodeSettings {
+  return resolveProjectCodeSettings(project.codeSettings);
+}
+
+export function setProjectCodeSettings(
+  projectId: string,
+  input: Partial<ProjectCodeSettings>,
+): ProjectCodeSettings {
+  const registry = getRegistry();
+  const projectIndex = registry.projects.findIndex((p) => p.id === projectId);
+  if (projectIndex === -1) {
+    throw new Error("Progetto non trovato");
+  }
+  const current = registry.projects[projectIndex];
+  const codeSettings = resolveProjectCodeSettings({ ...current.codeSettings, ...input });
+  registry.projects[projectIndex] = { ...current, codeSettings, updatedAt: nowIso() };
+  persistRegistry(registry);
+  return codeSettings;
+}
+
 export function setProjectSchemaPreset(projectId: string, presetKey: string): ProjectDefinition {
   const registry = getRegistry();
   const projectIndex = registry.projects.findIndex((p) => p.id === projectId);
@@ -564,6 +599,89 @@ export function setProjectSchemaDefinition(
   return normalized;
 }
 
+/**
+ * Aggiorna il vocabolario controllato di un singolo campo dello schema progetto,
+ * senza toccare la struttura (campi, codici, tipi, obbligatorieta).
+ * A differenza di {@link setProjectSchemaDefinition} e consentito anche per i
+ * progetti ICCD: la conformita ICCD riguarda la struttura, non le voci del thesaurus.
+ */
+export function setProjectSchemaFieldVocabulary(
+  projectId: string,
+  entity: DocumentationEntityType,
+  fieldKey: string,
+  vocabulary: string[],
+): DocumentationSchemaDefinition {
+  const registry = getRegistry();
+  const projectIndex = registry.projects.findIndex((p) => p.id === projectId);
+  if (projectIndex === -1) {
+    throw new Error("Progetto non trovato");
+  }
+
+  const key = String(fieldKey || "").trim();
+  if (!key) {
+    throw new Error("fieldKey obbligatorio");
+  }
+
+  const cleanVocabulary = Array.from(
+    new Set((Array.isArray(vocabulary) ? vocabulary : []).map((item) => String(item ?? "").trim()).filter(Boolean)),
+  );
+
+  const current = registry.projects[projectIndex];
+  const currentSchema = getProjectSchemaDefinition(projectId);
+
+  let matched = 0;
+  const applyToParagraphs = (paragraphs: DocumentationParagraphDefinition[]) =>
+    paragraphs.map((paragraph) => ({
+      ...paragraph,
+      fields: (paragraph.fields || []).map((field) => {
+        if (String(field.key || "").trim() !== key) return field;
+        matched += 1;
+        return { ...field, vocabulary: cleanVocabulary.length > 0 ? cleanVocabulary : undefined };
+      }),
+    }));
+
+  const nextModules: DocumentationSchemaModules = {
+    us: entity === "us" ? applyToParagraphs(currentSchema.modules.us) : currentSchema.modules.us,
+    sas: entity === "sas" ? applyToParagraphs(currentSchema.modules.sas) : currentSchema.modules.sas,
+    ra: entity === "ra" ? applyToParagraphs(currentSchema.modules.ra) : currentSchema.modules.ra,
+  };
+
+  // Chiavi US top-level non presenti come campi di paragrafo (tipico dello schema
+  // ICCD): il vocabolario va salvato nella mappa dedicata dello schema.
+  const TOP_LEVEL_VOCABULARY_KEYS = new Set(["tipo", "definizione"]);
+  const nextVocabularies: Record<string, string[]> = { ...(currentSchema.vocabularies || {}) };
+  if (matched === 0 && entity === "us" && TOP_LEVEL_VOCABULARY_KEYS.has(key)) {
+    if (cleanVocabulary.length > 0) {
+      nextVocabularies[key] = cleanVocabulary;
+    } else {
+      delete nextVocabularies[key];
+    }
+  } else if (matched === 0) {
+    throw new Error(`Campo "${key}" non presente nel modulo ${entity}`);
+  } else if (key in nextVocabularies) {
+    // Il campo esiste ora come paragrafo: evita una doppia fonte per la stessa chiave.
+    delete nextVocabularies[key];
+  }
+
+  const normalized = normalizeDocumentationSchemaDefinition({
+    ...currentSchema,
+    key: current.schemaKey,
+    mode: current.documentationMode,
+    exportMode: current.exportMode,
+    usModelKey: current.defaultUsModelKey,
+    modules: nextModules,
+    paragraphs: nextModules.us,
+    vocabularies: nextVocabularies,
+  });
+
+  registry.projects[projectIndex] = { ...current, updatedAt: nowIso() };
+  persistRegistry(registry);
+
+  ensureProjectStructure(current);
+  writeProjectSchemaFile(current, normalized);
+  return normalized;
+}
+
 export function getStorageForProject(projectId: string): IStorage {
   const cached = STORAGE_CACHE.get(projectId);
   if (cached) return cached;
@@ -577,4 +695,77 @@ export function getStorageForProject(projectId: string): IStorage {
   const storage = createStorage(project.dbPath);
   STORAGE_CACHE.set(projectId, storage);
   return storage;
+}
+
+function dirSizeRecursive(dir: string): number {
+  if (!fs.existsSync(dir)) return 0;
+  let total = 0;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) total += dirSizeRecursive(full);
+    else { try { total += fs.statSync(full).size; } catch { /* skip */ } }
+  }
+  return total;
+}
+
+export type ProjectContentStats = {
+  cantieri: number;
+  giornate: number;
+  us: number;
+  allegati: number;
+  dbSizeBytes: number;
+  mediaSizeBytes: number;
+};
+
+export function getProjectContentStats(projectId: string): ProjectContentStats {
+  const project = getProjectById(projectId);
+  if (!project) throw new Error("Progetto non trovato");
+
+  const storage = getStorageForProject(projectId);
+  const cantieri = storage.getCantieri();
+
+  let giornate = 0;
+  let us = 0;
+  let allegati = 0;
+  for (const cantiere of cantieri) {
+    const g = storage.getGiornate(cantiere.id);
+    giornate += g.length;
+    const u = storage.getUSList(cantiere.id);
+    us += u.length;
+    const a = storage.getAllegati(cantiere.id);
+    allegati += a.length;
+  }
+
+  let dbSizeBytes = 0;
+  try { dbSizeBytes = fs.statSync(project.dbPath).size; } catch { /* no db yet */ }
+
+  let mediaSizeBytes = 0;
+  try {
+    mediaSizeBytes = dirSizeRecursive(project.mediaDir);
+  } catch { /* ignore */ }
+
+  return { cantieri: cantieri.length, giornate, us, allegati, dbSizeBytes, mediaSizeBytes };
+}
+
+export function deleteProject(projectId: string, deleteFiles: boolean): void {
+  const registry = getRegistry();
+  const idx = registry.projects.findIndex((p) => p.id === projectId);
+  if (idx === -1) throw new Error("Progetto non trovato");
+
+  const project = registry.projects[idx];
+
+  // Close any cached storage connection
+  STORAGE_CACHE.delete(projectId);
+
+  if (deleteFiles) {
+    try { fs.rmSync(project.projectRoot, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+
+  registry.projects.splice(idx, 1);
+
+  if (registry.currentProjectId === projectId) {
+    registry.currentProjectId = registry.projects[0]?.id || null;
+  }
+
+  persistRegistry(registry);
 }

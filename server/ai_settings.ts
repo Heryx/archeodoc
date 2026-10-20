@@ -81,19 +81,37 @@ const DEFAULT_KEYS: Array<{ key: string; label: string; description: string; fil
     description: "Istruzioni per la generazione del testo del giornale di cantiere",
     file: "giornale_format.md",
   },
+  {
+    key: "qc_relazioni_prompt",
+    label: "QC relazioni stratigrafiche (AI)",
+    description: "Istruzioni per l'analisi AI delle incongruenze nelle relazioni stratigrafiche tra US",
+    file: "qc_relazioni_prompt.md",
+  },
 ];
 
 export function seedDefaultSettings(): void {
-  for (const { key, label, description, file } of DEFAULT_KEYS) {
-    const existing = getSetting(key);
-    if (!existing) {
-      const filePath = path.join(DEFAULTS_DIR, file);
-      const value = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf-8").trim() : "";
-      setSetting(key, value);
+  const db = getDb();
+  const existingRows = db.prepare("SELECT key, value FROM ai_settings").all() as Array<{ key: string; value: string }>;
+  const existingKeys = new Set(existingRows.map((r) => r.key));
+
+  const insertStmt = db.prepare(`
+    INSERT INTO ai_settings (key, value, updated_at)
+    VALUES (?, ?, CURRENT_TIMESTAMP)
+  `);
+  const updateMetaStmt = db.prepare(`
+    UPDATE ai_settings SET label = ?, description = ? WHERE key = ?
+  `);
+
+  db.transaction(() => {
+    for (const { key, label, description, file } of DEFAULT_KEYS) {
+      if (!existingKeys.has(key)) {
+        const filePath = path.join(DEFAULTS_DIR, file);
+        const value = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf-8").trim() : "";
+        insertStmt.run(key, value);
+      }
+      updateMetaStmt.run(label, description, key);
     }
-    // Aggiorna sempre label e description
-    upsertSettingMeta(key, label, description);
-  }
+  })();
 }
 
 export function resetToDefault(key: string): boolean {

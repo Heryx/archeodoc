@@ -42,6 +42,13 @@ export function getUsFieldVocabulary(
     if (vocabulary.length > 0) return vocabulary;
   }
 
+  // Fallback: vocabolari controllati per chiavi US non legate a un campo di
+  // paragrafo (es. "tipo"/"definizione" nei progetti ICCD).
+  if (schema && typeof schema === "object") {
+    const fromVocabularies = cleanVocabulary((schema as { vocabularies?: Record<string, unknown> }).vocabularies?.[normalizedKey]);
+    if (fromVocabularies.length > 0) return fromVocabularies;
+  }
+
   return [];
 }
 

@@ -1,15 +1,28 @@
 import type { Express } from "express";
 import multer from "multer";
 import type { WithProject } from "./types";
-import { analizzaTestoUS, analizzaTestoGiornata } from "../ai";
+import { analizzaTestoUS, analizzaTestoGiornata, generateReportSettimanaleCustom, estraiCampiGiornataFromText } from "../ai";
 import { logger } from "../logger";
 import { applyAiFieldsToUS, buildUSAiFillSuggestions } from "../ai_fill";
 import { extractTextFromDocxBuffer } from "../docx_extract";
 import {
   exportSchedaUSDocx,
+  exportSchedaUSDocxFromTemplate,
+  exportElencoUSDocxFromTemplate,
   exportReportGiornalieroDocx,
   exportReportSettimanaleDocx,
+  exportReportSettimanaleCustomDocx,
 } from "../docx_export";
+import {
+  exportSchedaUSMarkdown,
+  exportSchedaUSPdf,
+  exportSchedaUSOdt,
+} from "../export_formats";
+import fs from "fs";
+import path from "path";
+import { resolveUSTemplatePath } from "../us_template_path";
+import { elencoUsTemplatePath, readElencoTemplateChoice } from "../elenco_us_template_path";
+import { analyzeElencoTemplate, describeRepairs } from "../elenco_template_repair";
 import { getDocumentText } from "../google_docs";
 import { applyUSImportPreview, buildUSImportPreview } from "../us_extractor";
 import {
@@ -20,10 +33,21 @@ import {
 import {
   exportHarrisMatrixDocx,
   exportHarrisMatrixPdf,
+  exportHarrisMatrixSvg,
   matrixExportFileBase,
   type HarrisMatrixMode,
 } from "../matrix_export";
 import { calcolaSettimaneProgetto } from "@shared/weekUtils";
+
+const AVAILABLE_PLACEHOLDER_KEYS = [
+  "nome_commessa", "codice_cantiere", "luogo", "provincia", "committente",
+  "responsabile", "direttore_scavo", "responsabile_sabap", "responsabile_scavo",
+  "data_inizio_wk", "data_fine_wk", "data_relazione", "settimana",
+  "archeologo_coordinatore", "archeologi", "scavatori", "topografo", "escavatore",
+  "obiettivo", "dettaglio_attivita",
+  "nome_archeologo_coord", "nome_archeologi", "nome_topografo",
+  "nome_ditta", "nome_scavatori", "nome_direttore",
+];
 
 function parseMatrixMode(raw: unknown): HarrisMatrixMode {
   if (raw === "fisica" || raw === "stratigrafica" || raw === "all") return raw;
@@ -76,6 +100,11 @@ function parseIsoDateOnly(value: unknown): Date | null {
   const parsed = new Date(`${text}T00:00:00`);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed;
+}
+
+function parseTipoRelazione(value: unknown): "template" | "narrativo" | "strutturato" {
+  if (value === "narrativo" || value === "strutturato") return value;
+  return "template";
 }
 
 function parsePositiveInteger(value: unknown): number | null {
@@ -586,8 +615,13 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
       campiMancanti = [];
     }
 
+    const modelKey = cantiere?.usModelKey || us.schedaModelKey || "base-us";
+    const templatePath = resolveUSTemplatePath(ctx.project, modelKey);
+
     try {
-      const buf = await exportSchedaUSDocx(us, cantiere, schedaTesto, campiMancanti, "");
+      const buf = templatePath
+        ? await exportSchedaUSDocxFromTemplate(templatePath, us, cantiere)
+        : await exportSchedaUSDocx(us, cantiere, schedaTesto, campiMancanti, "", modelKey);
       const filename = `Scheda_${us.codiceUS.replace(/[\s/]/g, "_")}.docx`;
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
@@ -597,7 +631,98 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     }
   }));
 
-  // â”€â”€â”€ Statistiche cantiere â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Export Elenco US DOCX (tabella, tutte le US del cantiere o di una giornata)
+  app.get("/api/cantieri/:cid/elenco-us/export-docx", withProject(async (ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const cantiere = ctx.storage.getCantiere(cid);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const templatePath = elencoUsTemplatePath(ctx.project);
+    if (!fs.existsSync(templatePath)) {
+      return res.status(404).json({ error: "Nessun template elenco US caricato per questo cantiere" });
+    }
+
+    const giornataIdRaw = req.query.giornataId;
+    const giornataId = typeof giornataIdRaw === "string" && giornataIdRaw.trim() ? Number(giornataIdRaw) : undefined;
+    const usList = ctx.storage.getUSList(cid, giornataId);
+
+    // Se il template ha un ciclo incompleto o placeholder non validi e l'utente non ha ancora
+    // deciso, non esportare: il client apre il prompt di riparazione del template.
+    if (!readElencoTemplateChoice(ctx.project)) {
+      const plan = await analyzeElencoTemplate(ctx.project, cantiere);
+      if (plan?.needsRepair) {
+        return res.status(409).json({
+          needsTemplateRepair: true,
+          summary: describeRepairs(plan),
+          orphanRows: plan.orphanRows,
+          unknownPlaceholders: plan.unknownPlaceholders,
+        });
+      }
+    }
+
+    try {
+      const buf = await exportElencoUSDocxFromTemplate(templatePath, usList, cantiere);
+      const filename = `Elenco_US_${cantiere.codice.replace(/[\s/]/g, "_")}.docx`;
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(buf);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  }));
+
+  // Export US PDF
+  app.get("/api/us/:id/export-pdf", withProject(async (ctx, req, res) => {
+    const id = Number(req.params.id);
+    const us = ctx.storage.getUS(id);
+    if (!us) return res.status(404).json({ error: "US non trovata" });
+    const cantiere = ctx.storage.getCantiere(us.cantiereId);
+    try {
+      const buf = await exportSchedaUSPdf(us, cantiere);
+      const filename = `Scheda_${us.codiceUS.replace(/[\s/]/g, "_")}.pdf`;
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(buf);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  }));
+
+  // Export US ODT
+  app.get("/api/us/:id/export-odt", withProject(async (ctx, req, res) => {
+    const id = Number(req.params.id);
+    const us = ctx.storage.getUS(id);
+    if (!us) return res.status(404).json({ error: "US non trovata" });
+    const cantiere = ctx.storage.getCantiere(us.cantiereId);
+    try {
+      const buf = await exportSchedaUSOdt(us, cantiere);
+      const filename = `Scheda_${us.codiceUS.replace(/[\s/]/g, "_")}.odt`;
+      res.setHeader("Content-Type", "application/vnd.oasis.opendocument.text");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(buf);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  }));
+
+  // Export US Markdown
+  app.get("/api/us/:id/export-md", withProject(async (ctx, req, res) => {
+    const id = Number(req.params.id);
+    const us = ctx.storage.getUS(id);
+    if (!us) return res.status(404).json({ error: "US non trovata" });
+    const cantiere = ctx.storage.getCantiere(us.cantiereId);
+    try {
+      const md = exportSchedaUSMarkdown(us, cantiere);
+      const filename = `Scheda_${us.codiceUS.replace(/[\s/]/g, "_")}.md`;
+      res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(md);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  }));
+
+  // â"€â"€â"€ Statistiche cantiere â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   app.get("/api/cantieri/:id/statistiche", withProject(async (ctx, req, res) => {
     const id = Number(req.params.id);
     const cantiere = ctx.storage.getCantiere(id);
@@ -645,7 +770,7 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     });
   }));
 
-  // â”€â”€â”€ Export ZIP cantiere completo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€â"€ Export ZIP cantiere completo â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   app.get("/api/cantieri/:id/matrix/export-docx", withProject(async (ctx, req, res) => {
     const id = Number(req.params.id);
     const cantiere = ctx.storage.getCantiere(id);
@@ -681,6 +806,25 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
       res.send(buf);
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Errore export matrix PDF" });
+    }
+  }));
+
+  app.get("/api/cantieri/:id/matrix/export-svg", withProject(async (ctx, req, res) => {
+    const id = Number(req.params.id);
+    const cantiere = ctx.storage.getCantiere(id);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const mode = parseMatrixMode(req.query.mode);
+    const usList = ctx.storage.getUSList(id);
+
+    try {
+      const svg = exportHarrisMatrixSvg(cantiere, usList, mode);
+      const filename = `${matrixExportFileBase(cantiere, String(id))}_${mode}.svg`;
+      res.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(svg);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Errore export matrix SVG" });
     }
   }));
 
@@ -721,7 +865,11 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
       if (!us.schedaAiGenerata) continue;
       try {
         const campiRaw = us.qcProblemi ? JSON.parse(us.qcProblemi).filter((p: any) => p.livello === "error").map((p: any) => p.messaggio) : [];
-        const buf = await exportSchedaUSDocx(us, cantiere, us.schedaAiGenerata, campiRaw, "");
+        const zipModelKey = cantiere?.usModelKey || us.schedaModelKey || "base-us";
+        const zipTemplatePath = resolveUSTemplatePath(ctx.project, zipModelKey);
+        const buf = zipTemplatePath
+          ? await exportSchedaUSDocxFromTemplate(zipTemplatePath, us, cantiere)
+          : await exportSchedaUSDocx(us, cantiere, us.schedaAiGenerata, campiRaw, "", zipModelKey);
         const fname = `Scheda_${us.codiceUS.replace(/[\s/\\:*?"<>|]/g, "_")}.docx`;
         folder.folder(schedeFolderName)!.file(fname, buf);
       } catch {
@@ -732,7 +880,7 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     // README.txt con info cantiere
     folder.file(
       "README.txt",
-      `Archivio ArcheoDoc â€” ${cantiere.nome}\n` +
+      `Archivio ArcheoDoc â€" ${cantiere.nome}\n` +
         `Tipo export: ${includeDiari ? "completo" : "solo schede US"}\n` +
         `Codice: ${cantiere.codice}\n` +
         `Localit\u00e0: ${cantiere.localita}\n` +
@@ -773,6 +921,232 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     }
   }));
 
+  // ── Diagnostica template report settimanale ─────────────────────────────────
+  app.get("/api/cantieri/:cid/giornale/template-diagnostics", withProject(async (ctx, _req, res) => {
+    const templatesDir = ctx.project.templatesDir;
+    if (!templatesDir || !fs.existsSync(templatesDir)) {
+      return res.json({ found: false, reason: "templatesDir non esiste", templatesDir });
+    }
+    const indexPath = path.join(templatesDir, "_index.json");
+    let idx: Record<string, { uso?: string }> = {};
+    try { idx = JSON.parse(fs.readFileSync(indexPath, "utf-8")); } catch { /* no index */ }
+    const files = fs.readdirSync(templatesDir).filter((f) => /\.(docx|md|txt)$/i.test(f));
+    const templateFile = files.find((f) => idx[f]?.uso === "report_settimanale");
+    if (!templateFile) {
+      return res.json({ found: false, reason: "nessun template con uso=report_settimanale", files, idx });
+    }
+    const templatePath = path.join(templatesDir, templateFile);
+    if (!/\.docx$/i.test(templateFile)) {
+      return res.json({ found: true, templateFile, type: "md/txt", tags: null, note: "template testuale, non DOCX" });
+    }
+    try {
+      const PizZip = require("pizzip") as typeof import("pizzip");
+      const Docxtemplater = require("docxtemplater") as typeof import("docxtemplater");
+      const InspectModule = require("docxtemplater/js/inspect-module.js") as any;
+      const content = fs.readFileSync(templatePath, "binary");
+      const zip = new PizZip(content);
+      const iModule = new (InspectModule.default || InspectModule)();
+      const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true, nullGetter: () => "", modules: [iModule] });
+      doc.compile();
+      const tags = iModule.getAllTags();
+      return res.json({ found: true, templateFile, type: "docx", tags, availableVars: AVAILABLE_PLACEHOLDER_KEYS });
+    } catch (e: any) {
+      return res.status(500).json({ found: true, templateFile, type: "docx", error: e?.message, detail: String(e) });
+    }
+  }));
+
+  // ── Download DOCX con tutti i placeholder elencati ──────────────────────────
+  app.get("/api/cantieri/:cid/report/placeholder-template", withProject((_ctx, _req, res) => {
+    try {
+      const PizZip = require("pizzip") as typeof import("pizzip");
+      const descriptions: Record<string, string> = {
+        nome_commessa: "Nome del cantiere/commessa",
+        codice_cantiere: "Codice identificativo cantiere",
+        luogo: "Località del cantiere",
+        provincia: "Provincia",
+        committente: "Committente/cliente",
+        responsabile: "Responsabile di progetto",
+        direttore_scavo: "Direttore di scavo",
+        responsabile_sabap: "Responsabile SABAP",
+        responsabile_scavo: "Responsabile dello scavo",
+        data_inizio_wk: "Data inizio settimana",
+        data_fine_wk: "Data fine settimana",
+        data_relazione: "Data della relazione",
+        settimana: 'Periodo settimana (es. "05/05 – 11/05/2026")',
+        archeologo_coordinatore: "Archeologo coordinatore",
+        archeologi: "Lista archeologi",
+        scavatori: "Lista scavatori",
+        topografo: "Topografo",
+        escavatore: "Escavatore meccanico",
+        obiettivo: "Obiettivo della settimana",
+        dettaglio_attivita: "Dettaglio attività giornaliero (sezione complessa)",
+        nome_archeologo_coord: "Alias: Archeologo coordinatore",
+        nome_archeologi: "Alias: Lista archeologi",
+        nome_topografo: "Alias: Topografo",
+        nome_ditta: "Alias: Committente/ditta",
+        nome_scavatori: "Alias: Lista scavatori",
+        nome_direttore: "Alias: Direttore di scavo",
+      };
+
+      // Build minimal OOXML DOCX in memory
+      const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+      const rows = AVAILABLE_PLACEHOLDER_KEYS.map((key) => {
+        const desc = descriptions[key] || "";
+        return `<w:tr><w:tc><w:p><w:r><w:rPr><w:rFonts w:ascii="Courier New" w:hAnsi="Courier New"/></w:rPr><w:t xml:space="preserve">{{${esc(key)}}}</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>${esc(desc)}</w:t></w:r></w:p></w:tc></w:tr>`;
+      }).join("");
+
+      const header = `<w:tr><w:tc><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Placeholder</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Descrizione</w:t></w:r></w:p></w:tc></w:tr>`;
+      const intro = `<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Placeholder disponibili per i template ArcheoDoc</w:t></w:r></w:p><w:p><w:r><w:t>Inserisci questi tag nel tuo documento Word personalizzato. Verranno sostituiti con i dati reali all'export.</w:t></w:r></w:p>`;
+      const tableXml = `<w:tbl><w:tblPr><w:tblW w:w="9360" w:type="dxa"/><w:tblBorders><w:top w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:left w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:bottom w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:right w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:insideH w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:insideV w:val="single" w:sz="4" w:space="0" w:color="auto"/></w:tblBorders></w:tblPr>${header}${rows}</w:tbl>`;
+      const docXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${intro}${tableXml}<w:sectPr/></w:body></w:document>`;
+
+      const relsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`;
+      const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:rPr><w:b/><w:sz w:val="32"/></w:rPr></w:style></w:styles>`;
+      const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>`;
+      const appRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`;
+
+      const zip = new PizZip();
+      zip.file("[Content_Types].xml", contentTypes);
+      zip.file("_rels/.rels", appRels);
+      zip.file("word/document.xml", docXml);
+      zip.file("word/styles.xml", stylesXml);
+      zip.file("word/_rels/document.xml.rels", relsXml);
+      const buf = zip.generate({ type: "nodebuffer", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      res.setHeader("Content-Disposition", "attachment; filename=placeholder_template.docx");
+      res.send(buf);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  }));
+
+  // ── Placeholder disponibili con valori reali del cantiere ────────────────────
+  app.get("/api/cantieri/:cid/report/placeholders", withProject((ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const cantiere = ctx.storage.getCantiere(cid);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const giornate = ctx.storage.getGiornate(cid);
+    const tuttiScavatori = new Set<string>();
+    const tuttiArcheologi = new Set<string>();
+    let archeologoCoordinatore = cantiere.responsabile || "";
+    let topografo = "";
+    let escavatore = "";
+    let obiettivo = "";
+    for (const g of giornate) {
+      const parseCsvOrJson = (v: string | null | undefined) => {
+        if (!v) return [];
+        try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch { return v.split(",").map((s) => s.trim()).filter(Boolean); }
+      };
+      parseCsvOrJson(g.scavatori || g.operatori).forEach((o: string) => tuttiScavatori.add(o));
+      parseCsvOrJson(g.archeologi).forEach((o: string) => tuttiArcheologi.add(o));
+      if (g.archeologoCoordinatore) archeologoCoordinatore = g.archeologoCoordinatore;
+      if (g.topografo) topografo = g.topografo;
+      if (g.escavatore) escavatore = g.escavatore;
+      if (g.obiettivo) obiettivo = g.obiettivo;
+    }
+    const scavatoriStr = Array.from(tuttiScavatori).join(", ") || "";
+    const archeologiStr = Array.from(tuttiArcheologi).join(", ") || "";
+    const provinciaMatch = (cantiere.localita || "").match(/\(([A-Z]{2})\)\s*$/);
+    const provincia = provinciaMatch ? provinciaMatch[1] : (cantiere.localita || "");
+
+    const values: Record<string, string> = {
+      nome_commessa: cantiere.nome || "",
+      codice_cantiere: cantiere.codice || "",
+      luogo: cantiere.localita || "",
+      provincia,
+      committente: cantiere.committente || "",
+      responsabile: cantiere.responsabile || "",
+      direttore_scavo: archeologoCoordinatore,
+      responsabile_sabap: "",
+      responsabile_scavo: cantiere.responsabile || "",
+      data_inizio_wk: "(data inizio settimana)",
+      data_fine_wk: "(data fine settimana)",
+      data_relazione: new Date().toLocaleDateString("it-IT"),
+      settimana: "(W1, W2, ...)",
+      archeologo_coordinatore: archeologoCoordinatore,
+      archeologi: archeologiStr,
+      scavatori: scavatoriStr,
+      topografo,
+      escavatore,
+      obiettivo,
+      dettaglio_attivita: "(testo narrativo AI della settimana)",
+      nome_archeologo_coord: archeologoCoordinatore,
+      nome_archeologi: archeologiStr,
+      nome_topografo: topografo,
+      nome_ditta: cantiere.committente || "",
+      nome_scavatori: scavatoriStr,
+      nome_direttore: archeologoCoordinatore,
+    };
+
+    return res.json({ placeholders: values, keys: AVAILABLE_PLACEHOLDER_KEYS });
+  }));
+
+  async function buildReportSettimanale(
+    cantiere: import("@shared/schema").Cantiere | undefined,
+    weekStart: string,
+    weekEnd: string,
+    entries: Array<{ giornata: import("@shared/schema").Giornata; reportFormattato: string; campiMancanti: string[]; usSchede?: import("@shared/schema").UnitaStratigrafica[] }>,
+    weekNumber?: number,
+    imgDir?: string,
+    templatesDir?: string,
+    tipoRelazione: "template" | "narrativo" | "strutturato" = "template",
+  ): Promise<Buffer> {
+
+    // Modalità "strutturato": tabelle per giornata, nessuna AI narrativa
+    if (tipoRelazione === "strutturato") {
+      return exportReportSettimanaleDocx({ cantiere, weekStart, weekEnd, entries });
+    }
+
+    // Modalità "narrativo": solo testo AI senza template
+    if (tipoRelazione === "narrativo") {
+      let testo_ai = "";
+      try {
+        testo_ai = await generateReportSettimanaleCustom({
+          cantiere: cantiere!,
+          weekStart,
+          weekEnd,
+          entries: entries.map(({ giornata, reportFormattato, usSchede }) => ({ giornata, reportFormattato, usSchede })),
+        });
+      } catch (aiErr: any) {
+        logger.warn("AI non disponibile per report narrativo, procedo senza testo AI:", aiErr?.message || aiErr);
+      }
+      // Usa il layout custom ma senza cercare il template file (templatesDir=undefined)
+      return exportReportSettimanaleCustomDocx({ cantiere, weekStart, weekEnd, weekNumber, testo_ai, entries, imgDir, templatesDir: undefined });
+    }
+
+    // Modalità "template" (default): usa template custom se disponibile, altrimenti layout strutturato
+    let hasCustomTemplate = false;
+    if (templatesDir) {
+      const fs = await import("fs");
+      const path = await import("path");
+      const indexPath = path.join(templatesDir, "_index.json");
+      if (fs.existsSync(indexPath)) {
+        try {
+          const idx: Record<string, { uso?: string }> = JSON.parse(fs.readFileSync(indexPath, "utf-8"));
+          hasCustomTemplate = Object.values(idx).some((v) => v.uso === "report_settimanale");
+        } catch { /* ignore */ }
+      }
+    }
+
+    if (hasCustomTemplate || cantiere?.usModelKey === "archeosistemi-us") {
+      let testo_ai = "";
+      try {
+        testo_ai = await generateReportSettimanaleCustom({
+          cantiere: cantiere!,
+          weekStart,
+          weekEnd,
+          entries: entries.map(({ giornata, reportFormattato, usSchede }) => ({ giornata, reportFormattato, usSchede })),
+        });
+      } catch (aiErr: any) {
+        logger.warn("AI non disponibile per report settimanale, procedo senza testo AI:", aiErr?.message || aiErr);
+      }
+      return exportReportSettimanaleCustomDocx({ cantiere, weekStart, weekEnd, weekNumber, testo_ai, entries, imgDir, templatesDir });
+    }
+    return exportReportSettimanaleDocx({ cantiere, weekStart, weekEnd, entries });
+  }
+
   // Export giornale settimanale DOCX
   app.get("/api/cantieri/:cid/giornale/export-weekly-docx", withProject(async (ctx, req, res) => {
     const cid = Number(req.params.cid);
@@ -805,19 +1179,17 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
       const entries = giornateWithReport.map((giornata) => {
         const qcLogs = ctx.storage.getQcLogs(cid, giornata.id);
         const campiMancanti = qcLogs.filter((log) => log.livello === "error").map((log) => log.messaggio);
+        const usSchede = ctx.storage.getUSList(cid, giornata.id);
         return {
           giornata,
           reportFormattato: giornata.aiReportText || "",
           campiMancanti,
+          usSchede,
         };
       });
 
-      const buf = await exportReportSettimanaleDocx({
-        cantiere,
-        weekStart: weekStartIso,
-        weekEnd: weekEndIso,
-        entries,
-      });
+      const tipoRelazione = parseTipoRelazione(req.query.tipoRelazione);
+      const buf = await buildReportSettimanale(cantiere, weekStartIso, weekEndIso, entries, undefined, ctx.project.imgDir, ctx.project.templatesDir, tipoRelazione);
       const filename = `Diario_settimanale_${weekStartIso}_${weekEndIso}.docx`;
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
@@ -872,19 +1244,17 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
       const entries = giornateWithReport.map((giornata) => {
         const qcLogs = ctx.storage.getQcLogs(cid, giornata.id);
         const campiMancanti = qcLogs.filter((log) => log.livello === "error").map((log) => log.messaggio);
+        const usSchede = ctx.storage.getUSList(cid, giornata.id);
         return {
           giornata,
           reportFormattato: giornata.aiReportText || "",
           campiMancanti,
+          usSchede,
         };
       });
 
-      const buf = await exportReportSettimanaleDocx({
-        cantiere,
-        weekStart: settimanaTarget.dataInizio,
-        weekEnd: settimanaTarget.dataFine,
-        entries,
-      });
+      const tipoRelazione = parseTipoRelazione(req.body?.tipoRelazione);
+      const buf = await buildReportSettimanale(cantiere, settimanaTarget.dataInizio, settimanaTarget.dataFine, entries, weekNumber, ctx.project.imgDir, ctx.project.templatesDir, tipoRelazione);
       const filename = `Diario_settimanale_W${weekNumber}_${settimanaTarget.dataInizio}_${settimanaTarget.dataFine}.docx`;
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
@@ -938,21 +1308,19 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
       const entries = giornateWithReport.map((giornata) => {
         const qcLogs = ctx.storage.getQcLogs(cid, giornata.id);
         const campiMancanti = qcLogs.filter((log) => log.livello === "error").map((log) => log.messaggio);
+        const usSchede = ctx.storage.getUSList(cid, giornata.id);
         return {
           giornata,
           reportFormattato: giornata.aiReportText || "",
           campiMancanti,
+          usSchede,
         };
       });
 
       const startIso = settimaneSelezionate[0].dataInizio;
       const endIso = settimaneSelezionate[settimaneSelezionate.length - 1].dataFine;
-      const buf = await exportReportSettimanaleDocx({
-        cantiere,
-        weekStart: startIso,
-        weekEnd: endIso,
-        entries,
-      });
+      const tipoRelazione = parseTipoRelazione(req.body?.tipoRelazione);
+      const buf = await buildReportSettimanale(cantiere, startIso, endIso, entries, undefined, ctx.project.imgDir, ctx.project.templatesDir, tipoRelazione);
       const filename = `Diario_multi_settimane_${startIso}_${endIso}.docx`;
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
@@ -980,27 +1348,103 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
       const entries = giornateWithReport.map((giornata) => {
         const qcLogs = ctx.storage.getQcLogs(cid, giornata.id);
         const campiMancanti = qcLogs.filter((log) => log.livello === "error").map((log) => log.messaggio);
+        const usSchede = ctx.storage.getUSList(cid, giornata.id);
         return {
           giornata,
           reportFormattato: giornata.aiReportText || "",
           campiMancanti,
+          usSchede,
         };
       });
 
       const startIso = entries[0].giornata.data;
       const endIso = entries[entries.length - 1].giornata.data;
-      const buf = await exportReportSettimanaleDocx({
-        cantiere,
-        weekStart: startIso,
-        weekEnd: endIso,
-        entries,
-      });
+      const tipoRelazione = parseTipoRelazione(req.body?.tipoRelazione);
+      const buf = await buildReportSettimanale(cantiere, startIso, endIso, entries, undefined, ctx.project.imgDir, ctx.project.templatesDir, tipoRelazione);
       const filename = `Diario_completo_${startIso}_${endIso}.docx`;
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
       res.send(buf);
     } catch (error: any) {
       res.status(500).json({ error: error?.message || "Errore export diario completo DOCX" });
+    }
+  }));
+
+  // ─── Import giornata da DOCX/DOC con AI ──────────────────────────────────────
+  // POST /api/cantieri/:cid/import-giornata-from-docx
+  // - senza confirm: restituisce preview con campi AI estratti
+  // - con confirm + fields: crea la giornata e restituisce l'oggetto creato
+  app.post("/api/cantieri/:cid/import-giornata-from-docx", aiFillDocxUpload.single("file"), withProject(async (ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const cantiere = ctx.storage.getCantiere(cid);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const confirm = parseBooleanLike(req.body?.confirm);
+
+    if (confirm) {
+      // Modalità salvataggio: i campi vengono passati dal client come JSON
+      let fields: Record<string, string>;
+      try {
+        const raw = req.body?.fields;
+        fields = typeof raw === "string" ? JSON.parse(raw) : (raw || {});
+      } catch {
+        return res.status(400).json({ error: "Formato fields non valido" });
+      }
+
+      const data = String(fields.data || "").trim();
+      if (!data) return res.status(400).json({ error: "Campo data obbligatorio" });
+
+      try {
+        const giornata = ctx.storage.createGiornata({
+          cantiereId: cid,
+          data,
+          oraInizio: fields.oraInizio || null,
+          oraFine: fields.oraFine || null,
+          settore: fields.settore || null,
+          condMeteo: fields.condMeteo || null,
+          archeologoCoordinatore: fields.archeologoCoordinatore || null,
+          archeologi: fields.archeologi
+            ? JSON.stringify(fields.archeologi.split(",").map((s: string) => s.trim()).filter(Boolean))
+            : null,
+          scavatori: fields.scavatori
+            ? JSON.stringify(fields.scavatori.split(",").map((s: string) => s.trim()).filter(Boolean))
+            : null,
+          topografo: fields.topografo || null,
+          escavatore: fields.escavatore || null,
+          tipoScavo: fields.tipoScavo || null,
+          obiettivo: fields.obiettivo || null,
+          attivitaSvolta: fields.attivitaSvolta || null,
+          note: fields.note || null,
+        } as any);
+        return res.json({ mode: "created", giornata });
+      } catch (error: any) {
+        return res.status(400).json({ error: error.message || "Errore creazione giornata" });
+      }
+    }
+
+    // Modalità preview: estrae il testo dal DOCX e chiede all'AI di compilare i campi
+    const file = req.file as Express.Multer.File | undefined;
+    if (!file) return res.status(400).json({ error: "File mancante" });
+    if (!/\.(docx?)$/i.test(file.originalname || "")) {
+      return res.status(400).json({ error: "Formato non valido: carica un file .doc o .docx" });
+    }
+
+    let testo: string;
+    try {
+      testo = await extractTextFromDocxBuffer(file.buffer);
+    } catch (error: any) {
+      return res.status(400).json({ error: error?.message || "Impossibile leggere il file DOCX" });
+    }
+
+    if (!testo.trim()) {
+      return res.status(400).json({ error: "Il documento è vuoto o non contiene testo leggibile" });
+    }
+
+    try {
+      const preview = await estraiCampiGiornataFromText(testo);
+      return res.json({ mode: "preview", preview, filename: file.originalname });
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message || "Errore estrazione AI campi giornata" });
     }
   }));
 }

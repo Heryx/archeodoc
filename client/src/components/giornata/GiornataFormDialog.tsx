@@ -2,7 +2,7 @@
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import GoogleDocsImport from "@/components/GoogleDocsImport";
-import { GiornataFormFields } from "@/components/giornata/GiornataFormFields";
+import { GiornataFormFields, type GiornataSuggestions } from "@/components/giornata/GiornataFormFields";
 import type { GiornataForm } from "@/components/giornata/types";
 
 type GoogleImportPayload = {
@@ -23,6 +23,8 @@ type GiornataFormDialogProps = {
   submitLabelPending: string;
   submitDisabled: boolean;
   onImportedTextNotice: () => void;
+  suggestions?: GiornataSuggestions;
+  cantiereId?: number;
 };
 
 export function GiornataFormDialog({
@@ -37,6 +39,8 @@ export function GiornataFormDialog({
   submitLabelPending,
   submitDisabled,
   onImportedTextNotice,
+  suggestions,
+  cantiereId,
 }: GiornataFormDialogProps) {
   function handleImport(payload: GoogleImportPayload) {
     if (payload.mode === "structured") {
@@ -60,7 +64,7 @@ export function GiornataFormDialog({
             <div className="rounded-md border border-border bg-muted/10 p-3">
               <GoogleDocsImport mode="giornata" onImport={handleImport} />
             </div>
-            <GiornataFormFields form={form} setForm={setForm} />
+            <GiornataFormFields form={form} setForm={setForm} suggestions={suggestions} cantiereId={cantiereId} />
           </div>
         </div>
 

@@ -167,6 +167,15 @@ export function normalizeGoogleError(
   }
 
   const { message, statusCode } = extractGoogleApiErrorParts(error);
+
+  if (/invalid_grant/i.test(message)) {
+    return {
+      status: 401,
+      code: "google_invalid_grant",
+      message: "La sessione Google è scaduta o è stata revocata. Disconnetti e riconnetti l'account Google dalle Impostazioni.",
+    };
+  }
+
   return {
     status: statusCode && statusCode >= 400 && statusCode < 600 ? statusCode : 500,
     message: message || fallbackMessage,

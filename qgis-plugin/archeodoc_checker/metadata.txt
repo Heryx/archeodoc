@@ -1,0 +1,14 @@
+[general]
+name=ArcheoDoc Checker
+qgisMinimumVersion=3.22
+description=Verifica un progetto QGIS rispetto alle regole di interoperabilita' con ArcheoDoc e genera i file di collegamento US<->geometria.
+version=0.2.0
+author=ArcheoDoc
+email=guarino.archeo@gmail.com
+about=Non modifica il progetto QGIS. Legge i layer, valida CRS/geometrie/campi codice US e scrive una cartella archeodoc/ (senza punto iniziale, per restare visibile all'import da browser) accanto al file di progetto con manifest.json, us_links.json e report.json, letti poi da ArcheoDoc in fase di import.
+tracker=
+repository=
+category=Vector
+hasProcessingProvider=no
+experimental=True
+deprecated=False

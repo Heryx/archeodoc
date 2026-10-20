@@ -1,12 +1,14 @@
 import type Database from "better-sqlite3";
 
+export type RasterBounds = [[number, number], [number, number], [number, number], [number, number]];
+
 export type WebMapLayerRecord = {
   id: number;
   cantiereId: number;
   tableName: string;
   displayName: string;
   sourceFileName: string;
-  sourceFormat: "gpkg" | "geojson" | "kml" | "csv";
+  sourceFormat: "gpkg" | "geojson" | "kml" | "csv" | "shp" | "png" | "jpg" | "jpeg";
   sridOriginal: number | null;
   featureCount: number;
   geometryType: string | null;
@@ -15,6 +17,9 @@ export type WebMapLayerRecord = {
   zIndex: number;
   createdAt: string;
   updatedAt: string;
+  kind: "vector" | "raster";
+  rasterPath: string | null;
+  rasterBounds: RasterBounds | null;
 };
 
 type WebMapLayerRow = {
@@ -32,6 +37,9 @@ type WebMapLayerRow = {
   z_index: number;
   created_at: string;
   updated_at: string;
+  kind: string | null;
+  raster_path: string | null;
+  raster_bounds: string | null;
 };
 
 function rowToLayer(row: WebMapLayerRow): WebMapLayerRecord {
@@ -50,6 +58,9 @@ function rowToLayer(row: WebMapLayerRow): WebMapLayerRecord {
     zIndex: row.z_index,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    kind: row.kind === "raster" ? "raster" : "vector",
+    rasterPath: row.raster_path,
+    rasterBounds: row.raster_bounds ? (JSON.parse(row.raster_bounds) as RasterBounds) : null,
   };
 }
 
@@ -85,6 +96,19 @@ export function ensureWebMapTables(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_webmap_features_layer
       ON webmap_features(layer_table_name);
   `);
+
+  const existingColumns = new Set(
+    (db.prepare("PRAGMA table_info(webmap_layers)").all() as Array<{ name: string }>).map((c) => c.name),
+  );
+  if (!existingColumns.has("kind")) {
+    db.exec("ALTER TABLE webmap_layers ADD COLUMN kind TEXT NOT NULL DEFAULT 'vector'");
+  }
+  if (!existingColumns.has("raster_path")) {
+    db.exec("ALTER TABLE webmap_layers ADD COLUMN raster_path TEXT");
+  }
+  if (!existingColumns.has("raster_bounds")) {
+    db.exec("ALTER TABLE webmap_layers ADD COLUMN raster_bounds TEXT");
+  }
 }
 
 export function getWebMapLayers(db: Database.Database, cantiereId: number): WebMapLayerRecord[] {
@@ -96,6 +120,17 @@ export function getWebMapLayers(db: Database.Database, cantiereId: number): WebM
 
 export function getWebMapLayer(db: Database.Database, id: number): WebMapLayerRecord | null {
   const row = db.prepare("SELECT * FROM webmap_layers WHERE id = ?").get(id) as WebMapLayerRow | undefined;
+  return row ? rowToLayer(row) : null;
+}
+
+export function getWebMapLayerByDisplayName(
+  db: Database.Database,
+  cantiereId: number,
+  displayName: string,
+): WebMapLayerRecord | null {
+  const row = db
+    .prepare("SELECT * FROM webmap_layers WHERE cantiere_id = ? AND display_name = ? ORDER BY id ASC LIMIT 1")
+    .get(cantiereId, displayName) as WebMapLayerRow | undefined;
   return row ? rowToLayer(row) : null;
 }
 
@@ -120,8 +155,13 @@ export function upsertWebMapLayer(
     styleJson: string | null;
     visible?: boolean;
     zIndex?: number;
+    kind?: "vector" | "raster";
+    rasterPath?: string | null;
+    rasterBounds?: RasterBounds | null;
   },
 ): WebMapLayerRecord {
+  const kind = data.kind ?? "vector";
+  const rasterBoundsJson = data.rasterBounds ? JSON.stringify(data.rasterBounds) : null;
   const existing = getWebMapLayerByTableName(db, data.tableName);
   if (existing) {
     db.prepare(`
@@ -135,6 +175,9 @@ export function upsertWebMapLayer(
         style_json = ?,
         visible = ?,
         z_index = ?,
+        kind = ?,
+        raster_path = ?,
+        raster_bounds = ?,
         updated_at = datetime('now')
       WHERE table_name = ?
     `).run(
@@ -147,6 +190,9 @@ export function upsertWebMapLayer(
       data.styleJson,
       data.visible === false ? 0 : 1,
       data.zIndex ?? existing.zIndex,
+      kind,
+      data.rasterPath ?? null,
+      rasterBoundsJson,
       data.tableName,
     );
     return getWebMapLayerByTableName(db, data.tableName)!;
@@ -161,8 +207,9 @@ export function upsertWebMapLayer(
   const result = db.prepare(`
     INSERT INTO webmap_layers (
       cantiere_id, table_name, display_name, source_file_name, source_format,
-      srid_original, feature_count, geometry_type, style_json, visible, z_index
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      srid_original, feature_count, geometry_type, style_json, visible, z_index,
+      kind, raster_path, raster_bounds
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     data.cantiereId,
     data.tableName,
@@ -175,6 +222,9 @@ export function upsertWebMapLayer(
     data.styleJson,
     data.visible === false ? 0 : 1,
     data.zIndex ?? maxZ + 1,
+    kind,
+    data.rasterPath ?? null,
+    rasterBoundsJson,
   );
 
   return getWebMapLayer(db, Number(result.lastInsertRowid))!;

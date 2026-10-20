@@ -50,7 +50,7 @@ export function ToolbarStrip({ children }: { children?: React.ReactNode }) {
 
   const toggleModule = (module: ActiveModuleKey) => {
     dispatch({ type: "TOGGLE_MODULE", module });
-    if (module === "measure" || module === "export") {
+    if (module === "export") {
       toast({
         title: "Modulo pronto",
         description: "Colleghiamo il plugin dedicato nel prossimo step.",

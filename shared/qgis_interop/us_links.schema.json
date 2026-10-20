@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "archeodoc://qgis-interop/us_links.schema.json",
+  "title": "ArcheoDoc QGIS US links",
+  "description": "Scritto da archeodoc/us_links.json dal plugin QGIS. Collega ogni codice US normalizzato alla feature vettoriale che lo rappresenta, cosi' ArcheoDoc non deve piu' indovinare il campo attributo (guessUSCode) ne' il fid a runtime.",
+  "type": "object",
+  "required": ["schemaVersion", "generatedAt", "links"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["usCodeRaw", "usCodeNormalized", "layerId", "featureId"],
+        "properties": {
+          "usCodeRaw": { "type": "string", "description": "Valore letterale nel campo attributo, non normalizzato." },
+          "usCodeNormalized": { "type": "string", "description": "Risultato atteso di normalizeUSCode() lato ArcheoDoc, calcolato dal plugin con la stessa logica per un controllo di coerenza." },
+          "layerId": { "type": "string", "description": "Riferimento a layers[].id in manifest.json." },
+          "featureId": { "type": ["integer", "string"], "description": "fid QGIS della feature." },
+          "geometryType": { "type": ["string", "null"] }
+        }
+      }
+    }
+  }
+}

@@ -85,9 +85,9 @@ export function ensureUniqueRelativePath(baseDir: string, requestedRelativePath:
   }
 }
 
-export function moveUploadedFileToCantiereDir(
+function moveUploadedFileInternal(
   project: ProjectDefinition,
-  cantiereId: number,
+  requestedRelativePath: string,
   file: Express.Multer.File,
 ): string {
   const sourceAbsolute = path.resolve(file.path);
@@ -96,8 +96,6 @@ export function moveUploadedFileToCantiereDir(
     throw new Error("Percorso sorgente upload non valido");
   }
 
-  const safeUploadName = sanitizeIncomingUploadName(file.filename);
-  const requestedRelativePath = normalizeRelativePath(path.posix.join(String(cantiereId), safeUploadName));
   const targetRelativePath = ensureUniqueRelativePath(project.mediaDir, requestedRelativePath);
   const targetAbsolute = resolvePathInside(project.mediaDir, targetRelativePath);
   if (!targetAbsolute) {
@@ -115,6 +113,30 @@ export function moveUploadedFileToCantiereDir(
   }
 
   return targetRelativePath;
+}
+
+export function moveUploadedFileToCantiereDir(
+  project: ProjectDefinition,
+  cantiereId: number,
+  file: Express.Multer.File,
+): string {
+  const safeUploadName = sanitizeIncomingUploadName(file.filename);
+  const requestedRelativePath = normalizeRelativePath(path.posix.join(String(cantiereId), safeUploadName));
+  return moveUploadedFileInternal(project, requestedRelativePath, file);
+}
+
+export function moveUploadedFileToCantiereDateDir(
+  project: ProjectDefinition,
+  cantiereId: number,
+  dateStr: string,
+  file: Express.Multer.File,
+): string {
+  const safeDate = dateStr.replace(/[^0-9-]/g, "").slice(0, 10);
+  const safeUploadName = sanitizeIncomingUploadName(file.filename);
+  const requestedRelativePath = normalizeRelativePath(
+    path.posix.join(String(cantiereId), safeDate, safeUploadName),
+  );
+  return moveUploadedFileInternal(project, requestedRelativePath, file);
 }
 
 export function cleanupUploadedTempFiles(files: Express.Multer.File[] | undefined): void {

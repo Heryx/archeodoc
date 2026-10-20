@@ -1,6 +1,9 @@
 import type { Cantiere, UnitaStratigrafica } from "@shared/schema";
 import type { ProjectDefinition } from "./projects";
-import type { USModelDefinition } from "@shared/us_models";
+import { BASE_US_FIELD_KEYS, type USModelDefinition } from "@shared/us_models";
+import { getEntityFields } from "@shared/documentation_schema";
+import { getProjectSchemaDefinition } from "./projects";
+import { humanizeFieldKey } from "./docx_template_utils";
 import { callAI } from "./ai";
 import { getSetting } from "./ai_settings";
 import { buildUSFlatFields } from "./docx_export";
@@ -38,6 +41,7 @@ const MAX_FIELD_CHARS = 240;
 export function assistantFieldDictionary(
   project: ProjectDefinition,
   cantiere: Pick<Cantiere, "usModelKey">,
+  usList: UnitaStratigrafica[] = [],
 ): { model: USModelDefinition; byKey: Map<string, { label: string; type: string; required: boolean }> } {
   const model = getUSModel(project, cantiere.usModelKey);
   const byKey = new Map<string, { label: string; type: string; required: boolean }>();
@@ -45,8 +49,35 @@ export function assistantFieldDictionary(
   for (const f of knownFieldsForCantiere(project, cantiere)) {
     byKey.set(f.key, { label: f.label, type: "text", required: false });
   }
+  // Colonne fisse della scheda non presenti nel template di export (es. tipo, periodi, materiali).
+  for (const key of Array.from(BASE_US_FIELD_KEYS)) {
+    if (!byKey.has(key)) byKey.set(key, { label: humanizeFieldKey(key), type: "text", required: false });
+  }
+  // Campi dello schema progetto (inclusi quelli aggiunti/personalizzati dall'utente).
+  try {
+    for (const f of getEntityFields(getProjectSchemaDefinition(project.id), "us")) {
+      byKey.set(f.key, { label: f.label || humanizeFieldKey(f.key), type: String(f.type), required: !!f.required });
+    }
+  } catch (error) {
+    logger.warn("assistantFieldDictionary: schema progetto non leggibile", {
+      err: error instanceof Error ? error.message : String(error),
+    });
+  }
   for (const f of model.fields) {
     byKey.set(f.key, { label: f.label, type: f.type, required: !!f.required });
+  }
+  // Campi aggiunti a posteriori: qualunque chiave già salvata nelle schede (schedaData).
+  for (const us of usList) {
+    if (!us.schedaData) continue;
+    let extra: Record<string, unknown> = {};
+    try {
+      extra = JSON.parse(us.schedaData);
+    } catch {
+      continue;
+    }
+    for (const key of Object.keys(extra)) {
+      if (!byKey.has(key)) byKey.set(key, { label: humanizeFieldKey(key), type: "text", required: false });
+    }
   }
   return { model, byKey };
 }
@@ -150,7 +181,7 @@ export async function runUsAssistant(input: {
   const truncated = scoped.length > MAX_US_IN_CONTEXT;
   const usList = truncated ? scoped.slice(0, MAX_US_IN_CONTEXT) : scoped;
 
-  const { byKey } = assistantFieldDictionary(project, cantiere);
+  const { byKey } = assistantFieldDictionary(project, cantiere, input.usList);
   const usById = new Map(usList.map((us) => [us.id, us]));
 
   const fieldsList = Array.from(byKey.entries())

@@ -1,14 +1,37 @@
 export const meteOptions = [
   { value: "soleggiato", label: "Soleggiato" },
   { value: "nuvoloso", label: "Nuvoloso" },
+  { value: "variabile", label: "Variabile" },
   { value: "pioggia", label: "Pioggia" },
+  { value: "vento", label: "Ventoso" },
+];
+
+export const tipoScavoOptions = [
+  { value: "manuale", label: "Manuale" },
+  { value: "meccanico", label: "Meccanico" },
+  { value: "misto", label: "Misto (manuale + meccanico)" },
 ];
 
 export type GiornataForm = {
   data: string;
-  operatori: string;
+  oraInizio: string;
+  oraFine: string;
+  operatori: string;          // legacy / campo libero
+  scavatori: string;          // CSV → JSON array
+  archeologi: string;         // CSV → JSON array
+  topografo: string;
+  direttoreScavo: string;
+  antropologo: string;
+  respMateriali: string;
+  funzionarioSabap: string;
+  archeologoSorveglianza: string;
+  archeologoCoordinatore: string;
+  escavatore: string;
+  tipoScavo: string;
+  obiettivo: string;
   condMeteo: string;
   settore: string;
+  attivitaSvolta: string;
   note: string;
 };
 
@@ -108,9 +131,24 @@ export type GoogleSyncApplyReport = {
 
 export const emptyForm: GiornataForm = {
   data: new Date().toISOString().split("T")[0],
+  oraInizio: "",
+  oraFine: "",
   operatori: "",
+  scavatori: "",
+  archeologi: "",
+  topografo: "",
+  direttoreScavo: "",
+  antropologo: "",
+  respMateriali: "",
+  funzionarioSabap: "",
+  archeologoSorveglianza: "",
+  archeologoCoordinatore: "",
+  escavatore: "",
+  tipoScavo: "",
+  obiettivo: "",
   condMeteo: "",
   settore: "",
+  attivitaSvolta: "",
   note: "",
 };
 

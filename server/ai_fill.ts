@@ -84,6 +84,7 @@ const SELECT_FIELD_OPTIONS: Record<string, string[]> = {
 };
 
 const TEXT_FIELD_KEYS = new Set<string>([
+  "tipo",
   "definizione",
   "descrizione",
   "interpretazione",
@@ -99,7 +100,7 @@ const TEXT_FIELD_KEYS = new Set<string>([
   "datiQuantitativiReperti",
   "campionatureN",
   "responsabileSabap",
-  "responsabileArcheosistemi",
+  "responsabileScavo",
   "localita",
   "anno",
   "area",
@@ -141,6 +142,7 @@ const ALL_ALLOWED_KEYS = new Set<string>([
 ]);
 
 const TOP_LEVEL_KEYS = new Set<string>([
+  "tipo",
   "definizione",
   "descrizione",
   "interpretazione",
@@ -189,7 +191,7 @@ const DB_TEXT_MIRROR_KEYS = new Set<string>([
   "setacciaturaTipo",
   "affidabilitaStratigrafica",
   "responsabileSabap",
-  "responsabileArcheosistemi",
+  "responsabileScavo",
 ]);
 
 const SCHEDE_MIRROR_KEYS = new Set<string>([
@@ -617,8 +619,8 @@ function mergeAutomaticSuggestions(
   if (!us.localita && cantiere?.localita) {
     autoSet("localita", cantiere.localita, "Localita dedotta dal cantiere");
   }
-  if (!us.responsabileArcheosistemi && cantiere?.responsabile) {
-    autoSet("responsabileArcheosistemi", cantiere.responsabile, "Responsabile dedotto dal cantiere");
+  if (!us.responsabileScavo && cantiere?.responsabile) {
+    autoSet("responsabileScavo", cantiere.responsabile, "Responsabile dedotto dal cantiere");
   }
 
   return merged;

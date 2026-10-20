@@ -138,7 +138,7 @@ const SIMPLE_SCHEDE_KEYS: string[] = [
   "setacciaturaTipo",
   "affidabilitaStratigrafica",
   "responsabileSabap",
-  "responsabileArcheosistemi",
+  "responsabileScavo",
 ];
 
 const INORGANIC_CHECKBOX_MAP: Array<{ option: string; key: string }> = [

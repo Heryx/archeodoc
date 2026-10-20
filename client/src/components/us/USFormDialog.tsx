@@ -1,4 +1,6 @@
 ﻿import { useState, type Dispatch, type SetStateAction } from "react";
+import { useLocation } from "wouter";
+import { BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import GoogleDocsImport from "@/components/GoogleDocsImport";
@@ -6,6 +8,7 @@ import { USFormFields } from "@/components/us/USForm";
 import type { USForm } from "@/components/us/types";
 import type { USThesaurusConfig } from "@shared/us_thesaurus";
 import type { USModelDefinition } from "@shared/us_models";
+import { buildPanelHref } from "@/lib/location";
 
 type GoogleImportPayload = {
   mapped: Record<string, string>;
@@ -36,6 +39,14 @@ type USFormDialogProps = {
   onTriggerAiAnalysis?: (text: string) => void;
   potentialDuplicate?: { id: number; codiceUS: string } | null;
   onOpenDuplicate?: (id: number) => void;
+  /** All US codes in the cantiere for autocomplete in relation fields */
+  usCodeSuggestions?: string[];
+  /** Full US list for relation consistency indicators */
+  usFullList?: any[];
+  /** Called when user clicks a relation tag to navigate to that US */
+  onNavigateToUS?: (code: string) => void;
+  /** ID cantiere, usato solo per il link "Guida terminologica" verso il pannello Thesaurus */
+  cid?: string;
 };
 
 export function USFormDialog({
@@ -61,8 +72,14 @@ export function USFormDialog({
   onTriggerAiAnalysis,
   potentialDuplicate,
   onOpenDuplicate,
+  usCodeSuggestions = [],
+  usFullList = [],
+  onNavigateToUS,
+  cid,
 }: USFormDialogProps) {
   const [showAiHint, setShowAiHint] = useState(false);
+  const [location] = useLocation();
+  const thesaurusHref = buildPanelHref(location, "thesaurus");
 
   function handleImport(data: GoogleImportPayload) {
     if (data.mode === "structured") {
@@ -84,7 +101,16 @@ export function USFormDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[97vw] max-w-[1400px] max-h-[95vh] overflow-hidden p-0">
         <DialogHeader className="border-b border-border bg-muted/20 px-4 py-3 sm:px-6">
-          <DialogTitle>{title}</DialogTitle>
+          <div className="flex items-center justify-between gap-2 pr-6">
+            <DialogTitle>{title}</DialogTitle>
+            {cid && (
+              <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground shrink-0" asChild>
+                <a href={thesaurusHref} title="Apri Indice e Guida (vocabolario e note tecniche ICCD)">
+                  <BookOpen size={14} /> Guida terminologica
+                </a>
+              </Button>
+            )}
+          </div>
         </DialogHeader>
 
         <div className="max-h-[calc(95vh-158px)] overflow-y-auto px-4 py-4 sm:px-6">
@@ -105,6 +131,9 @@ export function USFormDialog({
               activeModel={activeModel}
               potentialDuplicate={potentialDuplicate}
               onOpenDuplicate={onOpenDuplicate}
+              usCodeSuggestions={usCodeSuggestions}
+              usFullList={usFullList}
+              onNavigateToUS={onNavigateToUS}
             />
           </div>
         </div>

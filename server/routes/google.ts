@@ -25,6 +25,13 @@ import {
   type GoogleSyncDecision,
   type GoogleSyncPreview,
 } from "../google_sync";
+import {
+  buildGiornaleImportPreview,
+  applyGiornaleImport,
+  type GiornaleImportPreview,
+  type GiornataImportDecision,
+  type RuoloPersona,
+} from "../giornale_import";
 import { getProjectSchemaDefinition } from "../projects";
 import { getUsTopLevelThesaurusFromSchema } from "@shared/us_schema_thesaurus";
 
@@ -273,5 +280,124 @@ export function registerGoogleRoutes(app: Express, withProject: WithProject) {
         warnings: preview.warnings,
       },
     });
+  }));
+
+  // ─── Persone (anagrafica per import giornale) ─────────────────────────────
+
+  app.get("/api/persone", (_req, res) => {
+    // withProject non necessario: le persone sono globali
+    // Usiamo il primo progetto disponibile per accedere allo storage
+    // Le persone sono per ora globali (tabella unica senza cantiere_id)
+    res.status(501).json({ error: "Usa /api/cantieri/:id/persone" });
+  });
+
+  app.get("/api/cantieri/:id/persone", withProject(async (ctx, _req, res) => {
+    res.json(ctx.storage.getPersone());
+  }));
+
+  app.post("/api/cantieri/:id/persone", withProject(async (ctx, req, res) => {
+    const { nome, ruolo } = req.body as { nome?: string; ruolo?: string };
+    if (!nome?.trim() || !ruolo) {
+      return res.status(400).json({ error: "nome e ruolo obbligatori" });
+    }
+    if (!["operaio", "archeologo", "topografo"].includes(ruolo)) {
+      return res.status(400).json({ error: "ruolo deve essere operaio, archeologo o topografo" });
+    }
+    try {
+      const existing = ctx.storage.getPersonaByNome(nome.trim());
+      if (existing) {
+        const updated = ctx.storage.updatePersona(existing.id, { ruolo });
+        return res.json(updated);
+      }
+      const created = ctx.storage.createPersona({ nome: nome.trim(), ruolo });
+      res.status(201).json(created);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  }));
+
+  app.put("/api/cantieri/:id/persone/:personaId", withProject(async (ctx, req, res) => {
+    const personaId = Number(req.params.personaId);
+    const { ruolo } = req.body as { ruolo?: string };
+    if (!ruolo || !["operaio", "archeologo", "topografo"].includes(ruolo)) {
+      return res.status(400).json({ error: "ruolo deve essere operaio, archeologo o topografo" });
+    }
+    const updated = ctx.storage.updatePersona(personaId, { ruolo });
+    if (!updated) return res.status(404).json({ error: "Persona non trovata" });
+    res.json(updated);
+  }));
+
+  app.delete("/api/cantieri/:id/persone/:personaId", withProject(async (ctx, req, res) => {
+    const personaId = Number(req.params.personaId);
+    const ok = ctx.storage.deletePersona(personaId);
+    if (!ok) return res.status(404).json({ error: "Persona non trovata" });
+    res.json({ ok: true });
+  }));
+
+  // ─── Import Giornale di Scavo ─────────────────────────────────────────────
+
+  app.post("/api/cantieri/:id/giornale/preview", withProject(async (ctx, req, res) => {
+    const cantiereId = Number(req.params.id);
+    const cantiere = ctx.storage.getCantiere(cantiereId);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const { docUrl } = req.body as { docUrl?: string };
+    if (!docUrl?.trim()) {
+      return res.status(400).json({ error: "docUrl obbligatorio" });
+    }
+
+    try {
+      assertTokenHasRequiredScopes();
+    } catch (error) {
+      return sendGoogleError(res, error, "Permessi Google non validi");
+    }
+
+    try {
+      const preview = await buildGiornaleImportPreview(ctx.storage, cantiereId, docUrl.trim());
+      res.json(preview);
+    } catch (error) {
+      logger.error("Giornale import preview fallita", {
+        cantiereId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      sendGoogleError(res, error, "Errore durante la lettura del documento");
+    }
+  }));
+
+  app.post("/api/cantieri/:id/giornale/apply", withProject(async (ctx, req, res) => {
+    const cantiereId = Number(req.params.id);
+    const cantiere = ctx.storage.getCantiere(cantiereId);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const {
+      preview,
+      decisioni,
+      classificazioni,
+    } = req.body as {
+      preview?: GiornaleImportPreview;
+      decisioni?: GiornataImportDecision[];
+      classificazioni?: Array<{ nome: string; ruolo: RuoloPersona }>;
+    };
+
+    if (!preview || !Array.isArray(decisioni) || !Array.isArray(classificazioni)) {
+      return res.status(400).json({ error: "preview, decisioni e classificazioni obbligatori" });
+    }
+
+    try {
+      const result = applyGiornaleImport(
+        ctx.storage,
+        cantiereId,
+        preview,
+        decisioni,
+        classificazioni,
+      );
+      res.json(result);
+    } catch (error) {
+      logger.error("Giornale import apply fallita", {
+        cantiereId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      res.status(500).json({ error: error instanceof Error ? error.message : "Errore import giornale" });
+    }
   }));
 }

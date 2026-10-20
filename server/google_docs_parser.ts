@@ -86,7 +86,7 @@ export interface USData {
   affidabilitaStratigrafica?: string;
   motivazioneAffidabilita?: string;
   responsabileSABAPUMB?: string;
-  responsabileArcheosistemi?: string;
+  responsabileScavo?: string;
   direttoreScientifico?: string;
   responsabileSettore?: string;
   compilatoreScheda?: string;
@@ -101,6 +101,12 @@ export interface GiornataData {
   data: string;
   meteo?: string;
   operai?: number;
+  // Nuovi campi estratti dal formato giornale di scavo
+  personale?: string[];       // nomi raw da "Personale presente:"
+  oraInizio?: string;
+  oraFine?: string;
+  attivitaSvolta?: string;    // testo narrativo libero
+  tipoScavo?: "manuale" | "meccanico" | "misto" | null; // null = non deducibile
   us: USData[];
 }
 
@@ -230,7 +236,8 @@ const US_TEXT_FIELD_ALIASES: Record<string, keyof USData> = {
   "affidabilita stratigrafica": "affidabilitaStratigrafica",
   "affidabilita motivazione": "motivazioneAffidabilita",
   "responsabile sabap umb": "responsabileSABAPUMB",
-  "responsabile archeosistemi": "responsabileArcheosistemi",
+  "responsabile archeosistemi": "responsabileScavo",
+  "responsabile scavo": "responsabileScavo",
   "direttore scientifico": "direttoreScientifico",
   "responsabile del settore": "responsabileSettore",
   compilatore: "compilatoreScheda",
@@ -261,7 +268,7 @@ function normalizeKey(value: string): string {
   return value
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[̀-ͯ]/g, "")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 }
@@ -370,12 +377,11 @@ function parseItalianDateToIso(value: string): string | null {
   return `${year}-${monthP}-${dayP}`;
 }
 
+// Riconosce heading di giornata in due formati:
+//   1. "Giornata del 20/04/2026" (vecchio formato)
+//   2. "Lunedì 20/04/2026" o "Martedì 21/04/2026" ecc. (formato giornale di scavo)
 function parseGiornataHeading(text: string): string | null {
-  const normalized = normalizeKey(text);
-  if (!normalized.includes("giornata")) return null;
-
-  const iso = parseItalianDateToIso(text);
-  return iso || null;
+  return parseItalianDateToIso(text);
 }
 
 function parseUsHeading(text: string): number | null {
@@ -390,6 +396,59 @@ function parseUsHeading(text: string): number | null {
 
   const n = Number(fallback[1]);
   return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+// Cerca menzioni di US nel testo libero: "US 100", "US100", "u.s. 5", ecc.
+function extractUsNumbersFromText(text: string): number[] {
+  const re = /\bU\.?S\.?\s*(\d{1,5})\b/gi;
+  const matches: RegExpExecArray[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) matches.push(m);
+  const out: number[] = [];
+  const seen = new Set<number>();
+  for (const m of matches) {
+    const n = Number(m[1]);
+    if (!Number.isInteger(n) || n <= 0 || seen.has(n)) continue;
+    seen.add(n);
+    out.push(n);
+  }
+  return out;
+}
+
+// Deduce tipo scavo dal testo: null = non deducibile
+function inferTipoScavo(text: string): "manuale" | "meccanico" | "misto" | null {
+  const norm = normalizeKey(text);
+  const hasMeccanico = /escavator|meccanico|ruspa|bulldozer|benna/.test(norm);
+  const hasManurale = /piccone|manuale|cazzuola|trowel|vanga|pala\b|manualmente/.test(norm);
+  if (hasMeccanico && hasManurale) return "misto";
+  if (hasMeccanico) return "meccanico";
+  if (hasManurale) return "manuale";
+  return null;
+}
+
+// Parsing riga "Orario operativo: 07:00 – 12:30" → { oraInizio, oraFine }
+function parseOrarioOperativo(value: string): { oraInizio?: string; oraFine?: string } {
+  const match = value.match(/(\d{1,2})[:.h](\d{2}).*?(\d{1,2})[:.h](\d{2})/);
+  if (!match) {
+    // Solo ora inizio
+    const single = value.match(/(\d{1,2})[:.h](\d{2})/);
+    if (single) return { oraInizio: `${single[1].padStart(2, "0")}:${single[2]}` };
+    return {};
+  }
+  return {
+    oraInizio: `${match[1].padStart(2, "0")}:${match[2]}`,
+    oraFine: `${match[3].padStart(2, "0")}:${match[4]}`,
+  };
+}
+
+// Parsing "Personale presente: Nome1, Nome2, Nome3 (Referenti: X, Y)"
+// Restituisce array di nomi puliti, escludendo il testo tra parentesi
+function parsePersonale(value: string): string[] {
+  const withoutParens = value.replace(/\([^)]*\)/g, "");
+  return withoutParens
+    .split(/[,;]/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 1);
 }
 
 function assignUsField(target: USData, key: string, value: string): boolean {
@@ -435,7 +494,7 @@ function assignUsField(target: USData, key: string, value: string): boolean {
 function assignGiornataField(target: GiornataData, key: string, value: string): boolean {
   const cleaned = value.trim();
 
-  if (key === "meteo") {
+  if (key === "condizioni meteo" || key === "meteo") {
     target.meteo = cleaned || undefined;
     return true;
   }
@@ -446,6 +505,18 @@ function assignGiornataField(target: GiornataData, key: string, value: string): 
       target.operai = n;
       return true;
     }
+  }
+
+  if (key === "personale presente" || key === "personale") {
+    target.personale = parsePersonale(value);
+    return true;
+  }
+
+  if (key === "orario operativo" || key === "orario") {
+    const { oraInizio, oraFine } = parseOrarioOperativo(value);
+    if (oraInizio) target.oraInizio = oraInizio;
+    if (oraFine) target.oraFine = oraFine;
+    return true;
   }
 
   return false;
@@ -465,6 +536,11 @@ export const __test = {
   parseRelationNumbers,
   assignUsField,
   computeMissingFields,
+  parseGiornataHeading,
+  parsePersonale,
+  parseOrarioOperativo,
+  inferTipoScavo,
+  extractUsNumbersFromText,
 };
 
 export async function parseJournalDocument(docIdOrUrl: string): Promise<GiornataData[]> {
@@ -478,6 +554,19 @@ export async function parseJournalDocument(docIdOrUrl: string): Promise<Giornata
 
   let currentGiornata: GiornataData | null = null;
   let currentUS: (USData & { __rawLines: string[] }) | null = null;
+  const narrativeLines: string[] = [];
+
+  const flushNarrative = () => {
+    if (currentGiornata && narrativeLines.length > 0) {
+      const text = narrativeLines.join("\n").trim();
+      currentGiornata.attivitaSvolta = (currentGiornata.attivitaSvolta ? currentGiornata.attivitaSvolta + "\n" : "") + text;
+      // Deduce tipo scavo dal testo narrativo se non già impostato
+      if (currentGiornata.tipoScavo === undefined) {
+        currentGiornata.tipoScavo = inferTipoScavo(text);
+      }
+    }
+    narrativeLines.length = 0;
+  };
 
   for (const node of content) {
     const paragraph = node.paragraph;
@@ -487,61 +576,96 @@ export async function parseJournalDocument(docIdOrUrl: string): Promise<Giornata
     const text = paragraphText(paragraph);
     if (!text) continue;
 
-    if (style === "HEADING_2") {
+    // Heading 1 o Heading 2: potrebbe essere intestazione documento o giorno
+    if (style === "HEADING_1" || style === "HEADING_2") {
       const parsedDate = parseGiornataHeading(text);
       if (!parsedDate) {
-        currentUS = null;
+        // Heading senza data: non è un giorno, skip
         continue;
       }
 
+      flushNarrative();
+      currentUS = null;
       currentGiornata = {
         data: parsedDate,
         us: [],
+        tipoScavo: undefined,
       };
       out.push(currentGiornata);
-      currentUS = null;
       continue;
     }
 
+    // Heading 3: US esplicita come sezione
     if (style === "HEADING_3" && currentGiornata) {
+      flushNarrative();
       const usNumber = parseUsHeading(text);
       if (!usNumber) {
         currentUS = null;
         continue;
       }
 
-      currentUS = {
-        numero: usNumber,
-        __rawLines: [],
-      };
+      currentUS = { numero: usNumber, __rawLines: [] };
       currentGiornata.us.push(currentUS);
       continue;
     }
 
-    if (!currentGiornata) {
-      continue;
-    }
+    if (!currentGiornata) continue;
 
     const kv = extractKeyValue(paragraph);
 
+    // Dentro un blocco US esplicito (HEADING_3)
     if (currentUS) {
       currentUS.__rawLines.push(text);
-      if (!kv) continue;
-      assignUsField(currentUS, kv.key, kv.value);
+      if (kv) assignUsField(currentUS, kv.key, kv.value);
       continue;
     }
 
-    if (kv) {
-      assignGiornataField(currentGiornata, kv.key, kv.value);
+    // Testo della giornata
+    if (kv && assignGiornataField(currentGiornata, kv.key, kv.value)) {
+      // Campo giornata riconosciuto (meteo, personale, orario)
+      continue;
+    }
+
+    // Testo narrativo: accumula e cerca menzioni US inline
+    narrativeLines.push(text);
+
+    // Cerca US menzionate nel testo libero (es. "US 100", "US 101")
+    const usNums = extractUsNumbersFromText(text);
+    const existingNums = new Set(currentGiornata.us.map((u) => u.numero));
+    for (const num of usNums) {
+      if (!existingNums.has(num)) {
+        existingNums.add(num);
+        currentGiornata.us.push({
+          numero: num,
+          rawText: "",
+          campi_da_inferire: [...US_MISSING_FIELDS.map(String)],
+        });
+      }
     }
   }
 
+  // Flush eventuale narrativo dell'ultima giornata
+  flushNarrative();
+
+  // Post-processing: rawText e campi mancanti per ogni US
   for (const giornata of out) {
+    // Aggrega il rawText delle US trovate come heading (con __rawLines)
     for (const us of giornata.us) {
       const mutable = us as USData & { __rawLines?: string[] };
+      if (mutable.__rawLines) {
+        mutable.rawText = mutable.__rawLines.join("\n").trim();
+        delete mutable.__rawLines;
+      }
+      // Se US trovata inline nel testo, usa attivitaSvolta come contesto
+      if (!mutable.rawText && giornata.attivitaSvolta) {
+        mutable.rawText = giornata.attivitaSvolta;
+      }
       mutable.campi_da_inferire = computeMissingFields(mutable);
-      mutable.rawText = (mutable.__rawLines || []).join("\n").trim();
-      delete mutable.__rawLines;
+    }
+
+    // Tipo scavo: se ancora undefined dopo tutto il testo, imposta null (non deducibile)
+    if (giornata.tipoScavo === undefined) {
+      giornata.tipoScavo = null;
     }
   }
 

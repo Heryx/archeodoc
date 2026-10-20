@@ -1,3 +1,5 @@
+import { formatUsCode } from "@shared/us_code";
+import { useProjectCodeSettings } from "@/hooks/useProjectCodeSettings";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useParams } from "wouter";
@@ -54,6 +56,7 @@ function filterGiornataFromLocation(location: string): string {
 }
 
 export function MaterialiPage() {
+  const { settings: codeSettings } = useProjectCodeSettings();
   const { cid } = useParams<{ cid: string }>();
   const [location, navigate] = useLocation();
   const activeProjectId = getCurrentProjectId();
@@ -248,7 +251,7 @@ export function MaterialiPage() {
                   <SelectItem value="all">Tutte le US</SelectItem>
                   {usListFilteredByGiornata.map((us: any) => (
                     <SelectItem key={us.id} value={String(us.id)}>
-                      {us.codiceUS}
+                      {formatUsCode(us.codiceUS, us.tipo, codeSettings.tombaStyle)}
                     </SelectItem>
                   ))}
                 </SelectContent>

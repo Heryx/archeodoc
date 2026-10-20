@@ -26,7 +26,7 @@ echo.
 
 REM Installa/aggiorna le dipendenze
 echo  Verifica dipendenze...
-call npm install
+call npm install --no-audit --no-fund --loglevel=error
 if errorlevel 1 (
     echo  ERRORE durante l'installazione delle dipendenze.
     pause
@@ -36,12 +36,12 @@ if errorlevel 1 (
 REM Crea la cartella uploads se non esiste
 if not exist "uploads\" mkdir uploads
 
-REM Chiudi eventuale processo precedente sulla porta 5000
-for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "$p = Get-NetTCPConnection -LocalPort 5000 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if ($p) { [string]$p.OwningProcess }"`) do (
-    echo  Chiudo processo precedente ^(PID %%P^)...
-    taskkill /PID %%P /F >nul 2>&1
-)
-ping -n 2 127.0.0.1 >nul
+REM Chiudi eventuale processo precedente sulla porta 5000 e attendi che si liberi
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$port = 5000;" ^
+  "$pids = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | Where-Object { $_ -and $_ -ne 0 };" ^
+  "foreach ($procId in $pids) { Write-Host ('  Chiudo processo precedente (PID {0})...' -f $procId); taskkill /PID $procId /F 2>$null | Out-Null }" ^
+  "for ($i = 0; $i -lt 20; $i++) { $busy = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue; if (-not $busy) { break }; Start-Sleep -Milliseconds 500 }"
 
 echo.
 set "BUILD_REQUIRED=1"

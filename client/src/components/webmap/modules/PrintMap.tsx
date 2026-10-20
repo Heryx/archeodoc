@@ -515,7 +515,7 @@ export function PrintMap({
                   setAuthor(event.target.value);
                   clearPreview();
                 }}
-                placeholder="es. Dott. Guarino"
+                placeholder="es. Dott. Rossi"
                 className="h-7 text-xs mt-1"
               />
             </div>

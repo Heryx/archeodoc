@@ -16,9 +16,11 @@ type QcGiornataCardProps = {
 
 function statusLabel(status: string, warnCount: number, errCount: number): string {
   if (status === "ok") return "OK";
-  if (status === "warning") return `${warnCount} avvisi`;
-  if (status === "error") return `${errCount} errori`;
-  return "Non verificata";
+  if (status === "pending") return "Non verificata";
+  const parts: string[] = [];
+  if (errCount > 0) parts.push(`${errCount} errori`);
+  if (warnCount > 0) parts.push(`${warnCount} avvisi`);
+  return parts.length > 0 ? parts.join(", ") : status;
 }
 
 function statusClass(status: string): string {

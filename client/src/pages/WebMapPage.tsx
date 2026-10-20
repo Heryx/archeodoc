@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "wouter";
 import maplibregl from "maplibre-gl";
 import MapboxDraw from "@mapbox/mapbox-gl-draw";
@@ -36,10 +36,12 @@ import { AttributeTable } from "@/components/webmap/modules/AttributeTable";
 import { Geocoder } from "@/components/webmap/modules/Geocoder";
 import { useFeaturePopup } from "@/components/webmap/modules/FeaturePopup";
 import { LayerManager } from "@/components/webmap/modules/LayerManager";
+import { SessionLayerTree } from "@/components/webmap/modules/SessionLayerTree";
 import { MapExporter } from "@/components/webmap/modules/MapExporter";
 import { PrintMap } from "@/components/webmap/modules/PrintMap";
 import { useWebMapLayers } from "@/components/webmap/hooks/useWebMapLayers";
 import { TerrainPanel } from "@/components/webmap/modules/TerrainModule";
+import { MeasureToolPanel } from "@/components/webmap/modules/MeasureTool";
 import { StyleRendererPanel } from "@/components/webmap/modules/StyleRenderer";
 import { DEFAULT_STYLE, pickColor, useWebMap, useWebMapStore, WebMapContext } from "@/components/webmap/store";
 import { ToolbarStrip } from "@/components/webmap/ToolbarStrip";
@@ -69,15 +71,17 @@ import type {
   MapLayer,
   MapSnapshotRecord,
   RasterLayerConfig,
+  WebMapPanelTab,
   WebMapPreviewPayload,
 } from "@/components/webmap/types";
+import { MenuBar } from "@/components/webmap/MenuBar";
+import { CrsSelector } from "@/components/webmap/CrsSelector";
 import { normalizeUSCode, usCodeKey } from "@shared/normalize_us_code";
 
 let drawClassPatched = false;
 const US_CODE_FIELDS = ["codiceUS", "codice_us", "codice", "us_code", "us", "id_us", "cod_us"];
 const REMOTE_SOURCE_TYPES = ["xyz", "wms", "wmts", "wfs", "arcgis"] as const;
 type RemoteSourceType = (typeof REMOTE_SOURCE_TYPES)[number];
-type WebMapPanelTab = "geopackage" | "sources" | "shapefile" | "snapshot";
 type USLookupEntry = {
   id: number;
   codiceUS: string;
@@ -380,6 +384,7 @@ function applyGraduatedRenderer(map: maplibregl.Map, layer: MapLayer, field: str
 
 function WebMapContent() {
   const { cid } = useParams<{ cid: string }>();
+  const queryClient = useQueryClient();
   const { toast } = useToast();
   const { state, dispatch, mapRef } = useWebMap();
 
@@ -405,6 +410,12 @@ function WebMapContent() {
   const [remoteAttribution, setRemoteAttribution] = useState("");
   const [selectedPresetId, setSelectedPresetId] = useState("");
   const [selectedShapefile, setSelectedShapefile] = useState<File | null>(null);
+  const [shapefileSrid, setShapefileSrid] = useState("4326");
+  const [selectedProjectFolder, setSelectedProjectFolder] = useState<FileList | null>(null);
+  const [projectImportResult, setProjectImportResult] = useState<{
+    imported: Array<{ name: string; format: string; featureCount: number }>;
+    skipped: Array<{ name: string; format: string; reason: string }>;
+  } | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapLoadError, setMapLoadError] = useState<string | null>(null);
   const [tileProbeStatus, setTileProbeStatus] = useState<"idle" | "ok" | "error">("idle");
@@ -413,6 +424,8 @@ function WebMapContent() {
   const [scaleLabel, setScaleLabel] = useState<string>("1:?");
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelTab, setPanelTab] = useState<WebMapPanelTab>("geopackage");
+  const [layerPanelTab, setLayerPanelTab] = useState<"session" | "persisted">("session");
+  const [crsDialogOpen, setCrsDialogOpen] = useState(false);
   const { layers: persistedLayers } = useWebMapLayers(mapRef, Number(cid), dispatch, Boolean(cid));
 
   useEffect(() => {
@@ -640,7 +653,8 @@ function WebMapContent() {
       if (!selectedShapefile) throw new Error("Seleziona prima uno shapefile .zip");
       const collection = await readShapefileZip(selectedShapefile);
       if (!collection.features?.length) throw new Error("Nessuna feature trovata nello shapefile");
-      pushVectorLayer(selectedShapefile.name, remoteTitle.trim() || selectedShapefile.name, collection, undefined, 4326);
+      const srid = Number(shapefileSrid.trim()) || 4326;
+      pushVectorLayer(selectedShapefile.name, remoteTitle.trim() || selectedShapefile.name, collection, undefined, srid);
     },
     onSuccess: () => toast({ title: "Shapefile caricato in mappa" }),
     onError: (error: any) =>
@@ -649,6 +663,53 @@ function WebMapContent() {
         description: error?.message || "Impossibile caricare il file",
         variant: "destructive",
       }),
+  });
+
+  const projectFolderMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedProjectFolder || selectedProjectFolder.length === 0) {
+        throw new Error("Seleziona la cartella del progetto QGIS");
+      }
+      const formData = new FormData();
+      Array.from(selectedProjectFolder).forEach((file) => {
+        const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+        // I browser riscrivono le "/" nel nome file quando viene allegato a FormData:
+        // si codifica il path per farlo arrivare intatto, e si decodifica lato server.
+        formData.append("files", file, encodeURIComponent(relativePath));
+      });
+
+      const response = await fetch(`/api/cantieri/${cid}/webmap/import-project`, {
+        method: "POST",
+        body: formData,
+        headers: getProjectHeader(),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body?.error || body?.message || "Import cartella fallito");
+      return body as {
+        imported: Array<{ name: string; format: string; featureCount: number }>;
+        skipped: Array<{ name: string; format: string; reason: string }>;
+        checkReport: { errorCount?: number; warningCount?: number } | null;
+      };
+    },
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: ["webmap-layers", cid] });
+      setProjectImportResult({ imported: result.imported, skipped: result.skipped });
+      const parts = [`${result.imported.length} layer importati`];
+      if (result.skipped.length > 0) parts.push(`${result.skipped.length} ignorati (vedi dettaglio sotto)`);
+      if (result.checkReport?.errorCount) parts.push(`${result.checkReport.errorCount} errori nell'ultimo check QGIS`);
+      toast({
+        title: "Import cartella progetto completato",
+        description: parts.join(" · "),
+      });
+    },
+    onError: (error: any) => {
+      setProjectImportResult(null);
+      toast({
+        title: "Errore import cartella",
+        description: error?.message || "Impossibile importare la cartella",
+        variant: "destructive",
+      });
+    },
   });
 
   const exportSketchesMutation = useMutation({
@@ -994,6 +1055,12 @@ function WebMapContent() {
         <span className="text-xs text-muted-foreground">MapLibre · Multi-layer · QGIS-like panel</span>
       </div>
 
+      <MenuBar
+        openPanel={openPanel}
+        onOpenCrsDialog={() => setCrsDialogOpen(true)}
+        onClearCustomLayers={clearCustomLayers}
+      />
+
       <ToolbarStrip>
         <div className="px-3 py-1.5 border-t border-border bg-card flex items-center gap-2 flex-wrap">
           <div className="flex items-center gap-1">
@@ -1017,6 +1084,7 @@ function WebMapContent() {
           </div>
         </div>
         <TerrainPanel />
+        <MeasureToolPanel />
         <StyleRendererPanel />
       </ToolbarStrip>
 
@@ -1045,15 +1113,45 @@ function WebMapContent() {
             </button>
 
             <div
-              className={`absolute left-0 top-0 bottom-0 w-72 z-30
+              className={`absolute left-0 top-0 bottom-0 w-72 z-30 flex flex-col
                 bg-background/95 backdrop-blur-sm border-r border-border shadow-xl
                 transition-transform duration-300 ease-in-out
                 ${state.modules.layerManager ? "translate-x-0" : "-translate-x-full"}`}
             >
-              <LayerManager
-                cantiereId={Number(cid)}
-                onClose={() => dispatch({ type: "TOGGLE_MODULE", module: "layerManager" })}
-              />
+              <div className="flex items-center gap-1 px-3 pt-2 shrink-0 border-b border-border/60">
+                <button
+                  type="button"
+                  className={`text-[11px] px-2 py-1 rounded-t transition-colors ${
+                    layerPanelTab === "session"
+                      ? "bg-background border border-b-0 border-border font-medium"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  onClick={() => setLayerPanelTab("session")}
+                >
+                  Sessione
+                </button>
+                <button
+                  type="button"
+                  className={`text-[11px] px-2 py-1 rounded-t transition-colors ${
+                    layerPanelTab === "persisted"
+                      ? "bg-background border border-b-0 border-border font-medium"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  onClick={() => setLayerPanelTab("persisted")}
+                >
+                  Persistenti
+                </button>
+              </div>
+              <div className="flex-1 min-h-0">
+                {layerPanelTab === "session" ? (
+                  <SessionLayerTree onClose={() => dispatch({ type: "TOGGLE_MODULE", module: "layerManager" })} />
+                ) : (
+                  <LayerManager
+                    cantiereId={Number(cid)}
+                    onClose={() => dispatch({ type: "TOGGLE_MODULE", module: "layerManager" })}
+                  />
+                )}
+              </div>
             </div>
             {mapUnsupported && (
               <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground bg-background/80">
@@ -1077,7 +1175,14 @@ function WebMapContent() {
             </span>
             <span>Zoom: <span className="font-medium text-foreground">{zoomLevel.toFixed(2)}</span></span>
             <span>Scala visibilita: <span className="font-medium text-foreground">{scaleLabel}</span></span>
-            <span>CRS progetto: <span className="font-medium text-foreground">{activeLayerCrs}</span></span>
+            <button
+              type="button"
+              className="hover:underline"
+              onClick={() => setCrsDialogOpen(true)}
+              title="Gestione CRS/EPSG"
+            >
+              CRS progetto: <span className="font-medium text-foreground">{activeLayerCrs}</span>
+            </button>
             <span>Schizzi: <span className="font-medium text-foreground">{drawFeatureCount}</span></span>
             {activeLayer && (
               <span>
@@ -1150,6 +1255,15 @@ function WebMapContent() {
               >
                 <FileArchive size={13} />
                 Shapefile
+              </Button>
+              <Button
+                size="sm"
+                variant={panelTab === "qgis-project" ? "default" : "outline"}
+                className="gap-1.5"
+                onClick={() => setPanelTab("qgis-project")}
+              >
+                <Workflow size={13} />
+                Progetto QGIS
               </Button>
               <Button
                 size="sm"
@@ -1309,6 +1423,17 @@ function WebMapContent() {
                       onChange={(event) => setSelectedShapefile(event.target.files?.[0] || null)}
                     />
                   </div>
+                  <div>
+                    <Label>Sistema di riferimento sorgente (EPSG)</Label>
+                    <Input
+                      value={shapefileSrid}
+                      onChange={(event) => setShapefileSrid(event.target.value)}
+                      placeholder="4326"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Lo shapefile non dichiara sempre il CRS in modo leggibile: se le geometrie non compaiono nel punto giusto, indica qui il codice EPSG corretto (es. 32633 per UTM 33N).
+                    </p>
+                  </div>
                   <Button
                     variant="outline"
                     className="gap-2"
@@ -1317,6 +1442,78 @@ function WebMapContent() {
                   >
                     {shapefileMutation.isPending ? "Import..." : "Importa Shapefile"}
                   </Button>
+                </div>
+              )}
+
+              {panelTab === "qgis-project" && (
+                <div className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    Seleziona la cartella del progetto QGIS dopo aver eseguito "Verifica progetto ArcheoDoc"
+                    dal plugin: verranno importati automaticamente i layer trovati in <code>archeodoc/manifest.json</code>.
+                  </p>
+                  <div>
+                    <Label>Cartella progetto</Label>
+                    <Input
+                      type="file"
+                      // @ts-expect-error attributi di selezione cartella non tipizzati da React/TS
+                      webkitdirectory=""
+                      directory=""
+                      multiple
+                      onChange={(event) => setSelectedProjectFolder(event.target.files)}
+                    />
+                    {selectedProjectFolder && selectedProjectFolder.length > 0 && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {selectedProjectFolder.length} file selezionati
+                      </p>
+                    )}
+                  </div>
+                  <Button
+                    className="gap-2"
+                    onClick={() => projectFolderMutation.mutate()}
+                    disabled={!selectedProjectFolder || projectFolderMutation.isPending}
+                  >
+                    <RefreshCcw size={15} className={projectFolderMutation.isPending ? "animate-spin" : ""} />
+                    {projectFolderMutation.isPending ? "Importo..." : "Importa cartella progetto"}
+                  </Button>
+
+                  {projectImportResult && (
+                    <div className="space-y-2 text-sm border rounded-md p-3 bg-muted/30">
+                      {projectImportResult.imported.length > 0 && (
+                        <div>
+                          <p className="font-medium text-foreground">
+                            Importati ({projectImportResult.imported.length})
+                          </p>
+                          <ul className="list-disc pl-4 text-muted-foreground">
+                            {projectImportResult.imported.map((item, i) => (
+                              <li key={i}>
+                                {item.name} ({item.format}) — {item.featureCount} feature
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {projectImportResult.skipped.length > 0 && (
+                        <div>
+                          <p className="font-medium text-destructive">
+                            Ignorati ({projectImportResult.skipped.length})
+                          </p>
+                          <ul className="list-disc pl-4 text-muted-foreground">
+                            {projectImportResult.skipped.map((item, i) => (
+                              <li key={i}>
+                                <span className="text-foreground">{item.name}</span>
+                                {item.format ? ` (${item.format})` : ""}: {item.reason}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {projectImportResult.imported.length === 0 && projectImportResult.skipped.length === 0 && (
+                        <p className="text-muted-foreground">
+                          Nessun layer trovato in manifest.json.
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1382,6 +1579,8 @@ function WebMapContent() {
           </div>
         </SheetContent>
       </Sheet>
+
+      <CrsSelector open={crsDialogOpen} onOpenChange={setCrsDialogOpen} />
     </div>
   );
 }

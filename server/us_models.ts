@@ -36,7 +36,7 @@ function normalizeKey(value: string): string {
   return normalized || `us-model-${Date.now()}`;
 }
 
-function normalizeFieldKey(value: string): string {
+export function normalizeFieldKey(value: string): string {
   const asText = value
     .trim()
     .replace(/[^a-zA-Z0-9]+/g, " ")
@@ -169,8 +169,45 @@ function nextCustomModelKey(project: ProjectDefinition, preferred: string): stri
   return candidate;
 }
 
+/** Mappa key->{help,options} dei campi built-in (ICCD/Estesa) che hanno un aiuto o un vocabolario
+ * definito. Usata per arricchire a runtime i modelli custom generati da template, i cui campi
+ * (creati solo da placeholder DOCX) non hanno mai help/vocabolario propri. */
+const BUILTIN_FIELD_INFO_BY_KEY: Map<string, { help?: string; options?: string[] }> = (() => {
+  const map = new Map<string, { help?: string; options?: string[] }>();
+  for (const model of BUILTIN_US_MODELS) {
+    for (const field of model.fields) {
+      if (!field.help && !field.options) continue;
+      if (map.has(field.key)) continue;
+      map.set(field.key, { help: field.help, options: field.options });
+    }
+  }
+  return map;
+})();
+
+/** Arricchisce i campi di un modello custom con help/opzioni built-in per le chiavi coincidenti
+ * (es. "colore", "consistenza"), senza sovrascrivere help/opzioni già presenti sul campo custom
+ * e senza persistere nulla: l'arricchimento avviene solo in lettura, ad ogni richiesta. */
+function withBuiltinFieldInfo(model: USModelDefinition): USModelDefinition {
+  let changed = false;
+  const fields = model.fields.map((field) => {
+    const info = BUILTIN_FIELD_INFO_BY_KEY.get(field.key);
+    if (!info) return field;
+    if (field.help && field.options) return field;
+    changed = true;
+    return {
+      ...field,
+      help: field.help || info.help,
+      options: field.options || info.options,
+    };
+  });
+  return changed ? { ...model, fields } : model;
+}
+
 export function listUSModels(project: ProjectDefinition): USModelDefinition[] {
-  return [...BUILTIN_US_MODELS, ...parseCustomModels(getCustomModelsPath(project))];
+  return [
+    ...BUILTIN_US_MODELS,
+    ...parseCustomModels(getCustomModelsPath(project)).map(withBuiltinFieldInfo),
+  ];
 }
 
 export function getUSModel(project: ProjectDefinition, modelKey?: string | null): USModelDefinition {
@@ -179,7 +216,10 @@ export function getUSModel(project: ProjectDefinition, modelKey?: string | null)
   if (builtin) return builtin;
 
   const custom = parseCustomModels(getCustomModelsPath(project)).find((m) => m.key === key);
-  return custom || BUILTIN_US_MODELS[0];
+  if (custom) return withBuiltinFieldInfo(custom);
+  // Modello non trovato: logga e cade sul base invece di fallire silenziosamente
+  console.warn(`[getUSModel] Modello "${key}" non trovato, fallback su base`);
+  return BUILTIN_US_MODELS[0];
 }
 
 export function createCustomUSModel(project: ProjectDefinition, input: CustomModelInput): USModelDefinition {

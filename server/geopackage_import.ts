@@ -487,7 +487,7 @@ async function fetchEpsgIoProj4(srid: number): Promise<string | null> {
   }
 }
 
-async function resolveProj4Def(srid: number): Promise<string | null> {
+export async function resolveProj4Def(srid: number): Promise<string | null> {
   if (projDefCache.has(srid)) return projDefCache.get(srid) ?? null;
 
   const utmDef = utmWgs84ProjDef(srid);

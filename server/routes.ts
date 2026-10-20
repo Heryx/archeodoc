@@ -15,8 +15,11 @@ import { registerProjectRoutes } from "./routes/projects";
 import { registerSettingsRoutes } from "./routes/settings";
 import { registerAIExportRoutes } from "./routes/ai_export";
 import { registerQCRoutes } from "./routes/qc";
+import { registerAIAssistantRoutes } from "./routes/ai_assistant";
 import { registerFieldworkRoutes } from "./routes/fieldwork";
+import { registerUSImportRoutes } from "./routes/us_import";
 import { registerQFieldRoutes } from "./routes/qfield";
+import syncRouter from "./routes/sync";
 import { registerWebMapRoutes } from "./routes/webmap_routes";
 import { registerDocumentazioniRoutes } from "./routes/documentazioni";
 import type { ProjectContext, ProjectHandler } from "./routes/types";
@@ -27,10 +30,10 @@ import {
   ensureUniqueRelativePath,
   fileToTipo,
   moveUploadedFileToCantiereDir,
+  moveUploadedFileToCantiereDateDir,
   removeAttachmentIfExists,
   resolvePathInside,
 } from "./routes/file_helpers";
-import { normalizeUsDefinizione, normalizeUsTipo } from "@shared/us_thesaurus";
 type TransferMode = "copy" | "move";
 
 type CantiereTransferResult = {
@@ -157,13 +160,9 @@ function pickUSBaseFromPayload(payload: Record<string, unknown>, fallback: Recor
     }
   }
 
-  if (Object.prototype.hasOwnProperty.call(out, "tipo")) {
-    out.tipo = normalizeUsTipo(out.tipo);
-  }
-  if (Object.prototype.hasOwnProperty.call(out, "definizione")) {
-    out.definizione = normalizeUsDefinizione(out.definizione, out.tipo);
-  }
-
+  // tipo/definizione NON vengono normalizzati qui: lo fanno i chiamanti con il
+  // vocabolario del progetto (altrimenti i sinonimi built-in, es. taglio → interfaccia,
+  // sovrascrivono i termini scelti dall'utente nel thesaurus).
   return out;
 }
 
@@ -530,7 +529,11 @@ const upload = multer({
 
 const geopackageUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 200 * 1024 * 1024 },
+  // Generoso perche' include l'import cartella progetto QGIS, che puo' contenere
+  // ortofoto raster di centinaia di MB / qualche GB. App locale monoutente: il
+  // limite serve solo a evitare upload accidentalmente enormi, non a proteggere
+  // un server condiviso.
+  limits: { fileSize: 2 * 1024 * 1024 * 1024 },
 });
 
 export async function registerRoutes(_httpServer: Server, app: Express): Promise<void> {
@@ -691,8 +694,10 @@ export async function registerRoutes(_httpServer: Server, app: Express): Promise
     transferCantiere,
     fileToTipo,
     moveUploadedFileToCantiereDir,
+    moveUploadedFileToCantiereDateDir,
     cleanupUploadedTempFiles,
   });
+  registerUSImportRoutes(app, upload, withProject);
   registerQCRoutes(app, withProject);
   registerDocumentazioniRoutes(app, {
     withProject,
@@ -702,8 +707,10 @@ export async function registerRoutes(_httpServer: Server, app: Express): Promise
   registerSettingsRoutes(app, withProject);
 
   registerAIExportRoutes(app, withProject);
+  registerAIAssistantRoutes(app, withProject);
   registerQFieldRoutes(app, withProject);
 
+  app.use("/api/sync", syncRouter);
 }
 
 

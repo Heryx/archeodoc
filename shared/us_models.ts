@@ -21,7 +21,7 @@ export type USModelDefinition = {
 
 export const BASE_US_MODEL_KEY = "base-us";
 export const ICCD_US_2021_MODEL_KEY = "iccd-us-2021";
-export const ARCHEOSISTEMI_US_MODEL_KEY = "archeosistemi-us";
+export const EXTENDED_US_MODEL_KEY = "extended-us";
 
 // Campi presenti nel form base della scheda US.
 export const BASE_US_FIELD_KEYS = new Set<string>([
@@ -186,9 +186,21 @@ export const ICCD_US_2021_MODEL: USModelDefinition = {
       locked: true,
       help: "Per i reperti usa soprattutto riferimenti alle schede materiali (sigla/ID), con stima quantita e dimensione.",
     },
-    { key: "consistenza", label: "Consistenza", type: "text", locked: true },
-    { key: "colore", label: "Colore", type: "text", locked: true },
-    { key: "misure", label: "Misure", type: "text", locked: true },
+    {
+      key: "consistenza",
+      label: "Consistenza",
+      type: "text",
+      locked: true,
+      help: "Usa solo i 5 termini standard ICCD: Non coerente (particelle sciolte), Friabile (si sbriciola con leggera pressione), Compatto (richiede sforzo o strumento), Duro (richiede piccone/mazzetta), Plastico (argilla umida modellabile).",
+    },
+    {
+      key: "colore",
+      label: "Colore",
+      type: "text",
+      locked: true,
+      help: "Preferibile il codice Munsell (es. 10YR 4/3 = Brown). Misura a umidita standard e annota eventuali variazioni cromatiche.",
+    },
+    { key: "misure", label: "Misure", type: "text", locked: true, help: "Esprimi sempre le misure in METRI (es. 2.13 x 0.65 m): lunghezza, larghezza e profondita max/min." },
 
     {
       key: "stratoConfigurazioneSuperficie",
@@ -208,7 +220,8 @@ export const ICCD_US_2021_MODEL: USModelDefinition = {
       label: "Descrizione strato - definizione confine inferiore",
       type: "select",
       locked: true,
-      options: ["Netto", "Abbastanza netto", "Graduale", "Diffuso"],
+      options: ["Netto", "Abbastanza netto", "Graduale", "Diffuso", "Molto diffuso"],
+      help: "Spessore fascia di transizione: Netto <0,5 cm · Abbastanza netto 0,5-2,5 cm · Graduale 2,5-6 cm · Diffuso 6-13 cm · Molto diffuso >13 cm.",
     },
     {
       key: "stratoMorfologiaInclusi",
@@ -216,6 +229,7 @@ export const ICCD_US_2021_MODEL: USModelDefinition = {
       type: "select",
       locked: true,
       options: ["Spigolo vivo", "Arrotondato", "Fluitato", "Misto"],
+      help: "Arrotondato/Fluitato = superfici usurate dall'acqua, indicano giacitura secondaria (trasporto/dilavamento). Spigolo vivo = superfici non usurate, indicano giacitura primaria (deposizione in situ).",
     },
 
     { key: "strutturaOrientamento", label: "Descrizione struttura - orientamento", type: "text", locked: true },
@@ -224,12 +238,14 @@ export const ICCD_US_2021_MODEL: USModelDefinition = {
       label: "Descrizione struttura - tecnica costruttiva",
       type: "text",
       locked: true,
+      help: "Indica anzitutto la tipologia: lignea, litica, in argilla cruda, laterizia, cementizia, mista. Per i laterizi: crudi/cotti/cotti al sole/semifusi, forma triangolare/quadrata/rettangolare/spezzoni/circolare. Per la pietra: sfaldati, spaccati, sbozzati, squadrati, spianati, bugnati.",
     },
     {
       key: "strutturaMaterialiLegante",
       label: "Descrizione struttura - materiali e legante",
       type: "text",
       locked: true,
+      help: "Componenti della malta: calce, pozzolana, sabbia, elementi organici. Descrivi consistenza, colore e dimensione degli inclusi.",
     },
     {
       key: "strutturaMessaInOpera",
@@ -242,6 +258,7 @@ export const ICCD_US_2021_MODEL: USModelDefinition = {
       label: "Descrizione struttura - tracce di lavorazione",
       type: "text",
       locked: true,
+      help: "Finiture del paramento: a filo, arretrata, coprente, lisciatura (piana/concava), stilatura (anche doppia).",
     },
 
     {
@@ -250,6 +267,7 @@ export const ICCD_US_2021_MODEL: USModelDefinition = {
       type: "select",
       locked: true,
       options: ["Regolare", "Irregolare"],
+      help: "Definisce i margini (linea di bordo) del taglio. Specifica separatamente, nel testo, la sagoma planimetrica (rettangolare, ovale, irregolare) e l'orientamento dell'asse maggiore.",
     },
     {
       key: "negativaProfiloPareti",
@@ -257,6 +275,7 @@ export const ICCD_US_2021_MODEL: USModelDefinition = {
       type: "select",
       locked: true,
       options: ["Rettilineo", "Convesso", "Concavo", "Misto"],
+      help: "Definisce la sezione verticale del taglio. Indica anche il tipo di stacco col margine superiore (netto, graduale) e la pendenza delle pareti (verticale, inclinata).",
     },
     {
       key: "negativaTipoStacco",
@@ -270,7 +289,8 @@ export const ICCD_US_2021_MODEL: USModelDefinition = {
       label: "Descrizione US negativa - profilo fondo",
       type: "select",
       locked: true,
-      options: ["Piatto", "Concavo", "In declivio", "Irregolare"],
+      options: ["Piatto", "Concavo", "In declivio", "Irregolare", "Ad angolo acuto"],
+      help: "Definisce la base del taglio. Se in declivio, specifica nel testo la direzione della pendenza.",
     },
 
     { key: "taglia", label: "Sequenza fisica - taglia", type: "text", locked: true },
@@ -284,7 +304,7 @@ export const ICCD_US_2021_MODEL: USModelDefinition = {
       label: "Sequenza fisica - uguale a / si lega a",
       type: "text",
       locked: true,
-      help: "Usa questo campo per relazioni di equivalenza contemporanea.",
+      help: "Usa questo campo per relazioni di equivalenza contemporanea. Relazione reciproca e simmetrica: se qui scrivi 'uguale a X', nella scheda di X va indicato 'uguale a questa US'.",
     },
 
     {
@@ -292,14 +312,14 @@ export const ICCD_US_2021_MODEL: USModelDefinition = {
       label: "Sequenza stratigrafica - posteriore a",
       type: "text",
       locked: true,
-      help: "Registra solo le relazioni essenziali per la Harris Matrix.",
+      help: "Registra solo le relazioni essenziali per la Harris Matrix (rapporto POST: l'US si e formata DOPO l'unita indicata, quindi e piu recente). Scarta i nessi ridondanti o indiretti.",
     },
     {
       key: "anterioreA",
       label: "Sequenza stratigrafica - anteriore a",
       type: "text",
       locked: true,
-      help: "Registra solo le relazioni essenziali per la Harris Matrix.",
+      help: "Registra solo le relazioni essenziali per la Harris Matrix (rapporto ANTE: l'US si e formata PRIMA dell'unita indicata, quindi e piu antica). Scarta i nessi ridondanti o indiretti.",
     },
 
     {
@@ -421,12 +441,12 @@ export const ICCD_US_2021_MODEL: USModelDefinition = {
   ],
 };
 
-export const ARCHEOSISTEMI_US_MODEL: USModelDefinition = {
-  key: ARCHEOSISTEMI_US_MODEL_KEY,
-  name: "Archeosistemi US",
+export const EXTENDED_US_MODEL: USModelDefinition = {
+  key: EXTENDED_US_MODEL_KEY,
+  name: "US Estesa ArcheoDoc",
   source: "base",
   locked: true,
-  description: "Scheda US Archeosistemi con campi specifici del modello AR/S.",
+  description: "Scheda US estesa con campi aggiuntivi per documentazione operativa.",
   fields: [
     { key: "enteCompilatore", label: "Ente compilatore", type: "text", required: true, locked: true },
     { key: "nCatalogoGenerale", label: "N. catalogo generale", type: "text", locked: true },
@@ -445,7 +465,8 @@ export const ARCHEOSISTEMI_US_MODEL: USModelDefinition = {
     { key: "sezioni", label: "Sezioni", type: "text", locked: true },
     { key: "prospetti", label: "Prospetti", type: "text", locked: true },
     { key: "fotografie", label: "Foto", type: "text", locked: true },
-    { key: "tabelleMateriali", label: "Tabelle materiali", type: "text", locked: true },
+    { key: "tabelleMaterialiRa", label: "Tabelle materiali RA", type: "text", locked: true },
+    { key: "tabelleMaterialiN", label: "Tabelle materiali N", type: "text", locked: true },
 
     {
       key: "naturaUs",
@@ -507,9 +528,21 @@ export const ARCHEOSISTEMI_US_MODEL: USModelDefinition = {
       options: ["Fitta", "Media", "Rada"],
     },
 
-    { key: "consistenza", label: "Consistenza", type: "text", locked: true },
-    { key: "colore", label: "Colore", type: "text", locked: true },
-    { key: "misure", label: "Misure", type: "text", locked: true },
+    {
+      key: "consistenza",
+      label: "Consistenza",
+      type: "text",
+      locked: true,
+      help: "Usa solo i 5 termini standard ICCD: Non coerente (particelle sciolte), Friabile (si sbriciola con leggera pressione), Compatto (richiede sforzo o strumento), Duro (richiede piccone/mazzetta), Plastico (argilla umida modellabile).",
+    },
+    {
+      key: "colore",
+      label: "Colore",
+      type: "text",
+      locked: true,
+      help: "Preferibile il codice Munsell (es. 10YR 4/3 = Brown). Misura a umidita standard e annota eventuali variazioni cromatiche.",
+    },
+    { key: "misure", label: "Misure", type: "text", locked: true, help: "Esprimi sempre le misure in METRI (es. 2.13 x 0.65 m): lunghezza, larghezza e profondita max/min." },
     {
       key: "statoConservazione",
       label: "Stato di conservazione",
@@ -517,8 +550,14 @@ export const ARCHEOSISTEMI_US_MODEL: USModelDefinition = {
       locked: true,
       options: ["Intatto", "Buono", "Discreto", "Mediocre", "Pessimo"],
     },
-    { key: "danneggiatoDa", label: "L'unita e stata danneggiata da", type: "text", locked: true },
-    { key: "descrizioneEstesaArcheosistemi", label: "Descrizione estesa", type: "textarea", locked: true },
+    {
+      key: "danneggiatoDa",
+      label: "L'unita e stata danneggiata da",
+      type: "text",
+      locked: true,
+      help: "Tagliato da, sconvolto da, rimaneggiato da, alterato da, danneggiato da, mancante di.",
+    },
+    { key: "descrizioneEstesa", label: "Descrizione estesa", type: "textarea", locked: true },
 
     {
       key: "metodoScavo",
@@ -532,8 +571,23 @@ export const ARCHEOSISTEMI_US_MODEL: USModelDefinition = {
         "Asportata insieme ad altri strati",
       ],
     },
-    { key: "metodoScavoAltro", label: "Metodo scavo - altro", type: "text", locked: true },
+    { key: "altroScavo", label: "Osservazioni - Altro (testo)", type: "text", locked: true },
     { key: "interpretazioneEstesa", label: "Interpretazione", type: "textarea", locked: true },
+
+    {
+      key: "posterioreA",
+      label: "Posteriore a",
+      type: "text",
+      locked: true,
+      help: "Rapporto POST: l'US si e formata DOPO l'unita indicata, quindi e piu recente. Registra solo i nessi cronologici diretti per la Harris Matrix.",
+    },
+    {
+      key: "anterioreA",
+      label: "Anteriore a",
+      type: "text",
+      locked: true,
+      help: "Rapporto ANTE: l'US si e formata PRIMA dell'unita indicata, quindi e piu antica. Registra solo i nessi cronologici diretti per la Harris Matrix.",
+    },
 
     { key: "elementiDatanti", label: "Elementi datanti", type: "textarea", locked: true },
     {
@@ -573,11 +627,11 @@ export const ARCHEOSISTEMI_US_MODEL: USModelDefinition = {
       options: ["Nessuna", "Modesta", "Buona"],
     },
     { key: "responsabileSabap", label: "Responsabile SABAP-UMB", type: "text", locked: true },
-    { key: "responsabileArcheosistemi", label: "Responsabile Archeosistemi", type: "text", locked: true },
+    { key: "responsabileScavo", label: "Responsabile scavo", type: "text", locked: true },
     { key: "dataCompilazione", label: "Data compilazione", type: "date", locked: true },
   ],
 };
-export const BUILTIN_US_MODELS: USModelDefinition[] = [BASE_US_MODEL, ICCD_US_2021_MODEL, ARCHEOSISTEMI_US_MODEL];
+export const BUILTIN_US_MODELS: USModelDefinition[] = [BASE_US_MODEL, ICCD_US_2021_MODEL, EXTENDED_US_MODEL];
 
 export function isBuiltinUSModelKey(modelKey: string): boolean {
   return BUILTIN_US_MODELS.some((model) => model.key === modelKey);

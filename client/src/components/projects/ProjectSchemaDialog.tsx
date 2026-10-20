@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { getProjectHeader } from "@/lib/project";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -13,6 +14,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, RefreshCcw, Save, Trash2, Upload } from "lucide-react";
+import type { USModelDefinition } from "@shared/us_models";
+import { US_TIPO_THESAURUS, usDefinizioneSuggestions } from "@shared/us_thesaurus";
 import type { ProjectItem } from "@/components/projects/types";
 import type {
   DocumentationFieldType,
@@ -54,10 +57,10 @@ type ProjectSchemaDialogProps = {
   onOpenChange: (open: boolean) => void;
 };
 
-const ENTITY_OPTIONS: Array<{ value: SchemaEntityType; label: string; description: string }> = [
-  { value: "us", label: "US", description: "Unita Stratigrafica" },
-  { value: "sas", label: "SAS", description: "Saggio / Settore" },
-  { value: "ra", label: "RA", description: "Reperto Archeologico" },
+const ENTITY_OPTIONS: Array<{ value: SchemaEntityType; label: string; description: string; hint: string }> = [
+  { value: "us", label: "US", description: "Unita Stratigrafica", hint: "Schede compilate nella sezione Unita strat." },
+  { value: "sas", label: "SAS", description: "Saggio / Settore di Scavo", hint: "Schede compilate nella sezione Saggi (SAS)" },
+  { value: "ra", label: "RA", description: "Reperto Archeologico", hint: "Schede compilate nella sezione Materiali (RA)" },
 ];
 
 const FIELD_TYPE_OPTIONS: Array<{ value: DocumentationFieldType; label: string }> = [
@@ -184,6 +187,27 @@ function extractUsThesaurusFields(schema: SchemaDefinition): ThesaurusField[] {
     }
   }
 
+  // "tipo" e "definizione" sono campi US top-level: esponili anche quando non
+  // esistono come campi di paragrafo (schema ICCD), con le voci salvate nello
+  // schema o i default condivisi.
+  const schemaVocabularies = (schema.vocabularies || {}) as Record<string, string[]>;
+  const topLevelDefaults: Array<{ key: string; label: string; fallback: string[] }> = [
+    { key: "tipo", label: "Tipo", fallback: [...US_TIPO_THESAURUS] },
+    { key: "definizione", label: "Definizione", fallback: usDefinizioneSuggestions() },
+  ];
+
+  for (const { key, label, fallback } of topLevelDefaults) {
+    const existing = byKey.get(key);
+    if (existing && existing.vocabulary.length > 0) continue;
+    const stored = mergeVocabulary([], schemaVocabularies[key] || []);
+    byKey.set(key, {
+      key,
+      label: existing?.label || label,
+      type: existing?.type ?? "text",
+      vocabulary: stored.length > 0 ? stored : mergeVocabulary([], fallback),
+    });
+  }
+
   return Array.from(byKey.values());
 }
 
@@ -257,6 +281,7 @@ export function ProjectSchemaDialog({
 }: ProjectSchemaDialogProps) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const [topTab, setTopTab] = useState<"schema" | "models">("schema");
   const [schemaDraft, setSchemaDraft] = useState<SchemaDefinition | null>(null);
   const [schemaEntity, setSchemaEntity] = useState<SchemaEntityType>("us");
   const [presetDraftKey, setPresetDraftKey] = useState("");
@@ -264,6 +289,10 @@ export function ProjectSchemaDialog({
   const [thesaurusValuesRaw, setThesaurusValuesRaw] = useState("");
   const [sqliteFile, setSqliteFile] = useState<File | null>(null);
   const [suggestionMeta, setSuggestionMeta] = useState<string>("");
+  // Modelli US custom
+  const [newModelName, setNewModelName] = useState("");
+  const [newModelDescription, setNewModelDescription] = useState("");
+  const [newModelFieldsRaw, setNewModelFieldsRaw] = useState("");
 
   const schemaQuery = useQuery<ProjectSchemaResponse>({
     queryKey: ["/api/projects", projectId, "schema"],
@@ -336,16 +365,47 @@ export function ProjectSchemaDialog({
       }),
   });
 
+  // Salva il solo vocabolario di un campo: funziona anche per i progetti ICCD.
+  const saveVocabularyMutation = useMutation({
+    mutationFn: async ({
+      currentProjectId,
+      fieldKey,
+      values,
+    }: {
+      currentProjectId: string;
+      fieldKey: string;
+      values: string[];
+    }) =>
+      (await apiRequest("PATCH", `/api/projects/${currentProjectId}/schema/vocabulary`, {
+        entity: "us",
+        fieldKey,
+        vocabulary: values,
+      })).json(),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["/api/projects"] });
+      await schemaQuery.refetch();
+      toast({ title: "Vocabolario thesaurus salvato" });
+    },
+    onError: (error: any) =>
+      toast({
+        title: "Errore salvataggio vocabolario",
+        description: error?.message,
+        variant: "destructive",
+      }),
+  });
+
   function applyThesaurusToDraft(fieldKey: string, vocabulary: string[]) {
     const cleaned = mergeVocabulary([], vocabulary);
 
     setSchemaDraft((prev) => {
       if (!prev) return prev;
       const next = ensureSchemaDefinition(prev);
+      let matchedParagraphField = false;
       next.modules.us = next.modules.us.map((paragraph) => ({
         ...paragraph,
         fields: (paragraph.fields || []).map((field) => {
           if (field.key !== fieldKey) return field;
+          matchedParagraphField = true;
           return {
             ...field,
             vocabulary: cleaned.length > 0 ? cleaned : undefined,
@@ -353,6 +413,14 @@ export function ProjectSchemaDialog({
         }),
       }));
       next.paragraphs = next.modules.us.map(cloneParagraph);
+
+      if (!matchedParagraphField) {
+        const nextVocabularies = { ...(next.vocabularies || {}) };
+        if (cleaned.length > 0) nextVocabularies[fieldKey] = cleaned;
+        else delete nextVocabularies[fieldKey];
+        next.vocabularies = nextVocabularies;
+      }
+
       return next;
     });
   }
@@ -417,6 +485,50 @@ export function ProjectSchemaDialog({
         description: error?.message,
         variant: "destructive",
       }),
+  });
+
+  const usModelsQuery = useQuery<{ models: USModelDefinition[] }>({
+    queryKey: ["/api/us-models"],
+    queryFn: async () => (await apiRequest("GET", "/api/us-models")).json(),
+    enabled: open && !!projectId && topTab === "models",
+    staleTime: 0,
+    refetchOnMount: true,
+  });
+
+  const createUSModelMutation = useMutation({
+    mutationFn: async () => {
+      const name = newModelName.trim();
+      if (!name) throw new Error("Nome obbligatorio");
+      let fields: unknown[] = [];
+      const raw = newModelFieldsRaw.trim();
+      if (raw) {
+        try {
+          fields = JSON.parse(raw);
+          if (!Array.isArray(fields)) throw new Error("fields deve essere un array JSON");
+        } catch (e: any) {
+          throw new Error("JSON campi non valido: " + e.message);
+        }
+      }
+      return (await apiRequest("POST", "/api/us-models/custom", { name, description: newModelDescription, fields })).json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/us-models"] });
+      setNewModelName("");
+      setNewModelDescription("");
+      setNewModelFieldsRaw("");
+      toast({ title: "Modello US creato" });
+    },
+    onError: (error: any) => toast({ title: "Errore creazione modello", description: error?.message, variant: "destructive" }),
+  });
+
+  const deleteUSModelMutation = useMutation({
+    mutationFn: async (modelKey: string) =>
+      (await apiRequest("DELETE", `/api/us-models/custom/${modelKey}`)).json(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/us-models"] });
+      toast({ title: "Modello eliminato" });
+    },
+    onError: (error: any) => toast({ title: "Errore eliminazione modello", description: error?.message, variant: "destructive" }),
   });
 
   const schemaPresets = schemaQuery.data?.presets || fallbackPresets || [];
@@ -542,6 +654,10 @@ export function ProjectSchemaDialog({
       setSchemaDraft(null);
       setSchemaEntity("us");
       setPresetDraftKey("");
+      setTopTab("schema");
+      setNewModelName("");
+      setNewModelDescription("");
+      setNewModelFieldsRaw("");
     }
     onOpenChange(value);
   }
@@ -551,7 +667,115 @@ export function ProjectSchemaDialog({
       <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Schema documentazione progetto</DialogTitle>
+          <p className="text-xs text-muted-foreground mt-1">
+            Gestisci i campi delle schede <strong>US</strong>, <strong>SAS</strong> e <strong>RA</strong> e i modelli
+            di scheda US personalizzati.
+          </p>
         </DialogHeader>
+
+        <Tabs value={topTab} onValueChange={(v) => setTopTab(v as "schema" | "models")} className="mt-1">
+          <TabsList className="grid grid-cols-2 w-full max-w-sm">
+            <TabsTrigger value="schema">Campi schema (US / SAS / RA)</TabsTrigger>
+            <TabsTrigger value="models">Modelli scheda US</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="models" className="mt-4">
+            {usModelsQuery.isLoading ? (
+              <div className="text-sm text-muted-foreground py-4">Caricamento modelli...</div>
+            ) : (
+              <div className="space-y-5">
+                <div className="space-y-2">
+                  {(usModelsQuery.data?.models || []).map((model) => (
+                    <Card key={model.key}>
+                      <CardContent className="py-3 px-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-medium text-sm">{model.name}</span>
+                              <Badge variant="outline" className="font-mono text-xs">{model.key}</Badge>
+                              {model.source !== "custom" && (
+                                <Badge variant="secondary" className="text-xs">Predefinito</Badge>
+                              )}
+                            </div>
+                            {model.description && (
+                              <p className="text-xs text-muted-foreground mt-0.5">{model.description}</p>
+                            )}
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              {model.fields?.length || 0} campi
+                            </p>
+                          </div>
+                          {model.source === "custom" && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-destructive hover:text-destructive shrink-0"
+                              onClick={() => deleteUSModelMutation.mutate(model.key)}
+                              disabled={deleteUSModelMutation.isPending}
+                            >
+                              <Trash2 size={13} />
+                            </Button>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+
+                <Card>
+                  <CardHeader className="pb-2">
+                    <p className="text-sm font-medium">Crea modello US personalizzato</p>
+                    <p className="text-xs text-muted-foreground">
+                      I modelli US definiscono quali campi compaiono nel form di compilazione della scheda.
+                      I campi per SAS e RA si gestiscono direttamente nei tab Schema (US / SAS / RA) qui sopra.
+                    </p>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="grid md:grid-cols-2 gap-3">
+                      <div>
+                        <Label>Nome modello *</Label>
+                        <Input
+                          placeholder="es. Scheda estesa cantiere 2026"
+                          value={newModelName}
+                          onChange={(e) => setNewModelName(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <Label>Descrizione (opzionale)</Label>
+                        <Input
+                          placeholder="Breve descrizione del modello"
+                          value={newModelDescription}
+                          onChange={(e) => setNewModelDescription(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <Label>Campi (JSON array, opzionale)</Label>
+                      <Textarea
+                        rows={6}
+                        className="font-mono text-xs"
+                        placeholder={'[\n  { "key": "colore", "label": "Colore", "type": "text" },\n  { "key": "consistenza", "label": "Consistenza", "type": "select", "options": ["Friabile", "Compatto"] }\n]'}
+                        value={newModelFieldsRaw}
+                        onChange={(e) => setNewModelFieldsRaw(e.target.value)}
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Se lasci vuoto vengono usati i campi dello schema progetto.
+                      </p>
+                    </div>
+                    <Button
+                      className="gap-2"
+                      onClick={() => createUSModelMutation.mutate()}
+                      disabled={!newModelName.trim() || createUSModelMutation.isPending}
+                    >
+                      <Plus size={14} />
+                      {createUSModelMutation.isPending ? "Creazione..." : "Crea modello"}
+                    </Button>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="schema" className="mt-4">
 
         {!projectId || schemaQuery.isLoading ? (
           <div className="text-sm text-muted-foreground py-6">Caricamento schema...</div>
@@ -692,6 +916,7 @@ export function ProjectSchemaDialog({
 
                   <Button
                     type="button"
+                    variant="outline"
                     onClick={() => {
                       if (!thesaurusFieldKey) return;
                       const values = parseVocabulary(thesaurusValuesRaw) || [];
@@ -702,12 +927,32 @@ export function ProjectSchemaDialog({
                   >
                     Applica al draft
                   </Button>
+
+                  <Button
+                    type="button"
+                    className="gap-2"
+                    onClick={() => {
+                      if (!projectId || !thesaurusFieldKey) return;
+                      const values = parseVocabulary(thesaurusValuesRaw) || [];
+                      applyThesaurusToDraft(thesaurusFieldKey, values);
+                      saveVocabularyMutation.mutate({
+                        currentProjectId: projectId,
+                        fieldKey: thesaurusFieldKey,
+                        values,
+                      });
+                    }}
+                    disabled={!projectId || !thesaurusFieldKey || saveVocabularyMutation.isPending}
+                  >
+                    <Save size={14} />
+                    {saveVocabularyMutation.isPending ? "Salvataggio..." : "Salva vocabolario"}
+                  </Button>
                 </div>
 
                 {suggestionMeta && <p className="text-xs text-muted-foreground">{suggestionMeta}</p>}
                 {editingDisabled && (
                   <p className="text-xs text-amber-700">
-                    Il progetto ICCD e bloccato: puoi generare suggerimenti, ma non salvare modifiche thesaurus.
+                    Progetto ICCD: le voci del thesaurus sono modificabili con "Salva vocabolario", ma la struttura
+                    dei campi resta bloccata ("Applica al draft" disabilitato).
                   </p>
                 )}
               </CardContent>
@@ -734,7 +979,7 @@ export function ProjectSchemaDialog({
                         <div>
                           <p className="text-sm font-medium">{entity.description}</p>
                           <p className="text-xs text-muted-foreground">
-                            Paragrafi: {(schemaDraft.modules[entity.value] || []).length}
+                            {entity.hint} · Paragrafi: {(schemaDraft.modules[entity.value] || []).length}
                           </p>
                         </div>
                         <Button
@@ -985,6 +1230,9 @@ export function ProjectSchemaDialog({
         ) : (
           <div className="text-sm text-muted-foreground py-6">Nessuno schema disponibile.</div>
         )}
+
+          </TabsContent>
+        </Tabs>
       </DialogContent>
     </Dialog>
   );

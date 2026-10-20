@@ -1,3 +1,5 @@
+import { formatUsCode } from "@shared/us_code";
+import { useProjectCodeSettings } from "@/hooks/useProjectCodeSettings";
 import { Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,6 +13,7 @@ type MaterialiListProps = {
 };
 
 export function MaterialiList({ materiali, usById, isLoading, onEdit, onDelete }: MaterialiListProps) {
+  const { settings: codeSettings } = useProjectCodeSettings();
   if (isLoading) {
     return (
       <div className="space-y-3">
@@ -48,7 +51,7 @@ export function MaterialiList({ materiali, usById, isLoading, onEdit, onDelete }
                       </span>
                     )}
                     <span className="text-xs text-muted-foreground">
-                      {us ? `US: ${us.codiceUS}` : "US: non associata"}
+                      {us ? `US: ${formatUsCode(us.codiceUS, us.tipo, codeSettings.tombaStyle)}` : "US: non associata"}
                     </span>
                   </div>
 

@@ -13,33 +13,21 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Layers, Plus, Sparkles } from "lucide-react";
+import { Plus, ShieldCheck } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { getCurrentProjectId } from "@/lib/project";
 import { GiornataDeleteImpactDetails } from "@/components/giornata/GiornataDeleteImpact";
 import { GiornataFormDialog } from "@/components/giornata/GiornataFormDialog";
 import { GiornataList } from "@/components/giornata/GiornataList";
-import { GooglePanel } from "@/components/giornata/GooglePanel";
-import { GoogleSyncReviewDialog } from "@/components/giornata/GoogleSyncReviewDialog";
-import { USImportFromJournalDialog } from "@/components/us/USImportFromJournalDialog";
-import {
-  parseLastSyncSummary,
-  seedGoogleDecisionState,
-  withGoogleDecisionAction,
-  withGoogleSchedaOverride,
-  withGoogleTopFieldOverride,
-} from "@/components/giornata/googleSyncState";
 import {
   emptyForm,
   operatoriToPayload,
   parseOperatori,
   type GiornataDeleteImpact,
   type GiornataForm,
-  type GoogleSyncApplyReport,
-  type GoogleSyncDecisionState,
-  type GoogleSyncPreview,
 } from "@/components/giornata/types";
 import { useGiornatePerSettimana } from "@/hooks/useGiornatePerSettimana";
+import type { GiornataSuggestions } from "@/components/giornata/GiornataFormFields";
 
 export function GiornataPage() {
   const { cid, gid } = useParams<{ cid: string; gid?: string }>();
@@ -57,16 +45,18 @@ export function GiornataPage() {
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
   const [deleteImpact, setDeleteImpact] = useState<GiornataDeleteImpact | null>(null);
   const [isLoadingDeleteImpact, setIsLoadingDeleteImpact] = useState(false);
-  const [googleReviewOpen, setGoogleReviewOpen] = useState(false);
-  const [googlePreview, setGooglePreview] = useState<GoogleSyncPreview | null>(null);
-  const [googleDecisions, setGoogleDecisions] = useState<Record<string, GoogleSyncDecisionState>>({});
-  const [importUsDialogOpen, setImportUsDialogOpen] = useState(false);
-
   const { data: cantieri = [] } = useQuery<any[]>({
     queryKey: ["/api/cantieri", activeProjectId],
     queryFn: async () => (await apiRequest("GET", "/api/cantieri")).json(),
   });
   const cantiere = cantieri.find((c: any) => String(c.id) === cid);
+
+  const { data: giornateAc } = useQuery<GiornataSuggestions>({
+    queryKey: ["/api/cantieri", cid, "giornate", "autocomplete", activeProjectId],
+    queryFn: async () => (await apiRequest("GET", `/api/cantieri/${cid}/giornate/autocomplete`)).json(),
+    enabled: !!cid,
+    staleTime: 30_000,
+  });
 
   const { data: giornate = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/cantieri", cid, "giornate", activeProjectId],
@@ -102,27 +92,13 @@ export function GiornataPage() {
     setSelectedGiornataId(id);
   }, [gid, setSelectedGiornataId]);
 
-  function setGoogleDecisionAction(itemKey: string, action: "confirm" | "skip" | "edit") {
-    setGoogleDecisions((prev) => withGoogleDecisionAction(prev, itemKey, action));
-  }
-
-  function setGoogleTopFieldOverride(
-    itemKey: string,
-    field: Exclude<keyof GoogleSyncPreview["items"][number]["proposed"], "schedaData">,
-    value: string,
-  ) {
-    setGoogleDecisions((prev) => withGoogleTopFieldOverride(prev, itemKey, field, value));
-  }
-
-  function setGoogleSchedaOverride(itemKey: string, fieldKey: string, value: string) {
-    setGoogleDecisions((prev) => withGoogleSchedaOverride(prev, itemKey, fieldKey, value));
-  }
-
   const createGiornata = useMutation({
     mutationFn: async (data: GiornataForm) => {
       const r = await apiRequest("POST", `/api/cantieri/${cid}/giornate`, {
         ...data,
         operatori: operatoriToPayload(data.operatori),
+        scavatori: operatoriToPayload(data.scavatori),
+        archeologi: operatoriToPayload(data.archeologi),
       });
       return r.json();
     },
@@ -140,6 +116,8 @@ export function GiornataPage() {
       const r = await apiRequest("PATCH", `/api/giornate/${id}`, {
         ...data,
         operatori: operatoriToPayload(data.operatori),
+        scavatori: operatoriToPayload(data.scavatori),
+        archeologi: operatoriToPayload(data.archeologi),
       });
       return r.json();
     },
@@ -192,123 +170,93 @@ export function GiornataPage() {
     }
   };
 
+  const [qcLogsMap, setQcLogsMap] = useState<Record<number, any[]>>({});
+
+  const runQcAll = useMutation({
+    mutationFn: async () => {
+      const r = await apiRequest("POST", `/api/cantieri/${cid}/qc-all`, {});
+      return r.json() as Promise<{ giornate?: number; totalOk?: number; totalWarning?: number; totalError?: number }>;
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["/api/cantieri", cid, "giornate", activeProjectId] });
+      const parts = [];
+      if (data?.totalOk) parts.push(`${data.totalOk} OK`);
+      if (data?.totalWarning) parts.push(`${data.totalWarning} avvisi`);
+      if (data?.totalError) parts.push(`${data.totalError} errori`);
+      toast({
+        title: `QC completato su ${data?.giornate ?? 0} giornate`,
+        description: parts.length > 0 ? parts.join(", ") : undefined,
+        variant: data?.totalError && data.totalError > 0 ? "destructive" : "default",
+      });
+    },
+    onError: () => toast({ title: "Errore QC giornate", variant: "destructive" }),
+  });
+
   const runQc = useMutation({
     mutationFn: async (gidValue: number) => {
       const r = await apiRequest("POST", `/api/giornate/${gidValue}/qc`, {});
-      return r.json();
+      return r.json() as Promise<{ status?: string; issues?: Array<{ livello?: string; messaggio?: string; campoInteressato?: string }> }>;
     },
-    onSuccess: () => {
+    onSuccess: async (data, gidValue) => {
       qc.invalidateQueries({ queryKey: ["/api/cantieri", cid, "giornate", activeProjectId] });
-      toast({ title: "QC completato" });
+      try {
+        const logsRes = await apiRequest("GET", `/api/giornate/${gidValue}/qc-logs`);
+        const logs: any[] = await logsRes.json();
+        setQcLogsMap((prev) => ({ ...prev, [gidValue]: logs }));
+        const active = logs.filter((l) => !l.dismissed);
+        const errors = active.filter((l) => l.livello === "error");
+        const warnings = active.filter((l) => l.livello === "warning");
+        if (active.length === 0) {
+          toast({ title: "QC completato", description: "Nessun problema rilevato." });
+        } else {
+          const first = active[0];
+          const more = active.length - 1;
+          toast({
+            title: `QC: ${errors.length > 0 ? `${errors.length} errori` : ""}${errors.length > 0 && warnings.length > 0 ? ", " : ""}${warnings.length > 0 ? `${warnings.length} avvisi` : ""}`.trim(),
+            description: first.messaggio + (more > 0 ? ` (+${more} altri)` : ""),
+            variant: errors.length > 0 ? "destructive" : "default",
+          });
+        }
+      } catch {
+        toast({ title: "QC completato" });
+      }
     },
     onError: () => toast({ title: "Errore QC", variant: "destructive" }),
-  });
-
-  const setupGoogle = useMutation({
-    mutationFn: async () => {
-      const response = await apiRequest("POST", `/api/cantieri/${cid}/google/setup`, {});
-      return response.json() as Promise<{
-        ok: boolean;
-        reused: boolean;
-        folderUrl: string;
-        docUrl: string;
-      }>;
-    },
-    onSuccess: async (data) => {
-      await qc.invalidateQueries({ queryKey: ["/api/cantieri", activeProjectId] });
-      toast({
-        title: data.reused ? "Collegamento Google gia presente" : "Google configurato per il cantiere",
-        description: "Documento giornale pronto su Google Docs.",
-      });
-    },
-    onError: (error: any) =>
-      toast({
-        title: "Errore setup Google",
-        description: error?.message,
-        variant: "destructive",
-      }),
-  });
-
-  const previewGoogleSync = useMutation({
-    mutationFn: async () => {
-      const response = await apiRequest("POST", `/api/cantieri/${cid}/google/sync`, { apply: false });
-      return response.json() as Promise<{ mode: "preview"; preview: GoogleSyncPreview }>;
-    },
-    onSuccess: (payload) => {
-      setGooglePreview(payload.preview);
-      setGoogleDecisions(seedGoogleDecisionState(payload.preview));
-      setGoogleReviewOpen(true);
-      toast({
-        title: "Anteprima sincronizzazione pronta",
-        description: `${payload.preview.items.length} schede US da revisionare.`,
-      });
-    },
-    onError: (error: any) =>
-      toast({
-        title: "Errore lettura Google Docs",
-        description: error?.message,
-        variant: "destructive",
-      }),
-  });
-
-  const applyGoogleSync = useMutation({
-    mutationFn: async () => {
-      const payload = {
-        apply: true,
-        preview: googlePreview,
-        decisions: googleDecisions,
-      };
-      const response = await apiRequest("POST", `/api/cantieri/${cid}/google/sync`, payload);
-      return response.json() as Promise<{
-        mode: "applied";
-        lastSyncAt: string;
-        report: GoogleSyncApplyReport;
-      }>;
-    },
-    onSuccess: async (payload) => {
-      await qc.invalidateQueries({ queryKey: ["/api/cantieri", activeProjectId] });
-      await qc.invalidateQueries({ queryKey: ["/api/cantieri", cid, "giornate", activeProjectId] });
-      await qc.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
-      setGoogleReviewOpen(false);
-      toast({
-        title: "Sync Google completato",
-        description:
-          `Create: ${payload.report.created}, ` +
-          `Aggiornate: ${payload.report.updated}, ` +
-          `Invariate: ${payload.report.unchanged}, ` +
-          `Saltate: ${payload.report.skipped}.`,
-      });
-    },
-    onError: (error: any) =>
-      toast({
-        title: "Errore apply sync",
-        description: error?.message,
-        variant: "destructive",
-      }),
   });
 
   const openEditDialog = (giornata: any) => {
     setEditingId(giornata.id);
     setEditForm({
       data: giornata.data || "",
+      oraInizio: giornata.oraInizio || "",
+      oraFine: giornata.oraFine || "",
       operatori: parseOperatori(giornata.operatori),
+      scavatori: parseOperatori(giornata.scavatori),
+      archeologi: parseOperatori(giornata.archeologi),
+      topografo: giornata.topografo || "",
+      direttoreScavo: giornata.direttoreScavo || "",
+      antropologo: giornata.antropologo || "",
+      respMateriali: giornata.respMateriali || "",
+      funzionarioSabap: giornata.funzionarioSabap || "",
+      archeologoSorveglianza: giornata.archeologoSorveglianza || "",
+      archeologoCoordinatore: giornata.archeologoCoordinatore || "",
+      escavatore: giornata.escavatore || "",
+      tipoScavo: giornata.tipoScavo || "",
+      obiettivo: giornata.obiettivo || "",
       condMeteo: giornata.condMeteo || "",
       settore: giornata.settore || "",
+      attivitaSvolta: giornata.attivitaSvolta || "",
       note: giornata.note || "",
     });
     setOpenEdit(true);
   };
 
-  const lastSyncSummary = parseLastSyncSummary(cantiere?.lastSyncReport);
-  const giornataSelezionata = gid ? giornate.find((g: any) => String(g.id) === String(gid)) : null;
   const weekCorrente = useMemo(
     () => settimane.find((week) => week.weekNumber === selectedWeek),
     [settimane, selectedWeek],
   );
   const giornateVisibili = settimane.length > 0 ? giornateDellaSettimana : giornate;
   const gidAttivo = gid && giornateVisibili.some((g: any) => String(g.id) === String(gid)) ? gid : undefined;
-  const giornataUsTarget = selectedGiornataId || (gid ? Number(gid) : null);
-
   return (
     <div className="p-8 max-w-4xl mx-auto">
       <div className="mb-6">
@@ -319,26 +267,11 @@ export function GiornataPage() {
             <Button
               variant="outline"
               className="gap-2"
-              onClick={() =>
-                navigate(
-                  `/cantiere/${cid}/us${
-                    giornataUsTarget && Number.isFinite(giornataUsTarget)
-                      ? `?giornataId=${giornataUsTarget}`
-                      : ""
-                  }`,
-                )
-              }
+              onClick={() => runQcAll.mutate()}
+              disabled={runQcAll.isPending || giornate.length === 0}
             >
-              <Layers size={15} /> Vai alle US
-            </Button>
-            <Button
-              variant="outline"
-              className="gap-2"
-              disabled={!gid}
-              onClick={() => setImportUsDialogOpen(true)}
-              title={!gid ? "Apri prima una giornata specifica per importare le US" : undefined}
-            >
-              <Sparkles size={15} /> Importa US da giornale
+              <ShieldCheck size={15} />
+              {runQcAll.isPending ? "QC in corso..." : "QC tutte"}
             </Button>
             <Button data-testid="button-nuova-giornata" className="gap-2" onClick={() => setOpenCreate(true)}>
               <Plus size={16} /> Nuova giornata
@@ -346,15 +279,6 @@ export function GiornataPage() {
           </div>
         </div>
       </div>
-
-      <GooglePanel
-        cantiere={cantiere}
-        setupPending={setupGoogle.isPending}
-        syncPending={previewGoogleSync.isPending}
-        onSetup={() => setupGoogle.mutate()}
-        onSync={() => previewGoogleSync.mutate()}
-        lastSyncSummary={lastSyncSummary}
-      />
 
       <GiornataFormDialog
         open={openCreate}
@@ -367,6 +291,8 @@ export function GiornataPage() {
         submitLabelIdle="Registra giornata"
         submitLabelPending="Salvataggio..."
         submitDisabled={!createForm.data || createGiornata.isPending}
+        suggestions={giornateAc}
+        cantiereId={Number(cid)}
         onImportedTextNotice={() => {
           toast({ title: "Testo importato nel campo note" });
         }}
@@ -390,6 +316,8 @@ export function GiornataPage() {
         submitLabelIdle="Salva modifiche"
         submitLabelPending="Aggiornamento..."
         submitDisabled={!editForm.data || !editingId || updateGiornata.isPending}
+        suggestions={giornateAc}
+        cantiereId={Number(cid)}
         onImportedTextNotice={() => {
           toast({ title: "Testo importato nel campo note" });
         }}
@@ -431,34 +359,6 @@ export function GiornataPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <GoogleSyncReviewDialog
-        open={googleReviewOpen}
-        preview={googlePreview}
-        decisions={googleDecisions}
-        applyPending={applyGoogleSync.isPending}
-        onOpenChange={setGoogleReviewOpen}
-        onActionChange={setGoogleDecisionAction}
-        onTopFieldOverride={setGoogleTopFieldOverride}
-        onSchedaOverride={setGoogleSchedaOverride}
-        onApply={() => applyGoogleSync.mutate()}
-      />
-
-      {gid && (
-        <USImportFromJournalDialog
-          open={importUsDialogOpen}
-          onOpenChange={setImportUsDialogOpen}
-          cantiereId={Number(cid)}
-          giornataId={Number(gid)}
-          giornataDate={giornataSelezionata?.data}
-          linkedGoogleDocId={cantiere?.googleDocId}
-          onImported={() => {
-            qc.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
-            qc.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", activeProjectId] });
-            qc.invalidateQueries({ queryKey: ["/api/cantieri", cid, "giornate", activeProjectId] });
-          }}
-        />
-      )}
-
       {settimane.length > 0 && (
         <div className="mb-4 space-y-2">
           <div className="flex items-center gap-2 flex-wrap">
@@ -497,6 +397,7 @@ export function GiornataPage() {
         isLoading={isLoading}
         runQcPending={runQc.isPending}
         deletePending={deleteGiornata.isPending}
+        qcLogsMap={qcLogsMap}
         onNavigate={(path) => {
           const match = path.match(/\/giornata\/(\d+)/);
           if (match) {
@@ -505,6 +406,7 @@ export function GiornataPage() {
           }
           navigate(path);
         }}
+        onOpenDetail={(giornataId) => navigate(`/cantiere/${cid}/giornata/${giornataId}`)}
         onRunQc={(id) => runQc.mutate(id)}
         onEdit={openEditDialog}
         onDelete={(g) => {

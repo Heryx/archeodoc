@@ -28,6 +28,10 @@ function circleId(layerId: number) {
   return `${SOURCE_PREFIX}${layerId}-circle`;
 }
 
+function rasterId(layerId: number) {
+  return `${SOURCE_PREFIX}${layerId}-raster`;
+}
+
 function defaultStyle() {
   return {
     strokeColor: "#2563eb",
@@ -67,8 +71,39 @@ function withFeatureIds(collection: FeatureCollection): FeatureCollection {
   };
 }
 
-function mapDbLayerToStoreLayer(dbLayer: WebMapLayer, featureCollection?: FeatureCollection): MapLayer {
+function mapDbLayerToStoreLayer(
+  dbLayer: WebMapLayer,
+  featureCollection?: FeatureCollection,
+  cantiereId?: number,
+): MapLayer {
   const style = parseStyle(dbLayer.styleJson);
+
+  if (dbLayer.kind === "raster" && dbLayer.rasterBounds) {
+    return {
+      id: String(dbLayer.id),
+      sourceFileName: dbLayer.sourceFileName,
+      tableName: dbLayer.tableName,
+      sourceSrid: dbLayer.sridOriginal,
+      rowCount: 0,
+      geometryKind: "Unknown",
+      sourceKind: "raster",
+      visible: dbLayer.visible,
+      opacity: 1,
+      style: {
+        fillColor: style.fillColor,
+        strokeColor: style.strokeColor,
+        fillOpacity: style.fillOpacity,
+        strokeWidth: style.weight,
+      },
+      featureCollection: { type: "FeatureCollection", features: [] },
+      rasterConfig: {
+        protocol: "image",
+        imageUrl: `/api/cantieri/${cantiereId}/webmap/layers/${dbLayer.id}/raster`,
+        imageCoordinates: dbLayer.rasterBounds,
+      },
+    };
+  }
+
   return {
     id: String(dbLayer.id),
     sourceFileName: dbLayer.sourceFileName,
@@ -87,6 +122,21 @@ function mapDbLayerToStoreLayer(dbLayer: WebMapLayer, featureCollection?: Featur
     },
     featureCollection: featureCollection ?? { type: "FeatureCollection", features: [] },
   };
+}
+
+function layersSignature(layers: WebMapLayer[]): string {
+  return layers
+    .filter((l) => l.visible)
+    .map((l) => `${l.id}:${l.zIndex}:${l.styleJson || ""}:${l.kind || "vector"}:${l.rasterPath || ""}`)
+    .sort()
+    .join("|");
+}
+
+function persistentSourcesPresent(map: maplibregl.Map, layers: WebMapLayer[]): boolean {
+  const style = map.getStyle();
+  if (!style) return false;
+  const expected = layers.filter((l) => l.visible).map((l) => sourceId(l.id));
+  return expected.every((id) => Boolean(style.sources?.[id]));
 }
 
 function removePersistentLayers(map: maplibregl.Map) {
@@ -132,6 +182,27 @@ async function renderPersistentLayers(
   for (const layer of ordered) {
     if (runId !== runRef.current) return;
 
+    if (layer.kind === "raster" && layer.rasterBounds) {
+      if (!map.isStyleLoaded()) return;
+      const sid = sourceId(layer.id);
+      map.addSource(sid, {
+        type: "image",
+        url: `/api/cantieri/${cantiereId}/webmap/layers/${layer.id}/raster`,
+        coordinates: layer.rasterBounds,
+      } as any);
+      map.addLayer({
+        id: rasterId(layer.id),
+        type: "raster",
+        source: sid,
+        paint: { "raster-opacity": 1 },
+      });
+      dispatch({
+        type: "SYNC_LAYER",
+        layer: mapDbLayerToStoreLayer(layer, undefined, cantiereId),
+      });
+      continue;
+    }
+
     let fc: any;
     try {
       fc = await fetchGeoJson(cantiereId, layer.id);
@@ -148,7 +219,7 @@ async function renderPersistentLayers(
     );
     dispatch({
       type: "SYNC_LAYER",
-      layer: mapDbLayerToStoreLayer(layer, normalizedCollection),
+      layer: mapDbLayerToStoreLayer(layer, normalizedCollection, cantiereId),
     });
 
     const style = parseStyle(layer.styleJson);
@@ -237,21 +308,46 @@ export function useWebMapLayers(
     for (const dbLayer of layers) {
       dispatch({
         type: "SYNC_LAYER",
-        layer: mapDbLayerToStoreLayer(dbLayer),
+        layer: mapDbLayerToStoreLayer(dbLayer, undefined, cantiereId),
       });
     }
 
     prevLayerIds.current = currentIds;
-  }, [layers, dispatch]);
+  }, [layers, dispatch, cantiereId]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     const runRef = { current: Date.now() };
+    let lastAppliedSignature: string | null = null;
+    let applying = false;
+    let pendingRerun = false;
 
     const apply = () => {
+      // "styledata" scatta anche per le modifiche fatte da noi stessi qui sotto
+      // (addSource/addLayer, incluso il caricamento di un'immagine raster grande):
+      // senza queste guardie ogni applicazione si ritriggera da sola, interrompendo
+      // (abort) i fetch dei raster prima che finiscano di caricare. Mentre un giro e'
+      // gia' in corso, un nuovo trigger viene solo segnato come "da ricontrollare a
+      // fine corsa", non eseguito subito.
+      if (applying) {
+        pendingRerun = true;
+        return;
+      }
+      const signature = layersSignature(layers);
+      if (signature === lastAppliedSignature && persistentSourcesPresent(map, layers)) {
+        return;
+      }
+      lastAppliedSignature = signature;
+      applying = true;
       runRef.current += 1;
-      void renderPersistentLayers(map, cantiereId, layers, runRef.current, runRef, dispatch);
+      void renderPersistentLayers(map, cantiereId, layers, runRef.current, runRef, dispatch).finally(() => {
+        applying = false;
+        if (pendingRerun) {
+          pendingRerun = false;
+          apply();
+        }
+      });
     };
 
     if (map.isStyleLoaded()) apply();

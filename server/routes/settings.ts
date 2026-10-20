@@ -2,10 +2,16 @@ import type { Express } from "express";
 import { spawnSync } from "child_process";
 import fs from "fs";
 import path from "path";
+import os from "os";
+import multer from "multer";
+import Database from "better-sqlite3";
 import type { WithProject } from "./types";
 import { AI_AVAILABLE, AI_PROVIDER, reloadAIProvider } from "../ai";
 import { getAllSettings, setSetting, resetToDefault } from "../ai_settings";
+import { getQcUsConfig, setQcUsConfig, resetQcUsConfig } from "../qc_settings";
+import { QC_US_RULES } from "@shared/qc_us_rules";
 import { getLogPath, logger } from "../logger";
+import { getStorageForProject } from "../projects";
 
 type GitCommandResult = {
   ok: boolean;
@@ -367,6 +373,24 @@ export function registerSettingsRoutes(app: Express, withProject: WithProject) {
     res.json({ ok: true, value: newValue });
   });
 
+  // ─── Regole Controllo Qualità US personalizzabili ──────────────────────────
+  app.get("/api/settings/qc-us-rules", (_req, res) => {
+    res.json({ rules: QC_US_RULES, config: getQcUsConfig() });
+  });
+
+  app.put("/api/settings/qc-us-rules", (req, res) => {
+    const body = (req.body ?? {}) as { levels?: unknown; thresholds?: unknown };
+    const config = setQcUsConfig({
+      levels: (body.levels && typeof body.levels === "object" ? body.levels : {}) as Record<string, any>,
+      thresholds: (body.thresholds && typeof body.thresholds === "object" ? body.thresholds : {}) as Record<string, any>,
+    });
+    res.json({ ok: true, config });
+  });
+
+  app.post("/api/settings/qc-us-rules/reset", (_req, res) => {
+    res.json({ ok: true, config: resetQcUsConfig() });
+  });
+
   // ─── Log di sistema ────────────────────────────────────────────────────────
   app.get("/api/settings/ai-config", withProject((ctx, _req, res) => {
     fs.mkdirSync(ctx.project.aiConfigDir, { recursive: true });
@@ -447,7 +471,22 @@ export function registerSettingsRoutes(app: Express, withProject: WithProject) {
     const logPath = getLogPath();
     try {
       fs.mkdirSync(path.dirname(logPath), { recursive: true });
-      fs.writeFileSync(logPath, "", "utf-8");
+      // On Windows the file may be transiently locked; retry a few times before giving up
+      let lastErr: any;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          const fd = fs.openSync(logPath, "w");
+          fs.closeSync(fd);
+          lastErr = null;
+          break;
+        } catch (e: any) {
+          lastErr = e;
+          if (e?.code !== "EBUSY") break;
+          // busy — wait 100 ms and retry
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+        }
+      }
+      if (lastErr) throw lastErr;
       res.json({ ok: true, path: logPath });
     } catch (error: any) {
       res.status(500).json({ error: error?.message || "Impossibile svuotare il file di log" });
@@ -464,5 +503,181 @@ export function registerSettingsRoutes(app: Express, withProject: WithProject) {
       ctx.storage.undismissQcLog(id);
     }
     res.json({ ok: true });
+  }));
+
+  // ─── Database admin ────────────────────────────────────────────────────────
+
+  const PROTECTED_TABLES = new Set(["sqlite_master", "sqlite_sequence", "sqlite_stat1"]);
+  const PROTECTED_COLUMNS: Record<string, Set<string>> = {
+    cantieri: new Set(["id", "nome", "created_at"]),
+    giornate: new Set(["id", "cantiere_id", "data"]),
+    unita_stratigrafiche: new Set(["id", "cantiere_id", "numero"]),
+    allegati: new Set(["id", "cantiere_id"]),
+    qc_logs: new Set(["id"]),
+  };
+
+  function openProjectDb(project: { dbPath: string }): Database.Database {
+    return new Database(project.dbPath, { fileMustExist: true });
+  }
+
+  app.get("/api/db/tables", withProject((ctx, _req, res) => {
+    const db = openProjectDb(ctx.project);
+    try {
+      const tables = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+      ).all() as Array<{ name: string }>;
+      const result = tables.map((t) => {
+        const cols = db.prepare(`PRAGMA table_info("${t.name}")`).all() as Array<{
+          cid: number; name: string; type: string; notnull: number; dflt_value: string | null; pk: number;
+        }>;
+        const rowCount = (db.prepare(`SELECT COUNT(*) as cnt FROM "${t.name}"`).get() as { cnt: number }).cnt;
+        return {
+          name: t.name,
+          rowCount,
+          columns: cols.map((c) => ({
+            cid: c.cid,
+            name: c.name,
+            type: c.type,
+            notnull: c.notnull === 1,
+            dflt_value: c.dflt_value,
+            pk: c.pk === 1,
+            protected: !!(PROTECTED_COLUMNS[t.name]?.has(c.name) || c.pk === 1),
+          })),
+        };
+      });
+      res.json(result);
+    } finally {
+      db.close();
+    }
+  }));
+
+  app.get("/api/db/tables/:table/rows", withProject((ctx, req, res) => {
+    const table = String(req.params.table);
+    if (PROTECTED_TABLES.has(table)) return res.status(403).json({ error: "Tabella protetta" });
+    const limit = Math.min(Number(req.query.limit) || 100, 500);
+    const offset = Number(req.query.offset) || 0;
+    const db = openProjectDb(ctx.project);
+    try {
+      const rows = db.prepare(`SELECT * FROM "${table}" LIMIT ? OFFSET ?`).all(limit, offset);
+      res.json(rows);
+    } finally {
+      db.close();
+    }
+  }));
+
+  app.delete("/api/db/tables/:table/rows/:id", withProject((ctx, req, res) => {
+    const table = String(req.params.table);
+    const id = Number(req.params.id);
+    if (PROTECTED_TABLES.has(table)) return res.status(403).json({ error: "Tabella protetta" });
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "ID non valido" });
+    const db = openProjectDb(ctx.project);
+    try {
+      const result = db.prepare(`DELETE FROM "${table}" WHERE id = ?`).run(id);
+      if (result.changes === 0) return res.status(404).json({ error: "Riga non trovata" });
+      // Reload storage cache so ORM stays consistent
+      getStorageForProject(ctx.project.id);
+      res.json({ ok: true, deleted: id });
+    } finally {
+      db.close();
+    }
+  }));
+
+  app.patch("/api/db/tables/:table/rows/:id", withProject((ctx, req, res) => {
+    const table = String(req.params.table);
+    const id = Number(req.params.id);
+    if (PROTECTED_TABLES.has(table)) return res.status(403).json({ error: "Tabella protetta" });
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "ID non valido" });
+
+    const { column, value } = req.body as { column: string; value: unknown };
+    if (typeof column !== "string" || !column.trim()) {
+      return res.status(400).json({ error: "Parametro 'column' mancante" });
+    }
+
+    const db = openProjectDb(ctx.project);
+    try {
+      const cols = db.prepare(`PRAGMA table_info("${table}")`).all() as Array<{ name: string; pk: number }>;
+      const col = cols.find((c) => c.name === column);
+      if (!col) return res.status(404).json({ error: "Colonna non trovata" });
+      if (col.pk) return res.status(403).json({ error: "Impossibile modificare la chiave primaria" });
+
+      const result = db.prepare(`UPDATE "${table}" SET "${column}" = ? WHERE id = ?`).run(
+        value === "" || value === null ? null : value,
+        id,
+      );
+      if (result.changes === 0) return res.status(404).json({ error: "Riga non trovata" });
+
+      const updated = db.prepare(`SELECT * FROM "${table}" WHERE id = ?`).get(id);
+      res.json({ ok: true, row: updated });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "Errore aggiornamento" });
+    } finally {
+      db.close();
+    }
+  }));
+
+  app.delete("/api/db/tables/:table/columns/:column", withProject((ctx, req, res) => {
+    const table = String(req.params.table);
+    const column = String(req.params.column);
+    if (PROTECTED_TABLES.has(table)) return res.status(403).json({ error: "Tabella protetta" });
+    if (PROTECTED_COLUMNS[table]?.has(column)) return res.status(403).json({ error: "Colonna protetta" });
+    const db = openProjectDb(ctx.project);
+    try {
+      // Check column is PK
+      const cols = db.prepare(`PRAGMA table_info("${table}")`).all() as Array<{ name: string; pk: number }>;
+      const col = cols.find((c) => c.name === column);
+      if (!col) return res.status(404).json({ error: "Colonna non trovata" });
+      if (col.pk) return res.status(403).json({ error: "Impossibile eliminare una colonna chiave primaria" });
+
+      // SQLite >= 3.35 supports DROP COLUMN natively
+      db.exec(`ALTER TABLE "${table}" DROP COLUMN "${column}"`);
+      res.json({ ok: true, table, column });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "Errore eliminazione colonna" });
+    } finally {
+      db.close();
+    }
+  }));
+
+  // Backup download
+  app.get("/api/db/backup", withProject(async (ctx, _req, res) => {
+    const backupPath = ctx.project.dbPath + ".backup-admin.sqlite";
+    const db = openProjectDb(ctx.project);
+    try {
+      await db.backup(backupPath);
+      res.download(backupPath, `archeodoc-backup-${new Date().toISOString().slice(0, 10)}.sqlite`, () => {
+        try { fs.unlinkSync(backupPath); } catch { /* ignore */ }
+      });
+    } catch (e: any) {
+      try { db.close(); } catch { /* ignore */ }
+      res.status(500).json({ error: e.message });
+    }
+  }));
+
+  // Restore upload
+  const dbUpload = multer({ dest: os.tmpdir() });
+  app.post("/api/db/restore", dbUpload.single("db"), withProject(async (ctx, req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Nessun file caricato" });
+    const tmpPath = req.file.path;
+    try {
+      // Validate it's a valid SQLite file
+      const testDb = new Database(tmpPath, { fileMustExist: true });
+      testDb.prepare("SELECT 1").get();
+      testDb.close();
+
+      // Backup current before overwrite
+      const bakPath = ctx.project.dbPath + ".pre-restore.sqlite";
+      fs.copyFileSync(ctx.project.dbPath, bakPath);
+
+      fs.copyFileSync(tmpPath, ctx.project.dbPath);
+      fs.unlinkSync(tmpPath);
+
+      // Force reload storage
+      getStorageForProject(ctx.project.id);
+
+      res.json({ ok: true, message: "Database ripristinato. Riavviare l'applicazione per applicare le modifiche." });
+    } catch (e: any) {
+      try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+      res.status(500).json({ error: e.message || "File non valido o errore durante il ripristino" });
+    }
   }));
 }

@@ -1,6 +1,6 @@
 import {
-  ARCHEOSISTEMI_US_MODEL,
-  ARCHEOSISTEMI_US_MODEL_KEY,
+  EXTENDED_US_MODEL,
+  EXTENDED_US_MODEL_KEY,
   BASE_US_MODEL_KEY,
   ICCD_US_2021_MODEL,
   ICCD_US_2021_MODEL_KEY,
@@ -43,6 +43,12 @@ export type DocumentationSchemaDefinition = {
   modules: DocumentationSchemaModules;
   // Legacy alias kept for backward compatibility on older files.
   paragraphs?: DocumentationParagraphDefinition[];
+  /**
+   * Vocabolari controllati per chiavi US non legate a un campo di paragrafo
+   * (es. i campi top-level "tipo" e "definizione"). Modificabile dal Thesaurus
+   * anche per i progetti ICCD senza alterare la struttura dello schema.
+   */
+  vocabularies?: Record<string, string[]>;
 };
 
 export type ProjectDocumentationConfig = {
@@ -64,7 +70,7 @@ export type ProjectSchemaPresetSummary = Omit<ProjectSchemaPreset, "schema">;
 
 export const ARCHEODOC_CUSTOM_SCHEMA_KEY = "archeodoc-us-base-v1";
 export const ICCD_US_SCHEMA_KEY = "iccd-us-2021-v1";
-export const ARCHEOSISTEMI_US_SCHEMA_KEY = "archeosistemi-us-v1";
+export const EXTENDED_US_SCHEMA_KEY = "extended-us-v1";
 
 const ARCHEODOC_BASE_US_FIELDS: DocumentationFieldDefinition[] = [
   { key: "codiceUS", code: "US_CD", label: "Codice US", type: "text", required: true },
@@ -111,7 +117,7 @@ const ICCD_US_FIELDS: DocumentationFieldDefinition[] = ICCD_US_2021_MODEL.fields
   help: field.help,
 }));
 
-const ARCHEOSISTEMI_US_FIELDS: DocumentationFieldDefinition[] = ARCHEOSISTEMI_US_MODEL.fields.map((field) => ({
+const EXTENDED_US_FIELDS: DocumentationFieldDefinition[] = EXTENDED_US_MODEL.fields.map((field: { key: string; label: string; type: USModelFieldType; required?: boolean; options?: string[]; help?: string }) => ({
   key: field.key,
   code: field.key.toUpperCase(),
   label: field.label,
@@ -217,20 +223,20 @@ const ICCD_US_SCHEMA: DocumentationSchemaDefinition = {
   ],
 };
 
-const ARCHEOSISTEMI_US_SCHEMA: DocumentationSchemaDefinition = {
-  key: ARCHEOSISTEMI_US_SCHEMA_KEY,
-  label: "Schema AR/S Archeosistemi",
+const EXTENDED_US_SCHEMA: DocumentationSchemaDefinition = {
+  key: EXTENDED_US_SCHEMA_KEY,
+  label: "Schema US Estesa ArcheoDoc",
   version: "2026",
-  description: "Schema operativo Archeosistemi con campi e vocabolari dedicati alla scheda AR/S.",
+  description: "Schema operativo esteso con campi aggiuntivi per documentazione di scavo approfondita.",
   mode: "custom",
   exportMode: "custom",
-  usModelKey: ARCHEOSISTEMI_US_MODEL_KEY,
+  usModelKey: EXTENDED_US_MODEL_KEY,
   modules: {
     us: [
       {
         acronym: "US",
-        label: "Scheda Unita Stratigrafica (Archeosistemi)",
-        fields: ARCHEOSISTEMI_US_FIELDS,
+        label: "Scheda Unita Stratigrafica Estesa",
+        fields: EXTENDED_US_FIELDS,
       },
     ],
     sas: [
@@ -251,8 +257,8 @@ const ARCHEOSISTEMI_US_SCHEMA: DocumentationSchemaDefinition = {
   paragraphs: [
     {
       acronym: "US",
-      label: "Scheda Unita Stratigrafica (Archeosistemi)",
-      fields: ARCHEOSISTEMI_US_FIELDS,
+      label: "Scheda Unita Stratigrafica Estesa",
+      fields: EXTENDED_US_FIELDS,
     },
   ],
 };
@@ -270,15 +276,15 @@ const PROJECT_SCHEMA_PRESETS: ProjectSchemaPreset[] = [
     schema: ARCHEODOC_CUSTOM_SCHEMA,
   },
   {
-    key: ARCHEOSISTEMI_US_SCHEMA_KEY,
-    label: "Schema AR/S Archeosistemi",
-    description: "Preset Archeosistemi con modello US dedicato e vocabolari operativi.",
+    key: EXTENDED_US_SCHEMA_KEY,
+    label: "Schema US Estesa ArcheoDoc",
+    description: "Schema esteso con campi aggiuntivi: componenti, campionature, relazioni stratigrafiche complete.",
     locked: true,
     documentationMode: "custom",
     exportMode: "custom",
-    defaultUsModelKey: ARCHEOSISTEMI_US_MODEL_KEY,
-    schemaKey: ARCHEOSISTEMI_US_SCHEMA_KEY,
-    schema: ARCHEOSISTEMI_US_SCHEMA,
+    defaultUsModelKey: EXTENDED_US_MODEL_KEY,
+    schemaKey: EXTENDED_US_SCHEMA_KEY,
+    schema: EXTENDED_US_SCHEMA,
   },
   {
     key: ICCD_US_SCHEMA_KEY,
@@ -397,6 +403,19 @@ export function normalizeDocumentationSchemaDefinition(
     resolvedModules.us = cloneParagraphs(fallback.modules.us);
   }
 
+  let vocabularies: Record<string, string[]> | undefined;
+  if (schema.vocabularies && typeof schema.vocabularies === "object") {
+    for (const [rawKey, rawValues] of Object.entries(schema.vocabularies)) {
+      const key = String(rawKey || "").trim();
+      if (!key || !Array.isArray(rawValues)) continue;
+      const values = Array.from(
+        new Set(rawValues.map((item) => String(item ?? "").trim()).filter(Boolean)),
+      );
+      if (values.length === 0) continue;
+      (vocabularies ||= {})[key] = values;
+    }
+  }
+
   return {
     key: schema.key || fallback.key,
     label: schema.label || fallback.label,
@@ -407,5 +426,6 @@ export function normalizeDocumentationSchemaDefinition(
     usModelKey: schema.usModelKey || fallback.usModelKey,
     modules: resolvedModules,
     paragraphs: cloneParagraphs(resolvedModules.us),
+    ...(vocabularies ? { vocabularies } : {}),
   };
 }

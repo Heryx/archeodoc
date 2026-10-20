@@ -11,12 +11,16 @@ import {
   type AiFillResult,
 } from "@/lib/api";
 import { extractSearchFromLocation } from "@/lib/location";
+import { invalidateUsRelatedQueries } from "@/lib/usCache";
+import { useAiAssistant } from "@/components/ai/AiAssistantContext";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -29,7 +33,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Download, Filter, GitBranch, Package, Plus, Settings2 } from "lucide-react";
+import { ArrowDown, ArrowDownUp, ArrowUp, Download, FileUp, Filter, GitBranch, Package, Plus, Search, Settings2, ShieldCheck, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { buildProjectUrl, getCurrentProjectId, getProjectHeader } from "@/lib/project";
 import { BASE_US_MODEL_KEY, BUILTIN_US_MODELS, type USModelDefinition, type USModelField } from "@shared/us_models";
@@ -42,6 +46,8 @@ import { DuplicateUSBanner } from "@/components/us/DuplicateUSBanner";
 import { DiarioSourceDialog } from "@/components/us/DiarioSourceDialog";
 import { USFormDialog } from "@/components/us/USFormDialog";
 import { USModelDialog } from "@/components/us/USModelDialog";
+import { InverseSyncDialog, type PendingInverse } from "@/components/us/InverseSyncDialog";
+import { USBatchImportDialog } from "@/components/us/USBatchImportDialog";
 import { findPotentialDuplicateUS, useDuplicateUSCheck } from "@/hooks/useDuplicateUSCheck";
 import {
   emptyUSForm,
@@ -80,14 +86,6 @@ type DuplicateWarningPayload = {
 };
 const AUTO_GIORNATA_DATE_KEYS = ["dataCompilazione", "dataRilevamentoCampo", "giorno", "dataScheda"] as const;
 
-function giornataFilterFromLocation(location: string): string {
-  const search = extractSearchFromLocation(location);
-  if (!search) return "all";
-
-  const giornataId = new URLSearchParams(search).get("giornataId");
-  if (!giornataId) return "all";
-  return /^\d+$/.test(giornataId) ? giornataId : "all";
-}
 
 function isFieldFilled(value: unknown): boolean {
   if (value == null) return false;
@@ -183,14 +181,16 @@ export function USPage() {
   const activeProjectId = getCurrentProjectId();
   const qcClient = useQueryClient();
   const { toast } = useToast();
+  const { selectionFilter, setSelectionFilter } = useAiAssistant();
 
   const [openCreate, setOpenCreate] = useState(false);
   const [openEdit, setOpenEdit] = useState(false);
   const [openModelDialog, setOpenModelDialog] = useState(false);
+  const [openBatchImport, setOpenBatchImport] = useState(false);
   const [createForm, setCreateForm] = useState<USForm>(emptyUSForm);
   const [editForm, setEditForm] = useState<USForm>(emptyUSForm);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [filterGiornata, setFilterGiornata] = useState<string>(() => giornataFilterFromLocation(location));
+  const [filterText, setFilterText] = useState("");
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
   const [deleteImpact, setDeleteImpact] = useState<USDeleteImpact | null>(null);
@@ -208,6 +208,11 @@ export function USPage() {
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
   const [duplicateWarning, setDuplicateWarning] = useState<DuplicateWarningPayload | null>(null);
   const [pendingDuplicateSave, setPendingDuplicateSave] = useState<CreateUSVariables | null>(null);
+  const [sortKey, setSortKey] = useState<"codice" | "updatedAt" | "createdAt">("codice");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [inverseSyncDialogOpen, setInverseSyncDialogOpen] = useState(false);
+  const [pendingInverses, setPendingInverses] = useState<PendingInverse[]>([]);
+  const [inverseSyncSourceId, setInverseSyncSourceId] = useState<number | null>(null);
 
   const { data: giornate = [] } = useQuery<any[]>({
     queryKey: ["/api/cantieri", cid, "giornate", activeProjectId],
@@ -221,19 +226,27 @@ export function USPage() {
     enabled: !!cid,
   });
 
-  const { data: usList = [], isLoading } = useQuery<any[]>({
-    queryKey: ["/api/cantieri", cid, "us", filterGiornata, activeProjectId],
-    queryFn: async () => {
-      const query = filterGiornata !== "all" ? `?giornataId=${filterGiornata}` : "";
-      return (await apiRequest("GET", `/api/cantieri/${cid}/us${query}`)).json();
-    },
-    enabled: !!cid,
-  });
-  const { data: usListAll = [] } = useQuery<any[]>({
+  const { data: usListAll = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/cantieri", cid, "us", "all", activeProjectId],
     queryFn: async () => (await apiRequest("GET", `/api/cantieri/${cid}/us`)).json(),
     enabled: !!cid,
   });
+
+  // Filtro giornata e testo applicati lato client
+  const usList = useMemo(() => {
+    let list = usListAll;
+    if (filterText.trim()) {
+      const q = filterText.trim().toLowerCase();
+      list = list.filter((us: any) =>
+        String(us.codiceUS || "").toLowerCase().includes(q) ||
+        String(us.definizione || "").toLowerCase().includes(q) ||
+        String(us.descrizione || "").toLowerCase().includes(q) ||
+        String(us.interpretazione || "").toLowerCase().includes(q) ||
+        String(us.settore || "").toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }, [usListAll, filterText]);
   const {
     data: usModelsData,
     isLoading: isUsModelsLoading,
@@ -298,10 +311,6 @@ export function USPage() {
     return Array.from(byKey.entries()).map(([key, label]) => ({ key, label }));
   }, [schemaData?.schema]);
 
-  useEffect(() => {
-    const next = giornataFilterFromLocation(location);
-    setFilterGiornata(next);
-  }, [location]);
 
   const availableModels = useMemo(
     () => cantiereModelData?.availableModels || usModelsData?.models || BUILTIN_US_MODELS,
@@ -320,6 +329,17 @@ export function USPage() {
       }, {}),
     [availableModels],
   );
+
+  useEffect(() => {
+    const search = extractSearchFromLocation(location);
+    const openUsId = new URLSearchParams(search).get("openUsId");
+    if (!openUsId) return;
+    const target = usListAll.find((item: any) => Number(item.id) === Number(openUsId));
+    if (!target) return;
+    openEditDialog(target);
+    navigate(`/cantiere/${cid}/us`, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [usListAll, location]);
 
   useEffect(() => {
     setModelDraftKey(activeModelKey);
@@ -362,6 +382,7 @@ export function USPage() {
     });
   }, [openEdit, editForm.giornataId, giornate, editModel]);
 
+
   const setCantiereModel = useMutation({
     mutationFn: async (modelKey: string) => {
       const response = await apiRequest("POST", `/api/cantieri/${cid}/us-model`, { modelKey });
@@ -370,7 +391,8 @@ export function USPage() {
     onSuccess: () => {
       qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us-model", activeProjectId] });
       qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
-      qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", filterGiornata, activeProjectId] });
+      invalidateUsRelatedQueries(qcClient, cid);
+      qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", activeProjectId] });
       toast({ title: "Modello US aggiornato per il cantiere" });
     },
     onError: (error: any) =>
@@ -486,9 +508,10 @@ export function USPage() {
       });
       return r.json();
     },
-    onSuccess: (_result, variables) => {
+    onSuccess: (result, variables) => {
       qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
-      qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", filterGiornata, activeProjectId] });
+      invalidateUsRelatedQueries(qcClient, cid);
+      qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", activeProjectId] });
       qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", "all", activeProjectId] });
       setOpenCreate(false);
       setDuplicateDialogOpen(false);
@@ -496,10 +519,10 @@ export function USPage() {
       setPendingDuplicateSave(null);
       setCreateForm({
         ...emptyUSForm,
-        giornataId: filterGiornata !== "all" ? filterGiornata : "",
         schedaModelKey: activeModelKey,
       });
       toast({ title: variables.saveMode === "draft" ? "US salvata in bozza" : "US registrata come completa" });
+      if (result?.id) fetchAndShowPendingInverses(result.id);
     },
     onError: (err: any, variables) => {
       const duplicate = parseDuplicateWarning(err);
@@ -522,18 +545,96 @@ export function USPage() {
       });
       return r.json();
     },
-    onSuccess: (_result, variables) => {
+    onSuccess: (result, variables) => {
       qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
-      qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", filterGiornata, activeProjectId] });
+      invalidateUsRelatedQueries(qcClient, cid);
+      qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", activeProjectId] });
       qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", "all", activeProjectId] });
       setOpenEdit(false);
       setEditingId(null);
       toast({ title: variables.saveMode === "draft" ? "Bozza US aggiornata" : "US aggiornata come completa" });
+      if (result?.id) fetchAndShowPendingInverses(result.id);
     },
     onError: (err: any) => {
       const desc = extractApiErrorDescription(err);
       toast({ title: "Errore aggiornamento US", description: desc || undefined, variant: "destructive" });
     },
+  });
+
+  const applyInverses = useMutation({
+    mutationFn: async ({ id, inverses }: { id: number; inverses: PendingInverse[] }) => {
+      await apiRequest("POST", `/api/us/${id}/apply-inverses`, { inverses });
+    },
+    onSuccess: () => {
+      qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
+      invalidateUsRelatedQueries(qcClient, cid);
+      qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", "all", activeProjectId] });
+      setInverseSyncDialogOpen(false);
+      setPendingInverses([]);
+      toast({ title: "Relazioni inverse applicate" });
+    },
+    onError: () => toast({ title: "Errore nell'applicazione delle relazioni inverse", variant: "destructive" }),
+  });
+
+  async function fetchAndShowPendingInverses(usId: number) {
+    try {
+      const res = await apiRequest("GET", `/api/us/${usId}/pending-inverses`);
+      const inverses: PendingInverse[] = await res.json();
+      if (inverses.length > 0) {
+        setPendingInverses(inverses);
+        setInverseSyncDialogOpen(true);
+        // Store usId so we can pass it to applyInverses
+        setInverseSyncSourceId(usId);
+      }
+    } catch {
+      // Non-blocking: silently ignore if fetch fails
+    }
+  }
+
+  const runQcUS = useMutation({
+    mutationFn: async (id: number) => {
+      const r = await apiRequest("POST", `/api/us/${id}/qc`, {});
+      return r.json() as Promise<{ status?: string }>;
+    },
+    onSuccess: (data, id) => {
+      qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
+      invalidateUsRelatedQueries(qcClient, cid);
+      qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", activeProjectId] });
+      const us = usList.find((u: any) => u.id === id);
+      const label = us?.codiceUS || `US #${id}`;
+      if (data?.status === "ok") {
+        toast({ title: `QC ${label}: nessun problema` });
+      } else if (data?.status === "warning") {
+        toast({ title: `QC ${label}: avvisi rilevati`, variant: "default" });
+      } else if (data?.status === "error") {
+        toast({ title: `QC ${label}: errori rilevati`, variant: "destructive" });
+      } else {
+        toast({ title: `QC ${label} completato` });
+      }
+    },
+    onError: () => toast({ title: "Errore QC US", variant: "destructive" }),
+  });
+
+  const runQcAllUS = useMutation({
+    mutationFn: async () => {
+      const r = await apiRequest("POST", `/api/cantieri/${cid}/us-qc-all`, {});
+      return r.json() as Promise<{ updated?: number }>;
+    },
+    onSuccess: (data: any) => {
+      qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
+      invalidateUsRelatedQueries(qcClient, cid);
+      qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", activeProjectId] });
+      const parts = [];
+      if (data?.totalOk) parts.push(`${data.totalOk} OK`);
+      if (data?.totalWarning) parts.push(`${data.totalWarning} avvisi`);
+      if (data?.totalError) parts.push(`${data.totalError} errori`);
+      toast({
+        title: `QC completato su ${data?.us ?? 0} US`,
+        description: parts.length > 0 ? parts.join(", ") : undefined,
+        variant: data?.totalError > 0 ? "destructive" : "default",
+      });
+    },
+    onError: () => toast({ title: "Errore QC tutte le US", variant: "destructive" }),
   });
 
   const deleteUS = useMutation({
@@ -543,7 +644,8 @@ export function USPage() {
     },
     onSuccess: () => {
       qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
-      qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", filterGiornata, activeProjectId] });
+      invalidateUsRelatedQueries(qcClient, cid);
+      qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", activeProjectId] });
       qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "allegati", activeProjectId] });
       setDeleteDialogOpen(false);
       setDeleteTarget(null);
@@ -579,7 +681,8 @@ export function USPage() {
     },
     onSuccess: () => {
       qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
-      qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", filterGiornata, activeProjectId] });
+      invalidateUsRelatedQueries(qcClient, cid);
+      qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", activeProjectId] });
       toast({ title: "Scheda US generata con AI" });
     },
     onError: () => toast({ title: "Errore generazione scheda AI", variant: "destructive" }),
@@ -648,7 +751,8 @@ export function USPage() {
     },
     onSuccess: () => {
       qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
-      qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", filterGiornata, activeProjectId] });
+      invalidateUsRelatedQueries(qcClient, cid);
+      qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", activeProjectId] });
       setAiFillOpen(false);
       setAiFillTarget(null);
       setAiFillSuggestions(null);
@@ -676,6 +780,10 @@ export function USPage() {
         codiceUS: String(item.codiceUS || ""),
       })),
     [usListAll],
+  );
+  const usCodeSuggestions = useMemo(
+    () => usListAllLite.map((item) => item.codiceUS).filter(Boolean),
+    [usListAllLite],
   );
   const duplicateGroups = useDuplicateUSCheck(usListAllLite);
   const createPotentialDuplicate = useMemo(
@@ -731,6 +839,20 @@ export function USPage() {
     return status;
   }, [usList, modelByKey, activeModelKey, activeModel, requiredTopLevelFields]);
 
+  const sortedUsList = useMemo(() => {
+    const selSet = selectionFilter ? new Set(selectionFilter) : null;
+    const list = (selSet ? usList.filter((u: any) => selSet.has(Number(u.id))) : [...usList]);
+    const dir = sortDir === "asc" ? 1 : -1;
+    if (sortKey === "codice") {
+      list.sort((a, b) => dir * String(a.codiceUS || "").localeCompare(String(b.codiceUS || ""), "it", { numeric: true }));
+    } else if (sortKey === "updatedAt") {
+      list.sort((a, b) => dir * (a.updatedAt || a.createdAt || "").localeCompare(b.updatedAt || b.createdAt || ""));
+    } else if (sortKey === "createdAt") {
+      list.sort((a, b) => dir * (a.createdAt || "").localeCompare(b.createdAt || ""));
+    }
+    return list;
+  }, [usList, sortKey, sortDir, giornate, selectionFilter]);
+
   const counts = { ok: 0, warning: 0, error: 0, pending: 0 };
   for (const us of usList) {
     const s = (us.qcStatus || "pending") as keyof typeof counts;
@@ -741,10 +863,6 @@ export function USPage() {
   const linkedGoogleDocUrl = linkedGoogleDocId
     ? `https://docs.google.com/document/d/${linkedGoogleDocId}/edit`
     : "";
-  const giornataFiltrata =
-    filterGiornata !== "all"
-      ? giornate.find((g: any) => String(g.id) === String(filterGiornata))
-      : null;
   const isAiSourceSubmitting =
     requestAiFill.isPending || requestAiFillDocx.isPending || requestAiFillGoogle.isPending;
 
@@ -817,106 +935,137 @@ export function USPage() {
     openEditDialog(target);
   };
 
+  const openUSByCode = (code: string) => {
+    const norm = code.trim().toUpperCase();
+    const target = usListAll.find((item: any) => item.codiceUS?.trim().toUpperCase() === norm);
+    if (!target) return;
+    openEditDialog(target);
+  };
+
   return (
-    <div className="p-8 max-w-4xl mx-auto">
-      <div className="mb-6 flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Unita Stratigrafiche</h1>
-          <div className="flex gap-3 mt-2 text-sm">
-            <span className="qc-ok px-2 py-0.5 rounded">{counts.ok} OK</span>
-            <span className="qc-warning px-2 py-0.5 rounded">{counts.warning} avvisi</span>
-            <span className="qc-error px-2 py-0.5 rounded">{counts.error} errori</span>
-            <span className="qc-pending px-2 py-0.5 rounded">{counts.pending} non verificate</span>
+    <div className="p-6 max-w-5xl mx-auto">
+      <div className="mb-5">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div>
+            <h1 className="text-xl font-bold">Unita Stratigrafiche</h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Modello: <span className="font-medium text-foreground">{activeModel?.name || "US base ArcheoDoc"}</span>
+              <span className="mx-2 text-border">·</span>
+              <span className="qc-ok px-1.5 py-0.5 rounded">{counts.ok} OK</span>{" "}
+              <span className="qc-warning px-1.5 py-0.5 rounded">{counts.warning} avvisi</span>{" "}
+              <span className="qc-error px-1.5 py-0.5 rounded">{counts.error} errori</span>{" "}
+              <span className="qc-pending px-1.5 py-0.5 rounded">{counts.pending} n.v.</span>
+            </p>
           </div>
-          <p className="text-xs text-muted-foreground mt-2">
-            Modello cantiere attivo: <span className="font-medium text-foreground">{activeModel?.name || "US base ArcheoDoc"}</span>
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            className="gap-2"
-            onClick={() => navigate(`/cantiere/${cid}/materiali${filterGiornata !== "all" ? `?giornataId=${filterGiornata}` : ""}`)}
-          >
-            <Package size={15} /> Materiali
-          </Button>
-          <Button variant="outline" className="gap-2" onClick={() => navigate(`/cantiere/${cid}/matrix`)}>
-            <GitBranch size={15} /> Apri Matrix
-          </Button>
-          <Button variant="outline" className="gap-2" onClick={() => setOpenModelDialog(true)}>
-            <Settings2 size={15} /> Modello US
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="gap-2" disabled={exportingKind !== null}>
-                <Download size={15} />
-                {exportingKind === "zip-all" || exportingKind === "zip-us" ? "Esporto..." : "Esporta schede"}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                onClick={() => void handleExportZip("all")}
-                disabled={exportingKind !== null}
-              >
-                ZIP completo cantiere
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => void handleExportZip("us")}
-                disabled={exportingKind !== null}
-              >
-                ZIP solo schede US
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <div className="min-w-52">
-              <Select
-                value={filterGiornata}
-                onValueChange={(value) => {
-                  setFilterGiornata(value);
-                  navigate(`/cantiere/${cid}/us${value !== "all" ? `?giornataId=${value}` : ""}`);
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Filtra per giornata" />
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            {/* Ricerca testo */}
+            <div className="relative">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+              <Input
+                className="pl-8 pr-7 h-9 w-48 text-sm"
+                placeholder="Cerca US..."
+                value={filterText}
+                onChange={(e) => setFilterText(e.target.value)}
+              />
+              {filterText && (
+                <button
+                  type="button"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  onClick={() => setFilterText("")}
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+
+            {/* Ordina */}
+            <div className="flex items-center gap-1">
+              <Select value={sortKey} onValueChange={(value) => setSortKey(value as typeof sortKey)}>
+                <SelectTrigger className="w-40 gap-1">
+                  <ArrowDownUp size={13} className="shrink-0 text-muted-foreground" />
+                  <SelectValue />
                 </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Tutte le giornate</SelectItem>
-                {giornate.map((g: any) => (
-                  <SelectItem key={g.id} value={String(g.id)}>
-                    {g.data}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+                <SelectContent>
+                  <SelectItem value="codice">Codice</SelectItem>
+                  <SelectItem value="updatedAt">Ultima modifica</SelectItem>
+                  <SelectItem value="createdAt">Data creazione</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 shrink-0"
+                title={sortDir === "asc" ? "Crescente" : "Decrescente"}
+                onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+              >
+                {sortDir === "asc" ? <ArrowUp size={13} /> : <ArrowDown size={13} />}
+              </Button>
+            </div>
+
+            {/* Menu secondario */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon" className="h-9 w-9" title="Altre opzioni">
+                  <Settings2 size={15} />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setOpenModelDialog(true)}>
+                  <Settings2 size={14} className="mr-2" /> Modello US
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setOpenBatchImport(true)}>
+                  <FileUp size={14} className="mr-2" /> Import da documento
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() => runQcAllUS.mutate()}
+                  disabled={runQcAllUS.isPending || usList.length === 0}
+                >
+                  <ShieldCheck size={14} className="mr-2" />
+                  {runQcAllUS.isPending ? "QC in corso..." : "QC tutte le US"}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => void handleExportZip("us")} disabled={exportingKind !== null}>
+                  <Download size={14} className="mr-2" /> ZIP schede US
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => void handleExportZip("all")} disabled={exportingKind !== null}>
+                  <Download size={14} className="mr-2" /> ZIP completo cantiere
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Nuova US — sempre visibile e prominente */}
+            <Button
+              data-testid="button-nuova-us"
+              className="gap-2"
+              onClick={() => setOpenCreate(true)}
+            >
+              <Plus size={16} /> Nuova US
+            </Button>
           </div>
-          <Button
-            data-testid="button-nuova-us"
-            className="gap-2"
-            onClick={() => {
-              setCreateForm((prev) => ({
-                ...prev,
-                giornataId: filterGiornata !== "all" ? filterGiornata : prev.giornataId,
-              }));
-              setOpenCreate(true);
-            }}
-          >
-            <Plus size={16} /> Nuova US
-          </Button>
         </div>
       </div>
 
-      {filterGiornata !== "all" && (
+      {filterText && (
         <div className="mb-4 flex items-center gap-2 rounded-md border border-primary/30 bg-primary/10 px-3 py-2 text-xs text-primary">
           <Filter size={12} />
-          Mostrando solo le US della giornata {giornataFiltrata?.data || filterGiornata}.
+          <span>Ricerca: <strong>"{filterText}"</strong></span>
+          <span className="text-muted-foreground">— {usList.length} di {usListAll.length} US</span>
           <button
             type="button"
             className="ml-auto underline"
-            onClick={() => {
-              setFilterGiornata("all");
-              navigate(`/cantiere/${cid}/us`);
-            }}
+            onClick={() => setFilterText("")}
           >
+            Mostra tutte
+          </button>
+        </div>
+      )}
+
+      {selectionFilter && (
+        <div className="mb-4 flex items-center gap-2 rounded-md border border-primary/30 bg-primary/10 px-3 py-2 text-xs text-primary">
+          <Filter size={12} />
+          <span>Selezione assistente IA: <strong>{sortedUsList.length}</strong> US</span>
+          <button type="button" className="ml-auto underline" onClick={() => setSelectionFilter(null)}>
             Mostra tutte
           </button>
         </div>
@@ -924,9 +1073,16 @@ export function USPage() {
 
       <DuplicateUSBanner duplicates={duplicateGroups} onGoToUS={openUSById} />
 
+      <USBatchImportDialog
+        open={openBatchImport}
+        onOpenChange={setOpenBatchImport}
+        cid={cid}
+      />
+
       <USModelDialog
         open={openModelDialog}
         onOpenChange={setOpenModelDialog}
+        cid={cid}
         modelDraftKey={modelDraftKey}
         activeModelKey={activeModelKey}
         availableModels={availableModels}
@@ -975,6 +1131,10 @@ export function USPage() {
         }}
         potentialDuplicate={createPotentialDuplicate}
         onOpenDuplicate={openUSById}
+        usCodeSuggestions={usCodeSuggestions}
+        usFullList={usListAll}
+        onNavigateToUS={openUSByCode}
+        cid={cid}
       />
 
       <USFormDialog
@@ -1008,6 +1168,8 @@ export function USPage() {
         }}
         potentialDuplicate={editPotentialDuplicate}
         onOpenDuplicate={openUSById}
+        usFullList={usListAll}
+        onNavigateToUS={openUSByCode}
         onTriggerAiAnalysis={() => {
           if (editingId) {
             // Save as draft first, then trigger AI fill for field suggestions
@@ -1021,6 +1183,7 @@ export function USPage() {
             );
           }
         }}
+        usCodeSuggestions={usCodeSuggestions}
       />
 
       <AlertDialog
@@ -1111,6 +1274,22 @@ export function USPage() {
         </AlertDialogContent>
       </AlertDialog>
 
+      <InverseSyncDialog
+        open={inverseSyncDialogOpen}
+        inverses={pendingInverses}
+        isApplying={applyInverses.isPending}
+        onConfirm={(selected) => {
+          if (inverseSyncSourceId != null) {
+            applyInverses.mutate({ id: inverseSyncSourceId, inverses: selected });
+          }
+        }}
+        onClose={() => {
+          setInverseSyncDialogOpen(false);
+          setPendingInverses([]);
+          setInverseSyncSourceId(null);
+        }}
+      />
+
       <DiarioSourceDialog
         open={aiSourceDialogOpen}
         onOpenChange={(value) => {
@@ -1163,14 +1342,28 @@ export function USPage() {
         </div>
       ) : usList.length === 0 ? (
         <div className="text-center py-20 border-2 border-dashed border-border rounded-xl">
-          <p className="font-medium">Nessuna US registrata</p>
+          <p className="font-medium">
+            {usListAll.length === 0
+              ? "Nessuna US registrata"
+              : `Nessuna US corrisponde a "${filterText}"`}
+          </p>
+          {usListAll.length > 0 && filterText && (
+            <button
+              type="button"
+              className="mt-2 text-xs text-muted-foreground hover:text-foreground underline"
+              onClick={() => setFilterText("")}
+            >
+              Mostra tutte le US
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-2">
-          {usList.map((us: any) => (
+          {sortedUsList.map((us: any) => (
             <USCard
               key={us.id}
               us={us}
+              cantiereId={cid ? Number(cid) : undefined}
               modelName={modelNameByKey[us.schedaModelKey || activeModelKey]}
               completionStatus={completionStatusByUsId.get(us.id) || "bozza"}
               onGenerate={(id) => generateScheda.mutate(id)}
@@ -1181,13 +1374,13 @@ export function USPage() {
               onEdit={openEditDialog}
               onDelete={openDeleteDialog}
               onOpenMateriali={(selectedUs) => {
-                const params = new URLSearchParams({ usId: String(selectedUs.id) });
-                if (filterGiornata !== "all") params.set("giornataId", filterGiornata);
-                navigate(`/cantiere/${cid}/materiali?${params.toString()}`);
+                navigate(`/cantiere/${cid}/materiali?usId=${selectedUs.id}`);
               }}
               onExportDocx={(selectedUs) => {
                 void handleExportSingleUS(selectedUs);
               }}
+              onRunQc={(id) => runQcUS.mutate(id)}
+              qcPending={runQcUS.isPending && runQcUS.variables === us.id}
               aiAvailable={aiAvailable}
             />
           ))}

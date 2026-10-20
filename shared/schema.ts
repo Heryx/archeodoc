@@ -23,6 +23,7 @@ export const cantieri = sqliteTable("cantieri", {
 });
 
 export const insertCantiereSchema = createInsertSchema(cantieri).omit({ id: true, createdAt: true });
+// @ts-ignore -- drizzle-zod/drizzle-orm type mismatch, runtime is correct
 export type InsertCantiere = z.infer<typeof insertCantiereSchema>;
 export type Cantiere = typeof cantieri.$inferSelect;
 
@@ -31,17 +32,36 @@ export const giornate = sqliteTable("giornate", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   cantiereId: integer("cantiere_id").notNull(),
   data: text("data").notNull(),
-  operatori: text("operatori"),
+  oraInizio: text("ora_inizio"),
+  oraFine: text("ora_fine"),
+  operatori: text("operatori"),          // legacy: stringa/JSON scavatori generici
+  scavatori: text("scavatori"),          // JSON array nomi scavatori
+  archeologi: text("archeologi"),        // JSON array nomi archeologi
+  topografo: text("topografo"),
+  direttoreScavo: text("direttore_scavo"),
+  antropologo: text("antropologo"),
+  respMateriali: text("resp_materiali"),
+  funzionarioSabap: text("funzionario_sabap"),
+  archeologoSorveglianza: text("archeologo_sorveglianza"),
+  archeologoCoordinatore: text("archeologo_coordinatore"),
+  escavatore: text("escavatore"),        // presenza/tipo escavatore meccanico
+  tipoScavo: text("tipo_scavo"),         // "manuale" | "meccanico" | "misto"
+  obiettivo: text("obiettivo"),          // sorveglianza, scavo, pulizia, etc.
   condMeteo: text("cond_meteo"),
   settore: text("settore"),
+  attivitaSvolta: text("attivita_svolta"), // diario narrativo del giorno
   note: text("note"),
   qcStatus: text("qc_status").default("pending"),
   qcReport: text("qc_report"),
   aiReportText: text("ai_report_text"),
   createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at"),
+  syncedAt: text("synced_at"),
+  deviceId: text("device_id"),
 });
 
 export const insertGiornataSchema = createInsertSchema(giornate).omit({ id: true, createdAt: true });
+// @ts-ignore -- drizzle-zod/drizzle-orm type mismatch, runtime is correct
 export type InsertGiornata = z.infer<typeof insertGiornataSchema>;
 export type Giornata = typeof giornate.$inferSelect;
 
@@ -123,7 +143,15 @@ export const unitaStratigrafiche = sqliteTable("unita_stratigrafiche", {
   setacciaturaTipo: text("setacciatura_tipo"),
   affidabilitaStratigrafica: text("affidabilita_stratigrafica"),
   responsabileSabap: text("responsabile_sabap"),
-  responsabileArcheosistemi: text("responsabile_archeosistemi"),
+  responsabileScavo: text("responsabile_scavo"),
+  saggio: text("saggio"),
+  quadrati: text("quadrati"),
+  quoteSlm: text("quote_slm"),
+  soprintendenza: text("soprintendenza"),
+  tabelleMaterialiRa: text("tabelle_materiali_ra"),
+  tabelleMaterialiN: text("tabelle_materiali_n"),
+  posterioreA: text("posteriore_a"),
+  anterioreA: text("anteriore_a"),
   haFoto: integer("ha_foto").default(0),
   haDisegno: integer("ha_disegno").default(0),
   haGps: integer("ha_gps").default(0),
@@ -135,10 +163,15 @@ export const unitaStratigrafiche = sqliteTable("unita_stratigrafiche", {
   schedaAiGenerata: text("scheda_ai_generata"),
   schedaModelKey: text("scheda_model_key").default("base-us"),
   schedaData: text("scheda_data"),
+  daRivedere: integer("da_rivedere", { mode: "boolean" }).default(false),
   createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at"),
+  syncedAt: text("synced_at"),
+  deviceId: text("device_id"),
 });
 
 export const insertUSSchema = createInsertSchema(unitaStratigrafiche).omit({ id: true, createdAt: true });
+// @ts-ignore -- drizzle-zod/drizzle-orm type mismatch, runtime is correct
 export type InsertUS = z.infer<typeof insertUSSchema>;
 export type UnitaStratigrafica = typeof unitaStratigrafiche.$inferSelect;
 
@@ -154,6 +187,7 @@ export const sasRecords = sqliteTable("sas_records", {
 });
 
 export const insertSasSchema = createInsertSchema(sasRecords).omit({ id: true, createdAt: true });
+// @ts-ignore -- drizzle-zod/drizzle-orm type mismatch, runtime is correct
 export type InsertSas = z.infer<typeof insertSasSchema>;
 export type SasRecord = typeof sasRecords.$inferSelect;
 
@@ -170,6 +204,7 @@ export const raRecords = sqliteTable("ra_records", {
 });
 
 export const insertRaSchema = createInsertSchema(raRecords).omit({ id: true, createdAt: true });
+// @ts-ignore -- drizzle-zod/drizzle-orm type mismatch, runtime is correct
 export type InsertRa = z.infer<typeof insertRaSchema>;
 export type RaRecord = typeof raRecords.$inferSelect;
 
@@ -179,6 +214,7 @@ export const allegati = sqliteTable("allegati", {
   cantiereId: integer("cantiere_id").notNull(),
   giornataId: integer("giornata_id"),
   usId: integer("us_id"),
+  sasId: integer("sas_id"),
   tipo: text("tipo").notNull(),
   nomeFile: text("nome_file").notNull(),
   percorso: text("percorso").notNull(),
@@ -195,6 +231,7 @@ export const allegati = sqliteTable("allegati", {
 });
 
 export const insertAllegatoSchema = createInsertSchema(allegati).omit({ id: true, createdAt: true });
+// @ts-ignore -- drizzle-zod/drizzle-orm type mismatch, runtime is correct
 export type InsertAllegato = z.infer<typeof insertAllegatoSchema>;
 export type Allegato = typeof allegati.$inferSelect;
 
@@ -213,6 +250,7 @@ export const qcLogs = sqliteTable("qc_logs", {
 });
 
 export const insertQcLogSchema = createInsertSchema(qcLogs).omit({ id: true, createdAt: true });
+// @ts-ignore -- drizzle-zod/drizzle-orm type mismatch, runtime is correct
 export type InsertQcLog = z.infer<typeof insertQcLogSchema>;
 export type QcLog = typeof qcLogs.$inferSelect;
 
@@ -241,6 +279,7 @@ export const insertMapSnapshotSchema = createInsertSchema(mapSnapshots).omit({
   createdAt: true,
   updatedAt: true,
 });
+// @ts-ignore -- drizzle-zod/drizzle-orm type mismatch, runtime is correct
 export type InsertMapSnapshot = z.infer<typeof insertMapSnapshotSchema>;
 export type MapSnapshot = typeof mapSnapshots.$inferSelect;
 
@@ -262,6 +301,7 @@ export const insertDocumentazioneSchema = createInsertSchema(documentazioni).omi
   createdAt: true,
   updatedAt: true,
 });
+// @ts-ignore -- drizzle-zod/drizzle-orm type mismatch, runtime is correct
 export type InsertDocumentazione = z.infer<typeof insertDocumentazioneSchema>;
 export type Documentazione = typeof documentazioni.$inferSelect;
 
@@ -278,8 +318,22 @@ export const documentazioneSnapshots = sqliteTable(
 );
 
 export const insertDocumentazioneSnapshotSchema = createInsertSchema(documentazioneSnapshots);
+// @ts-ignore -- drizzle-zod/drizzle-orm type mismatch, runtime is correct
 export type InsertDocumentazioneSnapshot = z.infer<typeof insertDocumentazioneSnapshotSchema>;
 export type DocumentazioneSnapshot = typeof documentazioneSnapshots.$inferSelect;
+
+// Anagrafica persone (per import giornale di scavo)
+export const persone = sqliteTable("persone", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  nome: text("nome").notNull().unique(),
+  ruolo: text("ruolo").notNull(), // "operaio" | "archeologo" | "topografo"
+  createdAt: text("created_at").notNull(),
+});
+
+export const insertPersonaSchema = createInsertSchema(persone).omit({ id: true, createdAt: true });
+// @ts-ignore -- drizzle-zod/drizzle-orm type mismatch, runtime is correct
+export type InsertPersona = z.infer<typeof insertPersonaSchema>;
+export type Persona = typeof persone.$inferSelect;
 
 // Impostazioni AI (prompt personalizzabili)
 export const aiSettings = sqliteTable("ai_settings", {

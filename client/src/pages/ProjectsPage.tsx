@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { FolderPlus } from "lucide-react";
+import { FolderOpen, FolderPlus } from "lucide-react";
 import { CantiereLista } from "@/components/projects/CantiereLista";
 import { ProjectSchemaDialog } from "@/components/projects/ProjectSchemaDialog";
 import type { ProjectItem } from "@/components/projects/types";
@@ -54,14 +54,6 @@ export function ProjectsPage() {
     refetchOnMount: true,
   });
 
-  useEffect(() => {
-    if (!createForm.documentationPresetKey && data?.schemaPresets?.length) {
-      setCreateForm((prev) => ({
-        ...prev,
-        documentationPresetKey: data.schemaPresets[0].key,
-      }));
-    }
-  }, [createForm.documentationPresetKey, data?.schemaPresets]);
 
   useEffect(() => {
     if (!data?.currentProjectId) return;
@@ -86,6 +78,25 @@ export function ProjectsPage() {
     onError: () => toast({ title: "Errore selezione progetto", variant: "destructive" }),
   });
 
+  const [isBrowsing, setIsBrowsing] = useState(false);
+
+  async function browseFolder() {
+    setIsBrowsing(true);
+    try {
+      const res = await apiRequest("POST", "/api/browse-folder", {
+        initialPath: createForm.basePath.trim() || undefined,
+      });
+      const json = await res.json();
+      if (!json.cancelled && json.path) {
+        setCreateForm((prev) => ({ ...prev, basePath: json.path }));
+      }
+    } catch {
+      toast({ title: "Impossibile aprire la finestra cartelle", variant: "destructive" });
+    } finally {
+      setIsBrowsing(false);
+    }
+  }
+
   const createProjectMutation = useMutation({
     mutationFn: async () => {
       const payload = {
@@ -98,10 +109,7 @@ export function ProjectsPage() {
     },
     onSuccess: (project) => {
       setOpenCreate(false);
-      setCreateForm({
-        ...emptyCreateForm,
-        documentationPresetKey: data?.schemaPresets?.[0]?.key || "",
-      });
+      setCreateForm(emptyCreateForm);
       toast({ title: "Progetto creato" });
       setCurrentProjectId(project.id);
       queryClient.clear();
@@ -165,26 +173,39 @@ export function ProjectsPage() {
 
               <div>
                 <Label>Percorso base (opzionale)</Label>
-                <Input
-                  placeholder={data?.workspaceRoot || "es. D:\\Scavi\\ArcheoDoc"}
-                  value={createForm.basePath}
-                  onChange={(event) => setCreateForm((prev) => ({ ...prev, basePath: event.target.value }))}
-                />
+                <div className="flex gap-2 mt-1">
+                  <Input
+                    placeholder={data?.workspaceRoot || "es. D:\\Scavi\\ArcheoDoc"}
+                    value={createForm.basePath}
+                    onChange={(event) => setCreateForm((prev) => ({ ...prev, basePath: event.target.value }))}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={browseFolder}
+                    disabled={isBrowsing}
+                    title="Sfoglia cartelle"
+                  >
+                    <FolderOpen size={16} />
+                  </Button>
+                </div>
                 <p className="text-xs text-muted-foreground mt-1">
                   Se vuoto usa il percorso predefinito: {data?.workspaceRoot || "..."}
                 </p>
               </div>
 
               <div>
-                <Label>Schema documentazione</Label>
+                <Label>Schema documentazione (opzionale)</Label>
                 <Select
                   value={createForm.documentationPresetKey}
                   onValueChange={(value) => setCreateForm((prev) => ({ ...prev, documentationPresetKey: value }))}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Seleziona schema..." />
+                    <SelectValue placeholder="Predefinito (schema base)" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="">Predefinito (schema base)</SelectItem>
                     {(data?.schemaPresets || []).map((preset) => (
                       <SelectItem key={preset.key} value={preset.key}>
                         {preset.label}
@@ -193,18 +214,14 @@ export function ProjectsPage() {
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Puoi scegliere schema ministeriale ICCD oppure schema personalizzato.
+                  Se non selezioni nulla viene usato lo schema base predefinito.
                 </p>
               </div>
 
               <Button
                 className="w-full"
                 onClick={() => createProjectMutation.mutate()}
-                disabled={
-                  !createForm.name.trim() ||
-                  !createForm.documentationPresetKey ||
-                  createProjectMutation.isPending
-                }
+                disabled={!createForm.name.trim() || createProjectMutation.isPending}
               >
                 {createProjectMutation.isPending ? "Creazione..." : "Crea progetto"}
               </Button>
@@ -221,6 +238,7 @@ export function ProjectsPage() {
         isSelecting={selectProjectMutation.isPending}
         onOpenSchema={openSchemaEditor}
         onOpenProject={(projectId) => selectProjectMutation.mutate(projectId)}
+        onProjectDeleted={() => queryClient.invalidateQueries({ queryKey: ["/api/projects"] })}
       />
 
       <ProjectSchemaDialog

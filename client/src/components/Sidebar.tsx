@@ -23,9 +23,13 @@ import {
   GitBranch,
   Package,
   BookOpenText,
+  BookOpen,
   Map as MapIcon,
   RefreshCw,
   Download,
+  Shovel,
+  DatabaseZap,
+  Table2,
 } from "lucide-react";
 
 type NavItem = {
@@ -237,8 +241,20 @@ export function Sidebar() {
         {
           href: `/cantiere/${cid}/us${giornataQuery}`,
           icon: Layers,
-          label: "Unita strat.",
+          label: "Schede US",
           isActive: (path) => path === `/cantiere/${cid}/us` || path.startsWith(`/cantiere/${cid}/us/`),
+        },
+        {
+          href: `/cantiere/${cid}/elenco-us`,
+          icon: Table2,
+          label: "Elenco US",
+          isActive: (path) => path === `/cantiere/${cid}/elenco-us` || path.startsWith(`/cantiere/${cid}/elenco-us/`),
+        },
+        {
+          href: `/cantiere/${cid}/sas`,
+          icon: Shovel,
+          label: "Saggi (SAS)",
+          isActive: (path) => path === `/cantiere/${cid}/sas` || path.startsWith(`/cantiere/${cid}/sas/`),
         },
         {
           href: `/cantiere/${cid}/materiali${giornataQuery}`,
@@ -246,23 +262,17 @@ export function Sidebar() {
           label: "Materiali (RA)",
           isActive: (path) => path === `/cantiere/${cid}/materiali` || path.startsWith(`/cantiere/${cid}/materiali/`),
         },
+      ]
+    : [];
+
+  const documentazioneItems = cid
+    ? [
         {
           href: `/cantiere/${cid}/documentazioni`,
           icon: FileText,
           label: "Documentazioni",
-          isActive: (path) =>
+          isActive: (path: string) =>
             path === `/cantiere/${cid}/documentazioni` || path.startsWith(`/cantiere/${cid}/documentazioni/`),
-        },
-      ]
-    : [];
-
-  const analisiItems = cid
-    ? [
-        {
-          href: `/cantiere/${cid}/matrix`,
-          icon: GitBranch,
-          label: "Harris Matrix",
-          isActive: (path: string) => path === `/cantiere/${cid}/matrix` || path.startsWith(`/cantiere/${cid}/matrix/`),
           isPanel: false,
         },
         {
@@ -289,6 +299,18 @@ export function Sidebar() {
             path.startsWith(`/cantiere/${cid}/thesaurus/`),
           isPanel: true,
         },
+      ]
+    : [];
+
+  const analisiItems = cid
+    ? [
+        {
+          href: `/cantiere/${cid}/matrix`,
+          icon: GitBranch,
+          label: "Harris Matrix",
+          isActive: (path: string) => path === `/cantiere/${cid}/matrix` || path.startsWith(`/cantiere/${cid}/matrix/`),
+          isPanel: false,
+        },
         {
           href: panelHrefFull("qc"),
           icon: ShieldCheck,
@@ -309,6 +331,13 @@ export function Sidebar() {
           label: "Statistiche",
           isActive: (path: string) => currentPanel === "stats" || path === `/cantiere/${cid}/stats` || path.startsWith(`/cantiere/${cid}/stats/`),
           isPanel: true,
+        },
+        {
+          href: `/cantiere/${cid}/dbmanager`,
+          icon: DatabaseZap,
+          label: "DB Manager",
+          isActive: (path: string) => path === `/cantiere/${cid}/dbmanager` || path.startsWith(`/cantiere/${cid}/dbmanager/`),
+          isPanel: false,
         },
       ]
     : [];
@@ -372,7 +401,7 @@ export function Sidebar() {
       </div>
 
       {cid && (
-        <nav className="px-3 pt-3 flex-1">
+        <nav className="px-3 pt-3 flex-1 overflow-y-auto min-h-0">
           <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1 px-2">Compilazione</div>
           <ul className="space-y-0.5">
             {compilazioneItems.map(({ href, icon: Icon, label, isActive }) => {
@@ -391,6 +420,46 @@ export function Sidebar() {
                     <Icon size={15} />
                     {label}
                   </Link>
+                </li>
+              );
+            })}
+          </ul>
+
+          <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mt-4 mb-1 px-2">
+            Documentazione
+          </div>
+          <ul className="space-y-0.5">
+            {documentazioneItems.map(({ href, icon: Icon, label, isActive, isPanel }) => {
+              const active = isActive(cleanLocation);
+              return (
+                <li key={label}>
+                  {isPanel ? (
+                    <a
+                      href={href}
+                      className={cn(
+                        "flex items-center gap-2.5 px-2 py-2 rounded-md text-sm transition-colors",
+                        active
+                          ? "bg-primary/10 text-primary font-medium"
+                          : "text-foreground/70 hover:bg-muted hover:text-foreground",
+                      )}
+                    >
+                      <Icon size={15} />
+                      {label}
+                    </a>
+                  ) : (
+                    <Link
+                      href={href}
+                      className={cn(
+                        "flex items-center gap-2.5 px-2 py-2 rounded-md text-sm transition-colors",
+                        active
+                          ? "bg-primary/10 text-primary font-medium"
+                          : "text-foreground/70 hover:bg-muted hover:text-foreground",
+                      )}
+                    >
+                      <Icon size={15} />
+                      {label}
+                    </Link>
+                  )}
                 </li>
               );
             })}
@@ -475,6 +544,19 @@ export function Sidebar() {
           >
             <Download size={15} className={cn(applyUpdates.isPending && "animate-pulse")} />
           </button>
+          <a
+            href="#/manuale"
+            className={cn(
+              "p-1.5 rounded-md transition-colors",
+              cleanLocation === "/manuale"
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+            )}
+            aria-label="Manuale"
+            title="Manuale"
+          >
+            <BookOpen size={15} />
+          </a>
           <a
             href={panelHrefFull("settings")}
             className={cn(

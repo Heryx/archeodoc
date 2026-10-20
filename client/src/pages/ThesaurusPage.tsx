@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Save, Upload } from "lucide-react";
+import { BookOpen, ChevronDown, ChevronRight, Save, Upload } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { getCurrentProjectId, getProjectHeader } from "@/lib/project";
 import { useToast } from "@/hooks/use-toast";
@@ -11,6 +11,123 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import type { ProjectItem } from "@/components/projects/types";
 import type { ProjectSchemaPresetSummary, SchemaDefinition } from "@shared/types/schema";
+import { US_TIPO_THESAURUS, usDefinizioneSuggestions } from "@shared/us_thesaurus";
+import {
+  PRONTUARIO_INTRODUZIONE,
+  PRONTUARIO_SEZIONI,
+  PRONTUARIO_SOTTOTITOLO,
+  PRONTUARIO_TITOLO,
+  type ProntuarioSezione,
+  type ProntuarioSubsection,
+} from "@shared/us_prontuario";
+
+/** Tabella di una sottosezione del prontuario (es. "Consistenza e colore"). */
+function ProntuarioSubsectionTable({ sub }: { sub: ProntuarioSubsection }) {
+  return (
+    <div className="space-y-1.5">
+      <p className="text-xs font-semibold text-foreground">{sub.titolo}</p>
+      <div className="overflow-x-auto rounded border border-border">
+        <table className="w-full text-xs">
+          <thead className="bg-muted/40">
+            <tr>
+              {sub.colonne.map((c, i) => (
+                <th key={i} className="text-left px-2 py-1.5 font-medium whitespace-nowrap">{c}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {sub.voci.map((v, i) => (
+              <tr key={i} className={i % 2 === 1 ? "bg-muted/20" : undefined}>
+                <td className="px-2 py-1.5 align-top font-medium whitespace-nowrap">{v.voce}</td>
+                <td className="px-2 py-1.5 align-top text-foreground">{v.termine}</td>
+                <td className="px-2 py-1.5 align-top text-muted-foreground">{v.descrizione}</td>
+                <td className="px-2 py-1.5 align-top text-muted-foreground italic">{v.nota}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/** Card collassabile per una sezione del prontuario (Strati, Strutture, Tagli, Relazioni). */
+function ProntuarioSectionCard({
+  sezione,
+  open,
+  onToggle,
+}: {
+  sezione: ProntuarioSezione;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="rounded-md border border-border overflow-hidden">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-muted/30 transition-colors"
+      >
+        <div>
+          <p className="text-sm font-semibold">{sezione.titolo}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">{sezione.introduzione}</p>
+        </div>
+        {open ? <ChevronDown size={16} className="shrink-0" /> : <ChevronRight size={16} className="shrink-0" />}
+      </button>
+      {open && (
+        <div className="border-t border-border bg-background p-3 space-y-4">
+          <p className="text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">Utilizzo sul campo:</span> {sezione.utilizzoCampo}
+            {" · "}
+            <span className="font-medium text-foreground">Scheda di riferimento:</span> {sezione.schedaRiferimento}
+          </p>
+          {sezione.sottosezioni.map((sub, i) => (
+            <ProntuarioSubsectionTable key={i} sub={sub} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Sezione "Indice e Guida": vocabolario controllato e note tecniche ICCD per la compilazione
+ * delle schede US/USM, consultabile indipendentemente dal progetto/schema attivo. */
+function ProntuarioGuide() {
+  const [openSections, setOpenSections] = useState<Set<string>>(new Set());
+
+  const toggle = (key: string) => {
+    setOpenSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  return (
+    <div id="guida" className="space-y-3 rounded-lg border border-border p-3 bg-muted/10">
+      <div className="flex items-start gap-2">
+        <BookOpen size={18} className="shrink-0 mt-0.5 text-primary" />
+        <div>
+          <p className="text-sm font-semibold">{PRONTUARIO_TITOLO}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">{PRONTUARIO_SOTTOTITOLO}</p>
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground">{PRONTUARIO_INTRODUZIONE}</p>
+
+      <div className="space-y-2">
+        {PRONTUARIO_SEZIONI.map((sezione) => (
+          <ProntuarioSectionCard
+            key={sezione.key}
+            sezione={sezione}
+            open={openSections.has(sezione.key)}
+            onToggle={() => toggle(sezione.key)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 type ThesaurusPageProps = {
   embedded?: boolean;
@@ -129,6 +246,26 @@ function extractUsThesaurusFields(schema: SchemaDefinition): ThesaurusField[] {
     }
   }
 
+  // I campi US top-level "tipo" e "definizione" non sempre esistono come campi di
+  // paragrafo (es. schema ICCD): esponili comunque, con le voci salvate nello
+  // schema o, in mancanza, i valori di default condivisi.
+  const schemaVocabularies = (schema.vocabularies || {}) as Record<string, string[]>;
+  const TOP_LEVEL_DEFAULTS: Array<{ key: string; label: string; fallback: string[] }> = [
+    { key: "tipo", label: "Tipo", fallback: [...US_TIPO_THESAURUS] },
+    { key: "definizione", label: "Definizione", fallback: usDefinizioneSuggestions() },
+  ];
+
+  for (const { key, label, fallback } of TOP_LEVEL_DEFAULTS) {
+    const existing = byKey.get(key);
+    if (existing && existing.vocabulary.length > 0) continue;
+    const stored = mergeVocabulary([], schemaVocabularies[key] || []);
+    byKey.set(key, {
+      key,
+      label: existing?.label || label,
+      vocabulary: stored.length > 0 ? stored : mergeVocabulary([], fallback),
+    });
+  }
+
   return Array.from(byKey.values());
 }
 
@@ -136,18 +273,27 @@ function applyVocabularyToSchema(schema: SchemaDefinition, fieldKey: string, val
   const vocabulary = mergeVocabulary([], values);
   const next = ensureSchemaDefinition(schema);
 
+  let matchedParagraphField = false;
   next.modules.us = next.modules.us.map((paragraph) => ({
     ...paragraph,
-    fields: (paragraph.fields || []).map((field) =>
-      field.key === fieldKey
-        ? {
-            ...field,
-            vocabulary: vocabulary.length > 0 ? vocabulary : undefined,
-          }
-        : field,
-    ),
+    fields: (paragraph.fields || []).map((field) => {
+      if (field.key !== fieldKey) return field;
+      matchedParagraphField = true;
+      return {
+        ...field,
+        vocabulary: vocabulary.length > 0 ? vocabulary : undefined,
+      };
+    }),
   }));
   next.paragraphs = cloneParagraphs(next.modules.us);
+
+  // Chiave top-level senza campo di paragrafo (es. "tipo"/"definizione" in ICCD).
+  if (!matchedParagraphField) {
+    const nextVocabularies = { ...(next.vocabularies || {}) };
+    if (vocabulary.length > 0) nextVocabularies[fieldKey] = vocabulary;
+    else delete nextVocabularies[fieldKey];
+    next.vocabularies = nextVocabularies;
+  }
 
   return next;
 }
@@ -211,11 +357,25 @@ export function ThesaurusPage({ embedded = false }: ThesaurusPageProps = {}) {
     }
   }, [thesaurusFields, fieldKey]);
 
-  const editingDisabled = schemaQuery.data?.project.documentationMode !== "custom";
+  // In ICCD la struttura dello schema resta bloccata, ma le voci del thesaurus
+  // (vocabolario controllato) sono modificabili tramite endpoint dedicato.
+  const structureLocked = schemaQuery.data?.project.documentationMode !== "custom";
 
   const saveMutation = useMutation({
-    mutationFn: async ({ currentProjectId, schema }: { currentProjectId: string; schema: SchemaDefinition }) =>
-      (await apiRequest("PATCH", `/api/projects/${currentProjectId}/schema`, { schema })).json(),
+    mutationFn: async ({
+      currentProjectId,
+      currentFieldKey,
+      values,
+    }: {
+      currentProjectId: string;
+      currentFieldKey: string;
+      values: string[];
+    }) =>
+      (await apiRequest("PATCH", `/api/projects/${currentProjectId}/schema/vocabulary`, {
+        entity: "us",
+        fieldKey: currentFieldKey,
+        vocabulary: values,
+      })).json(),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["/api/projects"] });
       await schemaQuery.refetch();
@@ -294,12 +454,14 @@ export function ThesaurusPage({ embedded = false }: ThesaurusPageProps = {}) {
   function handleSave() {
     if (!projectId || !schemaDraft || !fieldKey) return;
 
-    const next = applyVocabularyToSchema(schemaDraft, fieldKey, parseVocabulary(valuesRaw));
+    const values = parseVocabulary(valuesRaw);
+    const next = applyVocabularyToSchema(schemaDraft, fieldKey, values);
     setSchemaDraft(next);
 
     saveMutation.mutate({
       currentProjectId: projectId,
-      schema: next,
+      currentFieldKey: fieldKey,
+      values,
     });
   }
 
@@ -308,6 +470,7 @@ export function ThesaurusPage({ embedded = false }: ThesaurusPageProps = {}) {
   if (!projectId) {
     return (
       <div className={wrapperClass}>
+        <ProntuarioGuide />
         <p className="text-sm text-muted-foreground">Nessun progetto attivo: seleziona prima un progetto dati.</p>
       </div>
     );
@@ -328,6 +491,7 @@ export function ThesaurusPage({ embedded = false }: ThesaurusPageProps = {}) {
   if (schemaQuery.error || !schemaDraft) {
     return (
       <div className={wrapperClass}>
+        <ProntuarioGuide />
         <p className="text-sm text-red-600">
           Errore caricamento thesaurus: {(schemaQuery.error as Error)?.message || "schema non disponibile"}
         </p>
@@ -343,6 +507,8 @@ export function ThesaurusPage({ embedded = false }: ThesaurusPageProps = {}) {
           Gestisci le voci dei campi US con vocabolario controllato.
         </p>
       </div>
+
+      <ProntuarioGuide />
 
       <div className="rounded-md border border-border p-3 bg-muted/20">
         <p className="text-sm font-medium">
@@ -430,7 +596,7 @@ export function ThesaurusPage({ embedded = false }: ThesaurusPageProps = {}) {
             type="button"
             className="gap-2"
             onClick={handleSave}
-            disabled={!fieldKey || editingDisabled || saveMutation.isPending}
+            disabled={!fieldKey || saveMutation.isPending}
           >
             <Save size={14} />
             {saveMutation.isPending ? "Salvataggio..." : "Salva thesaurus"}
@@ -438,9 +604,9 @@ export function ThesaurusPage({ embedded = false }: ThesaurusPageProps = {}) {
         </div>
 
         {suggestionMeta && <p className="text-xs text-muted-foreground">{suggestionMeta}</p>}
-        {editingDisabled && (
+        {structureLocked && (
           <p className="text-xs text-amber-700">
-            Progetto in modalita ICCD bloccata: puoi generare suggerimenti ma non salvare modifiche.
+            Progetto in modalita ICCD: puoi modificare le voci del thesaurus, ma non la struttura dei campi.
           </p>
         )}
       </div>

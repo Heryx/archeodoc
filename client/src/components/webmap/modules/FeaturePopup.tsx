@@ -1,7 +1,9 @@
+import { formatUsCode } from "@shared/us_code";
+import { useProjectCodeSettings } from "@/hooks/useProjectCodeSettings";
 import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import { createRoot, type Root } from "react-dom/client";
-import { ExternalLink, Info, Layers, Loader2, MapPin, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, ExternalLink, Info, Layers, Loader2, MapPin, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getProjectHeader } from "@/lib/project";
 import type { WebMapLayer } from "@/components/webmap/types";
@@ -53,16 +55,19 @@ function formatCoord(value: number, digits = 6) {
 }
 
 function FeaturePopupBody({
-  feature,
+  features,
   cantiereId,
   onClose,
   onNavigateUS,
 }: {
-  feature: ClickedFeature;
+  features: ClickedFeature[];
   cantiereId: number;
   onClose: () => void;
   onNavigateUS?: (codiceUS: string) => void;
 }) {
+  const { settings: codeSettings } = useProjectCodeSettings();
+  const [index, setIndex] = useState(0);
+  const feature = features[Math.min(index, features.length - 1)];
   const usCode = guessUSCode(feature.properties);
   const visibleProps = filterProps(feature.properties);
   const [usLoading, setUsLoading] = useState(false);
@@ -122,6 +127,28 @@ function FeaturePopupBody({
         </button>
       </div>
 
+      {features.length > 1 && (
+        <div className="flex items-center justify-between px-3 py-1 bg-muted/60 border-b border-border text-[10px]">
+          <button
+            type="button"
+            onClick={() => setIndex((i) => (i - 1 + features.length) % features.length)}
+            className="p-0.5 rounded hover:bg-muted transition-colors"
+          >
+            <ChevronLeft size={12} />
+          </button>
+          <span className="text-muted-foreground font-medium">
+            Elemento {index + 1} di {features.length}
+          </span>
+          <button
+            type="button"
+            onClick={() => setIndex((i) => (i + 1) % features.length)}
+            className="p-0.5 rounded hover:bg-muted transition-colors"
+          >
+            <ChevronRight size={12} />
+          </button>
+        </div>
+      )}
+
       <div className="flex items-center gap-1.5 px-3 py-1.5 bg-muted/40 border-b border-border text-[10px] text-muted-foreground">
         <MapPin size={10} />
         {formatCoord(feature.lngLat.lat)}°N, {formatCoord(feature.lngLat.lng)}°E
@@ -139,7 +166,7 @@ function FeaturePopupBody({
 
             {usData ? (
               <div className="space-y-0.5">
-                <p className="text-sm font-bold">{usData.codiceUS}</p>
+                <p className="text-sm font-bold">{formatUsCode(usData.codiceUS ?? "", usData.tipo, codeSettings.tombaStyle)}</p>
                 {usData.tipo && <p className="text-[11px] text-muted-foreground">{usData.tipo}</p>}
                 {usData.definizione && (
                   <p className="text-[11px] text-muted-foreground italic">{usData.definizione}</p>
@@ -237,17 +264,28 @@ export function useFeaturePopup(
         return;
       }
 
-      const feature = found[0];
-      const sourceMatch = String(feature.source || "").match(/^layer-(\d+)/);
-      const layerId = sourceMatch ? Number(sourceMatch[1]) : -1;
-      const layerMeta = layers.find((item) => item.id === layerId);
+      const seen = new Set<string>();
+      const clickedFeatures: ClickedFeature[] = [];
+      for (const feature of found) {
+        const sourceMatch = String(feature.source || "").match(/^layer-(\d+)/);
+        const layerId = sourceMatch ? Number(sourceMatch[1]) : -1;
+        const featureKey = `${layerId}:${feature.id ?? JSON.stringify(feature.properties)}`;
+        if (seen.has(featureKey)) continue;
+        seen.add(featureKey);
 
-      const clicked: ClickedFeature = {
-        layerId,
-        layerName: layerMeta?.displayName || String(feature.source || "Layer"),
-        properties: (feature.properties || {}) as Record<string, unknown>,
-        lngLat: { lng: event.lngLat.lng, lat: event.lngLat.lat },
-      };
+        const layerMeta = layers.find((item) => item.id === layerId);
+        clickedFeatures.push({
+          layerId,
+          layerName: layerMeta?.displayName || String(feature.source || "Layer"),
+          properties: (feature.properties || {}) as Record<string, unknown>,
+          lngLat: { lng: event.lngLat.lng, lat: event.lngLat.lat },
+        });
+      }
+
+      if (!clickedFeatures.length) {
+        closePopup();
+        return;
+      }
 
       closePopup();
 
@@ -256,7 +294,7 @@ export function useFeaturePopup(
       popupRootRef.current = root;
       root.render(
         <FeaturePopupBody
-          feature={clicked}
+          features={clickedFeatures}
           cantiereId={cantiereId}
           onClose={closePopup}
           onNavigateUS={onNavigateUS}

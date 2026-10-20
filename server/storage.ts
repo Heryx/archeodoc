@@ -12,6 +12,7 @@ import {
   documentazioni,
   documentazioneSnapshots,
   qcLogs,
+  persone,
   type Cantiere,
   type InsertCantiere,
   type Giornata,
@@ -32,17 +33,28 @@ import {
   type InsertDocumentazioneSnapshot,
   type QcLog,
   type InsertQcLog,
+  type Persona,
+  type InsertPersona,
 } from "@shared/schema";
 import { ensureWebMapTables } from "./webmap_layers";
 
-function hasColumn(sqlite: Database.Database, tableName: string, columnName: string): boolean {
-  const columns = sqlite.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
-  return columns.some((c) => c.name === columnName);
+const tableColumnsCache = new Map<string, Set<string>>();
+
+function getTableColumns(sqlite: Database.Database, tableName: string): Set<string> {
+  let cols = tableColumnsCache.get(tableName);
+  if (!cols) {
+    const columns = sqlite.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+    cols = new Set(columns.map((c) => c.name));
+    tableColumnsCache.set(tableName, cols);
+  }
+  return cols;
 }
 
 function ensureColumn(sqlite: Database.Database, tableName: string, columnName: string, definition: string): void {
-  if (hasColumn(sqlite, tableName, columnName)) return;
+  const cols = getTableColumns(sqlite, tableName);
+  if (cols.has(columnName)) return;
   sqlite.exec(`ALTER TABLE ${tableName} ADD COLUMN ${definition}`);
+  cols.add(columnName);
 }
 
 function migrate(sqlite: Database.Database) {
@@ -198,6 +210,7 @@ function migrate(sqlite: Database.Database) {
       scheda_ai_generata TEXT,
       scheda_model_key TEXT DEFAULT 'base-us',
       scheda_data TEXT,
+      da_rivedere INTEGER DEFAULT 0,
       created_at TEXT NOT NULL,
       FOREIGN KEY (cantiere_id) REFERENCES cantieri(id) ON DELETE CASCADE,
       FOREIGN KEY (giornata_id) REFERENCES giornate(id) ON DELETE SET NULL
@@ -405,8 +418,17 @@ function migrate(sqlite: Database.Database) {
   ensureColumn(sqlite, "unita_stratigrafiche", "setacciatura_tipo", "setacciatura_tipo TEXT");
   ensureColumn(sqlite, "unita_stratigrafiche", "affidabilita_stratigrafica", "affidabilita_stratigrafica TEXT");
   ensureColumn(sqlite, "unita_stratigrafiche", "responsabile_sabap", "responsabile_sabap TEXT");
-  ensureColumn(sqlite, "unita_stratigrafiche", "responsabile_archeosistemi", "responsabile_archeosistemi TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "responsabile_scavo", "responsabile_scavo TEXT");
   ensureColumn(sqlite, "unita_stratigrafiche", "quota_piano_campagna", "quota_piano_campagna REAL");
+  ensureColumn(sqlite, "unita_stratigrafiche", "saggio", "saggio TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "quadrati", "quadrati TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "quote_slm", "quote_slm TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "soprintendenza", "soprintendenza TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "tabelle_materiali_ra", "tabelle_materiali_ra TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "tabelle_materiali_n", "tabelle_materiali_n TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "posteriore_a", "posteriore_a TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "anteriore_a", "anteriore_a TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "da_rivedere", "da_rivedere INTEGER DEFAULT 0");
   ensureColumn(sqlite, "map_snapshots", "didascalia", "didascalia TEXT");
   ensureColumn(sqlite, "map_snapshots", "tags", "tags TEXT");
   ensureColumn(sqlite, "map_snapshots", "mime_type", "mime_type TEXT");
@@ -425,8 +447,59 @@ function migrate(sqlite: Database.Database) {
   ensureColumn(sqlite, "documentazioni", "updated_at", "updated_at TEXT");
   ensureColumn(sqlite, "sas_records", "data", "data TEXT");
   ensureColumn(sqlite, "ra_records", "data", "data TEXT");
+  ensureColumn(sqlite, "allegati", "sas_id", "sas_id INTEGER");
   ensureColumn(sqlite, "qc_logs", "dismissed", "dismissed INTEGER DEFAULT 0");
+  // Diario scavo giornaliero
+  ensureColumn(sqlite, "giornate", "ora_inizio", "ora_inizio TEXT");
+  ensureColumn(sqlite, "giornate", "ora_fine", "ora_fine TEXT");
+  ensureColumn(sqlite, "giornate", "scavatori", "scavatori TEXT");
+  ensureColumn(sqlite, "giornate", "archeologi", "archeologi TEXT");
+  ensureColumn(sqlite, "giornate", "topografo", "topografo TEXT");
+  ensureColumn(sqlite, "giornate", "direttore_scavo", "direttore_scavo TEXT");
+  ensureColumn(sqlite, "giornate", "antropologo", "antropologo TEXT");
+  ensureColumn(sqlite, "giornate", "resp_materiali", "resp_materiali TEXT");
+  ensureColumn(sqlite, "giornate", "funzionario_sabap", "funzionario_sabap TEXT");
+  ensureColumn(sqlite, "giornate", "archeologo_sorveglianza", "archeologo_sorveglianza TEXT");
+  ensureColumn(sqlite, "giornate", "archeologo_coordinatore", "archeologo_coordinatore TEXT");
+  ensureColumn(sqlite, "giornate", "escavatore", "escavatore TEXT");
+  ensureColumn(sqlite, "giornate", "tipo_scavo", "tipo_scavo TEXT");
+  ensureColumn(sqlite, "giornate", "obiettivo", "obiettivo TEXT");
+  ensureColumn(sqlite, "giornate", "attivita_svolta", "attivita_svolta TEXT");
+  ensureColumn(sqlite, "giornate", "updated_at", "updated_at TEXT");
+  ensureColumn(sqlite, "giornate", "synced_at", "synced_at TEXT");
+  ensureColumn(sqlite, "giornate", "device_id", "device_id TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "updated_at", "updated_at TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "synced_at", "synced_at TEXT");
+  ensureColumn(sqlite, "unita_stratigrafiche", "device_id", "device_id TEXT");
   ensureWebMapTables(sqlite);
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS persone (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nome TEXT NOT NULL UNIQUE,
+      ruolo TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `);
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS sync_devices (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      last_sync_at TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS sync_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      device_id TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      operation TEXT NOT NULL,
+      timestamp TEXT NOT NULL,
+      synced INTEGER DEFAULT 0
+    );
+  `);
 }
 
 export interface IStorage {
@@ -466,10 +539,12 @@ export interface IStorage {
   deleteRaRecord(id: number): boolean;
 
   // Allegati
-  getAllegati(cantiereId: number, giornataId?: number, usId?: number): Allegato[];
+  getAllegati(cantiereId: number, giornataId?: number, usId?: number, sasId?: number): Allegato[];
   getAllegato(id: number): Allegato | undefined;
+  getALlegatoById(id: number): Allegato | undefined;
   createAllegato(data: InsertAllegato): Allegato;
   updateAllegato(id: number, data: Partial<InsertAllegato>): Allegato | undefined;
+  deleteAllegato(id: number): void;
 
   // Map snapshots
   getMapSnapshots(cantiereId: number): MapSnapshot[];
@@ -492,11 +567,21 @@ export interface IStorage {
 
   // QC logs
   getQcLogs(cantiereId: number, giornataId?: number): QcLog[];
+  getQcLogsByUS(cantiereId: number, usId: number): QcLog[];
   createQcLog(data: InsertQcLog): QcLog;
   deleteQcLogsByGiornata(giornataId: number): void;
   deleteQcLogsByUS(usId: number): void;
   dismissQcLog(id: number): void;
   undismissQcLog(id: number): void;
+
+  // Persone
+  getPersone(): Persona[];
+  getPersona(id: number): Persona | undefined;
+  getPersonaByNome(nome: string): Persona | undefined;
+  createPersona(data: InsertPersona): Persona;
+  updatePersona(id: number, data: Partial<InsertPersona>): Persona | undefined;
+  deletePersona(id: number): boolean;
+  upsertPersone(nomi: Array<{ nome: string; ruolo: string }>): Persona[];
 }
 
 function now() {
@@ -539,6 +624,8 @@ class SQLiteStorage implements IStorage {
     this.db.transaction((tx) => {
       tx.delete(qcLogs).where(eq(qcLogs.cantiereId, id)).run();
       tx.delete(mapSnapshots).where(eq(mapSnapshots.cantiereId, id)).run();
+      // Le documentazione_snapshots vengono eliminate via ON DELETE CASCADE su documentazione_id
+      tx.delete(documentazioni).where(eq(documentazioni.cantiereId, id)).run();
       tx.delete(allegati).where(eq(allegati.cantiereId, id)).run();
       tx.delete(raRecords).where(eq(raRecords.cantiereId, id)).run();
       tx.delete(sasRecords).where(eq(sasRecords.cantiereId, id)).run();
@@ -601,7 +688,7 @@ class SQLiteStorage implements IStorage {
   }
 
   updateUS(id: number, data: Partial<InsertUS>) {
-    return this.db.update(unitaStratigrafiche).set(data).where(eq(unitaStratigrafiche.id, id)).returning().get();
+    return this.db.update(unitaStratigrafiche).set({ ...data, updatedAt: now() }).where(eq(unitaStratigrafiche.id, id)).returning().get();
   }
 
   deleteUS(id: number) {
@@ -672,12 +759,20 @@ class SQLiteStorage implements IStorage {
   }
 
   // Allegati
-  getAllegati(cantiereId: number, giornataId?: number, usId?: number) {
+  getAllegati(cantiereId: number, giornataId?: number, usId?: number, sasId?: number) {
     if (usId !== undefined) {
       return this.db
         .select()
         .from(allegati)
         .where(and(eq(allegati.cantiereId, cantiereId), eq(allegati.usId, usId)))
+        .all();
+    }
+
+    if (sasId !== undefined) {
+      return this.db
+        .select()
+        .from(allegati)
+        .where(and(eq(allegati.cantiereId, cantiereId), eq(allegati.sasId, sasId)))
         .all();
     }
 
@@ -696,12 +791,20 @@ class SQLiteStorage implements IStorage {
     return this.db.select().from(allegati).where(eq(allegati.id, id)).get();
   }
 
+  getALlegatoById(id: number) {
+    return this.db.select().from(allegati).where(eq(allegati.id, id)).get();
+  }
+
   createAllegato(data: InsertAllegato) {
     return this.db.insert(allegati).values({ ...data, createdAt: now() }).returning().get();
   }
 
   updateAllegato(id: number, data: Partial<InsertAllegato>) {
     return this.db.update(allegati).set(data).where(eq(allegati.id, id)).returning().get();
+  }
+
+  deleteAllegato(id: number) {
+    this.db.delete(allegati).where(eq(allegati.id, id)).run();
   }
 
   // Map snapshots
@@ -862,6 +965,15 @@ class SQLiteStorage implements IStorage {
     this.db.delete(qcLogs).where(eq(qcLogs.giornataId, giornataId)).run();
   }
 
+  getQcLogsByUS(cantiereId: number, usId: number) {
+    return this.db
+      .select()
+      .from(qcLogs)
+      .where(and(eq(qcLogs.cantiereId, cantiereId), eq(qcLogs.usId, usId)))
+      .orderBy(desc(qcLogs.createdAt))
+      .all();
+  }
+
   deleteQcLogsByUS(usId: number) {
     this.db.delete(qcLogs).where(eq(qcLogs.usId, usId)).run();
   }
@@ -872,6 +984,49 @@ class SQLiteStorage implements IStorage {
 
   undismissQcLog(id: number) {
     this.db.update(qcLogs).set({ dismissed: false }).where(eq(qcLogs.id, id)).run();
+  }
+
+  // Persone
+  getPersone() {
+    return this.db.select().from(persone).orderBy(asc(persone.nome)).all();
+  }
+
+  getPersona(id: number) {
+    return this.db.select().from(persone).where(eq(persone.id, id)).get();
+  }
+
+  getPersonaByNome(nome: string) {
+    return this.db.select().from(persone).where(eq(persone.nome, nome)).get();
+  }
+
+  createPersona(data: InsertPersona) {
+    return this.db.insert(persone).values({ ...data, createdAt: now() }).returning().get();
+  }
+
+  updatePersona(id: number, data: Partial<InsertPersona>) {
+    return this.db.update(persone).set(data).where(eq(persone.id, id)).returning().get();
+  }
+
+  deletePersona(id: number) {
+    const existing = this.getPersona(id);
+    if (!existing) return false;
+    this.db.delete(persone).where(eq(persone.id, id)).run();
+    return true;
+  }
+
+  upsertPersone(nomi: Array<{ nome: string; ruolo: string }>) {
+    const result: Persona[] = [];
+    for (const { nome, ruolo } of nomi) {
+      const trimmed = nome.trim();
+      if (!trimmed) continue;
+      const existing = this.getPersonaByNome(trimmed);
+      if (existing) {
+        result.push(existing);
+      } else {
+        result.push(this.createPersona({ nome: trimmed, ruolo }));
+      }
+    }
+    return result;
   }
 }
 

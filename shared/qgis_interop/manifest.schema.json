@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "archeodoc://qgis-interop/manifest.schema.json",
+  "title": "ArcheoDoc QGIS interop manifest",
+  "description": "Scritto da archeodoc/manifest.json dal plugin QGIS ad ogni check. Elenca i layer del progetto che ArcheoDoc puo' importare/leggere, con i path relativi alla cartella di progetto.",
+  "type": "object",
+  "required": ["schemaVersion", "generatedAt", "projectFile", "projectCrs", "layers"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "generatedByPluginVersion": { "type": "string" },
+    "projectFile": { "type": "string", "description": "Nome file .qgz/.qgs, relativo alla cartella di progetto." },
+    "projectCrs": { "type": "string", "description": "Es. EPSG:32633" },
+    "layers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "kind", "format", "path"],
+        "properties": {
+          "id": { "type": "string", "description": "ID layer QGIS, stabile tra un check e l'altro." },
+          "name": { "type": "string" },
+          "kind": { "type": "string", "enum": ["vector", "raster", "table"] },
+          "format": { "type": "string", "enum": ["gpkg", "shp", "geojson", "kml", "csv", "tif", "tiff", "png", "jpg", "jpeg"] },
+          "path": { "type": "string", "description": "Path relativo alla cartella di progetto." },
+          "worldFilePath": { "type": ["string", "null"], "description": "Solo raster senza georeferenziazione interna." },
+          "crs": { "type": ["string", "null"] },
+          "geometryType": { "type": ["string", "null"], "enum": ["Point", "LineString", "Polygon", "MultiPoint", "MultiLineString", "MultiPolygon", "Mixed", null] },
+          "featureCount": { "type": ["integer", "null"] },
+          "hasUsCodeField": { "type": "boolean" },
+          "usCodeFieldName": { "type": ["string", "null"] }
+        }
+      }
+    }
+  }
+}

@@ -6,6 +6,8 @@ import { extractPathFromLocation, extractSearchFromLocation, useHashPathLocation
 import { Toaster } from "@/components/ui/toaster";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { Sidebar } from "@/components/Sidebar";
+import { AiAssistantProvider, useAiAssistant } from "@/components/ai/AiAssistantContext";
+import { AiAssistantPanel } from "@/components/ai/AiAssistantPanel";
 import {
   Sheet,
   SheetContent,
@@ -15,11 +17,17 @@ import {
 } from "@/components/ui/sheet";
 import { CantieriPage } from "@/pages/CantieriPage";
 import { GiornataPage } from "@/pages/GiornataPage";
+import { GiornataDetailPage } from "@/pages/GiornataDetailPage";
+import { AIStartupDialog } from "@/components/settings/AIStartupDialog";
 import NotFound from "@/pages/not-found";
 
 const USPage = lazy(async () => {
   const mod = await import("@/pages/USPage");
   return { default: mod.USPage };
+});
+const ElencoUSPage = lazy(async () => {
+  const mod = await import("@/pages/ElencoUSPage");
+  return { default: mod.ElencoUSPage };
 });
 const MaterialiPage = lazy(async () => {
   const mod = await import("@/pages/MaterialiPage");
@@ -65,6 +73,18 @@ const DocumentazioniPage = lazy(async () => {
   const mod = await import("@/pages/DocumentazioniPage");
   return { default: mod.DocumentazioniPage };
 });
+const SasPage = lazy(async () => {
+  const mod = await import("@/pages/SasPage");
+  return { default: mod.SasPage };
+});
+const ManualePage = lazy(async () => {
+  const mod = await import("@/pages/ManualePage");
+  return { default: mod.ManualePage };
+});
+const DBManagerPage = lazy(async () => {
+  const mod = await import("@/pages/DBManagerPage");
+  return { default: mod.DBManagerPage };
+});
 
 type SidePanel = "settings" | "qc" | "stats" | "thesaurus" | "report";
 
@@ -90,6 +110,10 @@ function AppShell() {
   const panel = parsePanel(params.get("panel"));
   const cidMatch = cleanLocation.match(/^\/cantiere\/(\d+)/);
   const cid = cidMatch?.[1];
+  const cantiereSeg = cleanLocation.split("/").filter(Boolean);
+  const pageContext = cantiereSeg[0] === "cantiere" ? cantiereSeg[2] || "cantiere" : "";
+  const { open: aiOpen, expanded: aiExpanded } = useAiAssistant();
+  const aiMainMargin = aiOpen ? (aiExpanded ? "lg:mr-[640px]" : "lg:mr-[380px]") : "";
 
   function closePanel() {
     const next = new URLSearchParams(search);
@@ -122,16 +146,19 @@ function AppShell() {
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
+      <AIStartupDialog />
       <Sidebar />
-      <main className="flex-1 min-h-0 overflow-y-auto">
+      <main className={`flex-1 min-h-0 overflow-y-auto transition-[margin] ${aiMainMargin}`}>
         <Suspense fallback={<div className="p-8 text-sm text-muted-foreground">Caricamento pagina...</div>}>
           <Switch>
             <Route path="/" component={CantieriPage} />
             <Route path="/projects" component={ProjectsPage} />
             <Route path="/cantiere/:cid" component={GiornataPage} />
-            <Route path="/cantiere/:cid/giornata/:gid" component={GiornataPage} />
+            <Route path="/cantiere/:cid/giornata/:gid" component={GiornataDetailPage} />
             <Route path="/cantiere/:cid/us" component={USPage} />
+            <Route path="/cantiere/:cid/elenco-us" component={ElencoUSPage} />
             <Route path="/cantiere/:cid/materiali" component={MaterialiPage} />
+            <Route path="/cantiere/:cid/sas" component={SasPage} />
             <Route path="/cantiere/:cid/matrix" component={MatrixPage} />
             <Route path="/cantiere/:cid/webmap" component={WebMapPage} />
             <Route path="/cantiere/:cid/documentazioni" component={DocumentazioniPage} />
@@ -148,8 +175,14 @@ function AppShell() {
             <Route path="/cantiere/:cid/stats">
               {() => <StatsPage />}
             </Route>
+            <Route path="/cantiere/:cid/dbmanager">
+              {() => <DBManagerPage />}
+            </Route>
             <Route path="/impostazioni">
               {() => <ImpostazioniPage />}
+            </Route>
+            <Route path="/manuale">
+              {() => <ManualePage />}
             </Route>
             <Route component={NotFound} />
           </Switch>
@@ -174,6 +207,8 @@ function AppShell() {
           </div>
         </SheetContent>
       </Sheet>
+
+      <AiAssistantPanel cid={cid} pageContext={pageContext} />
     </div>
   );
 }
@@ -181,7 +216,9 @@ function AppShell() {
 function AppLayout() {
   return (
     <Router hook={useHashPathLocation}>
-      <AppShell />
+      <AiAssistantProvider>
+        <AppShell />
+      </AiAssistantProvider>
     </Router>
   );
 }

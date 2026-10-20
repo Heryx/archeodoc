@@ -9,6 +9,7 @@ type CantiereListaProps = {
   isSelecting: boolean;
   onOpenSchema: (projectId: string) => void;
   onOpenProject: (projectId: string) => void;
+  onProjectDeleted: () => void;
 };
 
 export function CantiereLista({
@@ -19,6 +20,7 @@ export function CantiereLista({
   isSelecting,
   onOpenSchema,
   onOpenProject,
+  onProjectDeleted,
 }: CantiereListaProps) {
   if (isLoading) {
     return (
@@ -52,6 +54,7 @@ export function CantiereLista({
             presetLabel={presetLabel}
             onOpenSchema={onOpenSchema}
             onOpenProject={onOpenProject}
+            onDeleted={onProjectDeleted}
             isSelecting={isSelecting}
           />
         );

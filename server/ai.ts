@@ -15,9 +15,22 @@ function resolveProvider(): "gemini" | "claude" | "openai" | "none" {
   const hasClaude  = !!(process.env.ANTHROPIC_API_KEY?.trim());
   const hasOpenAI  = !!(process.env.OPENAI_API_KEY?.trim());
 
-  if (envProvider === "claude")  return hasClaude  ? "claude"  : "none";
-  if (envProvider === "gemini")  return hasGemini  ? "gemini"  : "none";
-  if (envProvider === "openai")  return hasOpenAI  ? "openai"  : "none";
+  const forcedHasKey =
+    (envProvider === "claude" && hasClaude) ||
+    (envProvider === "gemini" && hasGemini) ||
+    (envProvider === "openai" && hasOpenAI);
+
+  if (envProvider && (envProvider === "claude" || envProvider === "gemini" || envProvider === "openai")) {
+    if (forcedHasKey) return envProvider;
+    // Provider forzato ma senza chiave: invece di disattivare del tutto l'AI
+    // (che fa sparire l'assistente), si ripiega sull'auto-detect degli altri
+    // provider configurati.
+    logger.warn(
+      `AI_PROVIDER="${envProvider}" richiesto ma la relativa chiave API non è configurata: ` +
+        `ripiego sull'auto-detect.`,
+    );
+  }
+
   // Auto-detect priority: Gemini → OpenAI → Claude
   if (hasGemini) return "gemini";
   if (hasOpenAI) return "openai";
@@ -88,7 +101,7 @@ export const CAMPI_OBBLIGATORI_GIORNATA = [
 ];
 
 // ─── Helper: chiama l'AI con il provider attivo ───────────────────────────────
-async function callAI(prompt: string, maxTokens = 3000, systemPrompt?: string): Promise<string> {
+export async function callAI(prompt: string, maxTokens = 3000, systemPrompt?: string): Promise<string> {
   if (AI_PROVIDER === "gemini") {
     return generateWithGemini(prompt, systemPrompt);
   }
@@ -129,6 +142,62 @@ function parseJsonResponse(raw: string): Record<string, unknown> {
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error("Risposta AI non in formato JSON");
   return JSON.parse(jsonMatch[0]);
+}
+
+// ─── Match semantico placeholder → campo esistente (per "Elenco US") ──────────
+export type AIFieldMatch = { key: string; label: string; confidence: "alta" | "media" | "bassa" };
+
+/**
+ * Per ciascun placeholder candidato, chiede all'AI se corrisponde per significato (anche
+ * sinonimi) a uno dei campi noti — a differenza del confronto per stringhe (deterministico,
+ * vedi field_similarity.ts), qui si intende catturare casi come "note" ↔ "osservazioni".
+ */
+export async function matchFieldsWithAI(
+  candidates: string[],
+  knownFields: { key: string; label: string }[],
+): Promise<Record<string, AIFieldMatch | null>> {
+  if (!AI_AVAILABLE) {
+    throw new Error("Nessun provider AI configurato.");
+  }
+  if (candidates.length === 0) return {};
+
+  const fieldsList = knownFields.map((f) => `- ${f.key} (${f.label})`).join("\n");
+  const candidatesList = candidates.map((c) => `- ${c}`).join("\n");
+
+  const prompt = `Sei un assistente che aiuta a evitare campi duplicati in un archivio di scavo archeologico.
+Di seguito una lista di CAMPI GIA' ESISTENTI (chiave e descrizione):
+${fieldsList}
+
+E una lista di NUOVI PLACEHOLDER trovati in un template, di cui non è ancora chiaro se corrispondano
+a uno dei campi esistenti (anche come sinonimo o forma abbreviata) oppure siano concettualmente nuovi:
+${candidatesList}
+
+Per ciascun placeholder, indica se corrisponde per SIGNIFICATO (non solo somiglianza testuale) a uno
+dei campi esistenti. Rispondi SOLO con un oggetto JSON, senza altro testo, con questa forma:
+{"matches": {"<placeholder>": {"key": "<chiave campo esistente>", "confidence": "alta|media|bassa"} | null, ...}}
+Usa null se nessun campo esistente corrisponde davvero per significato.`;
+
+  const raw = await callAI(prompt, 2000, "Rispondi sempre e solo con JSON valido, nessun testo extra.");
+  const parsed = parseJsonResponse(raw) as { matches?: Record<string, { key: string; confidence?: string } | null> };
+  const matches = parsed.matches && typeof parsed.matches === "object" ? parsed.matches : {};
+
+  const knownByKey = new Map(knownFields.map((f) => [f.key, f]));
+  const out: Record<string, AIFieldMatch | null> = {};
+  for (const candidate of candidates) {
+    const raw = matches[candidate];
+    if (!raw || typeof raw !== "object" || !raw.key) {
+      out[candidate] = null;
+      continue;
+    }
+    const known = knownByKey.get(raw.key);
+    if (!known) {
+      out[candidate] = null;
+      continue;
+    }
+    const confidence = raw.confidence === "alta" || raw.confidence === "bassa" ? raw.confidence : "media";
+    out[candidate] = { key: known.key, label: known.label, confidence };
+  }
+  return out;
 }
 
 export async function inferMissingFields(
@@ -201,6 +270,34 @@ Rispondi SOLO con JSON:
       message: error instanceof Error ? error.message : String(error),
     });
     return Object.fromEntries(compactMissing.map((field) => [field, null]));
+  }
+}
+
+// ─── Deduzione obiettivo giornata dal testo narrativo ───────────────────────
+export async function inferGiornataObiettivo(attivitaSvolta: string): Promise<string | null> {
+  if (!attivitaSvolta?.trim()) return null;
+  if (!AI_AVAILABLE) return null;
+
+  let systemPrompt = "Sei un assistente specializzato in archeologia professionale.";
+  try { systemPrompt = getSetting("system_prompt") || systemPrompt; } catch { /* keep fallback */ }
+
+  const prompt = `Leggi il seguente resoconto di una giornata di scavo archeologico e restituisci in 3-6 parole l'obiettivo principale della giornata (es. "pulizia superficiale settore nord", "scavo stratigrafico US 12", "rilievo fotogrammetrico", "documentazione tombe", ecc.).
+
+TESTO:
+"""
+${attivitaSvolta.slice(0, 1500)}
+"""
+
+Rispondi SOLO con JSON: {"obiettivo": "..."}`;
+
+  try {
+    const raw = await callAI(prompt, 120, systemPrompt);
+    const parsed = parseJsonResponse(raw);
+    const val = parsed?.obiettivo;
+    if (typeof val === "string" && val.trim()) return val.trim();
+    return null;
+  } catch {
+    return null;
   }
 }
 
@@ -286,24 +383,40 @@ Rispondi SOLO con questo JSON (nessun testo prima o dopo):
 }
 
 // ─── Analisi e formattazione report giornaliero ───────────────────────────────
+function parseJsonArray(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const p = JSON.parse(raw);
+    if (Array.isArray(p)) return p.map(String);
+  } catch { /* ignore */ }
+  return raw.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
 export async function analizzaTestoGiornata(
   giornata: Giornata,
   usList: UnitaStratigrafica[],
   qcIssues: { livello: string; messaggio: string }[],
   mapSnapshotsSummary?: string,
 ): Promise<{ reportFormattato: string; campiMancanti: string[]; note: string }> {
-  let operatori = "NON INSERITI";
-  try {
-    const ops = JSON.parse(giornata.operatori || "[]");
-    operatori = Array.isArray(ops) && ops.length > 0 ? ops.join(", ") : giornata.operatori || "NON INSERITI";
-  } catch { operatori = giornata.operatori || "NON INSERITI"; }
+  // Compatibilità: legge sia scavatori (nuovo) che operatori (legacy)
+  const scavatori = parseJsonArray(giornata.scavatori).join(", ") || parseJsonArray(giornata.operatori).join(", ") || "NON INSERITI";
+  const archeologi = parseJsonArray(giornata.archeologi).join(", ") || "NON INSERITI";
 
   const datiGiornata = `
 DATA: ${giornata.data || "NON INSERITA"}
-OPERATORI: ${operatori}
+ORA INIZIO: ${giornata.oraInizio || "nd"}
+ORA FINE: ${giornata.oraFine || "nd"}
+ARCHEOLOGO COORDINATORE: ${giornata.archeologoCoordinatore || "NON INSERITO"}
+ARCHEOLOGI: ${archeologi}
+SCAVATORI: ${scavatori}
+TOPOGRAFO: ${giornata.topografo || "assente"}
+TIPO SCAVO: ${giornata.tipoScavo || "nd"}
+ESCAVATORE: ${giornata.escavatore || "assente"}
+OBIETTIVO GIORNATA: ${giornata.obiettivo || "non specificato"}
 CONDIZIONI METEO: ${giornata.condMeteo || "NON INSERITE"}
 SETTORE: ${giornata.settore || "NON INSERITO"}
-NOTE OPERATIVE: ${giornata.note || "NON INSERITE"}
+ATTIVITÀ SVOLTA: ${giornata.attivitaSvolta || "NON INSERITA"}
+NOTE OPERATIVE: ${giornata.note || "nessuna"}
   `.trim();
 
   const usRiassunto = usList.length > 0
@@ -375,5 +488,261 @@ Rispondi SOLO con questo JSON (nessun testo prima o dopo):
     const msg = err instanceof Error ? err.message : String(err);
     logger.error("analizzaTestoGiornata fallita", { err: msg });
     throw new Error(`Impossibile analizzare il report giornaliero con l'AI. Causa: ${msg}`);
+  }
+}
+
+// ─── Report settimanale personalizzato (modello custom) ──────────────────────
+
+export async function generateReportSettimanaleCustom(input: {
+  cantiere: import("@shared/schema").Cantiere;
+  weekStart: string;
+  weekEnd: string;
+  entries: Array<{
+    giornata: import("@shared/schema").Giornata;
+    reportFormattato: string;
+    usSchede?: import("@shared/schema").UnitaStratigrafica[];
+  }>;
+}): Promise<string> {
+  if (!AI_AVAILABLE) throw new Error("Nessun provider AI configurato.");
+
+  let systemPrompt = "Sei un assistente specializzato in archeologia professionale.";
+  try { systemPrompt = getSetting("system_prompt") || systemPrompt; } catch { /* keep default */ }
+
+  // Raccoglie personale unico della settimana
+  const tuttiScavatori = new Set<string>();
+  const tuttiArcheologi = new Set<string>();
+  for (const { giornata } of input.entries) {
+    parseJsonArray(giornata.scavatori || giornata.operatori).forEach((o) => tuttiScavatori.add(o));
+    parseJsonArray(giornata.archeologi).forEach((o) => tuttiArcheologi.add(o));
+  }
+
+  const riassuntoGiornate = input.entries.map(({ giornata, reportFormattato, usSchede }) => {
+    const linee = [
+      `--- ${giornata.data} ---`,
+      giornata.oraInizio ? `Orario: ${giornata.oraInizio}${giornata.oraFine ? " – " + giornata.oraFine : ""}` : "",
+      giornata.obiettivo ? `Obiettivo: ${giornata.obiettivo}` : "",
+      giornata.tipoScavo ? `Tipo scavo: ${giornata.tipoScavo}${giornata.escavatore ? " – escavatore: " + giornata.escavatore : ""}` : "",
+      giornata.condMeteo ? `Meteo: ${giornata.condMeteo}` : "",
+      giornata.settore ? `Settore: ${giornata.settore}` : "",
+      `\n${reportFormattato || giornata.attivitaSvolta || giornata.note || "nessuna nota"}`,
+    ].filter(Boolean);
+
+    if (usSchede && usSchede.length > 0) {
+      linee.push("\nUNITÀ STRATIGRAFICHE DOCUMENTATE:");
+      for (const us of usSchede) {
+        const usLinee = [
+          `  US ${us.codiceUS}${us.tipo ? ` (${us.tipo})` : ""}`,
+          us.definizione ? `    Definizione: ${us.definizione}` : "",
+          us.descrizione ? `    Descrizione: ${us.descrizione}` : "",
+          us.interpretazione ? `    Interpretazione: ${us.interpretazione}` : "",
+          us.epoca ? `    Epoca: ${us.epoca}` : "",
+          us.datazione ? `    Datazione: ${us.datazione}` : "",
+        ].filter(Boolean);
+        linee.push(usLinee.join("\n"));
+      }
+    }
+
+    return linee.join("\n");
+  }).join("\n\n");
+
+  // Legge il formato settimana dal DB se presente
+  let weekFormat = "";
+  try { weekFormat = getSetting("week_report_format") || ""; } catch { /* keep empty */ }
+
+  const prompt = `${weekFormat ? weekFormat + "\n\n---\n\n" : ""}Stai scrivendo il corpo principale (sezione "Dettaglio delle attività") di un report settimanale di scavo.
+
+CANTIERE: ${input.cantiere.nome}
+LOCALITA': ${input.cantiere.localita}
+COMMITTENTE: ${input.cantiere.committente || "nd"}
+PERIODO: dal ${input.weekStart} al ${input.weekEnd}
+ARCHEOLOGO COORDINATORE: ${input.entries[0]?.giornata.archeologoCoordinatore || "nd"}
+ARCHEOLOGI: ${Array.from(tuttiArcheologi).join(", ") || "non specificati"}
+SCAVATORI: ${Array.from(tuttiScavatori).join(", ") || "non specificati"}
+
+DIARI GIORNALIERI (con unità stratigrafiche documentate):
+${riassuntoGiornate}
+
+Scrivi un testo fluido, tecnico e professionale che sintetizzi le attività svolte nel corso della settimana. Il testo deve:
+- Essere in italiano, in terza persona, con il registro formale tipico dei report di scavo italiani
+- Descrivere le operazioni giorno per giorno in modo sintetico ma preciso
+- Citare esplicitamente le unità stratigrafiche documentate (es. "è stata messa in luce l'US 105, interpretata come strato di crollo...") quando disponibili
+- Integrare interpretazioni stratigrafiche, datazioni e materiali significativi
+- Concludere con una sintesi dello stato di avanzamento dello scavo e delle prospettive di indagine
+- Non includere titoli, intestazioni o elenchi puntati — solo testo continuo
+Lunghezza: 4-6 paragrafi.`;
+
+  try {
+    return await callAI(prompt, 1500, systemPrompt);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Impossibile generare il testo AI settimanale. Causa: ${msg}`);
+  }
+}
+
+// ─── Estrazione campi giornata da testo (import DOCX) ───────────────────────
+
+export type GiornataAIField = {
+  value: string;
+  confidence: "alta" | "media" | "bassa";
+  source: string;
+};
+
+export type GiornataAIPreview = {
+  data?: GiornataAIField;
+  oraInizio?: GiornataAIField;
+  oraFine?: GiornataAIField;
+  settore?: GiornataAIField;
+  condMeteo?: GiornataAIField;
+  archeologoCoordinatore?: GiornataAIField;
+  archeologi?: GiornataAIField;
+  scavatori?: GiornataAIField;
+  topografo?: GiornataAIField;
+  escavatore?: GiornataAIField;
+  tipoScavo?: GiornataAIField;
+  obiettivo?: GiornataAIField;
+  attivitaSvolta?: GiornataAIField;
+  note?: GiornataAIField;
+  campiMancanti: string[];
+  testoOriginale: string;
+};
+
+export async function estraiCampiGiornataFromText(testo: string): Promise<GiornataAIPreview> {
+  if (!AI_AVAILABLE) throw new Error("Nessun provider AI configurato.");
+  if (!testo.trim()) throw new Error("Testo vuoto: impossibile estrarre i campi.");
+
+  let systemPrompt = "Sei un assistente specializzato in archeologia professionale.";
+  try { systemPrompt = getSetting("system_prompt") || systemPrompt; } catch { /* keep default */ }
+
+  const prompt = `Analizza il testo seguente di un diario/giornale di scavo e estrai i campi della giornata.
+
+TESTO:
+${testo.slice(0, 8000)}
+
+Per ogni campo trovato, indica:
+- value: il valore estratto (stringa)
+- confidence: "alta" se esplicitamente scritto, "media" se dedotto, "bassa" se incerto
+- source: breve spiegazione di dove/come hai trovato il valore
+
+I campi da estrarre sono:
+- data: data della giornata (formato YYYY-MM-DD)
+- oraInizio: ora di inizio lavori (formato HH:MM)
+- oraFine: ora di fine lavori (formato HH:MM)
+- settore: settore o area di scavo
+- condMeteo: condizioni meteo (soleggiato, nuvoloso, variabile, pioggia, ventoso)
+- archeologoCoordinatore: nome dell'archeologo coordinatore
+- archeologi: archeologi presenti (nomi separati da virgola)
+- scavatori: scavatori/operai presenti (nomi separati da virgola)
+- topografo: nome del topografo (se presente)
+- escavatore: tipo/marca di escavatore meccanico (se presente)
+- tipoScavo: tipo di scavo (manuale, meccanico, misto)
+- obiettivo: obiettivo della giornata
+- attivitaSvolta: attività svolte durante la giornata
+- note: note operative o osservazioni
+
+Rispondi SOLO con questo JSON (nessun testo prima o dopo):
+{
+  "campiMancanti": ["campo1", "campo2"],
+  "fields": {
+    "data": { "value": "2024-03-15", "confidence": "alta", "source": "..." },
+    "settore": { "value": "A1", "confidence": "media", "source": "..." }
+  }
+}`;
+
+  const raw = await callAI(prompt, 2000, systemPrompt);
+  const parsed = parseJsonResponse(raw);
+
+  const fields = (parsed.fields || {}) as Record<string, { value?: string; confidence?: string; source?: string }>;
+  const campiMancanti = Array.isArray(parsed.campiMancanti) ? (parsed.campiMancanti as string[]) : [];
+
+  const GIORNATA_FIELD_KEYS = [
+    "data", "oraInizio", "oraFine", "settore", "condMeteo",
+    "archeologoCoordinatore", "archeologi", "scavatori", "topografo",
+    "escavatore", "tipoScavo", "obiettivo", "attivitaSvolta", "note",
+  ] as const;
+
+  type GiornataFieldKey = typeof GIORNATA_FIELD_KEYS[number];
+
+  const normalizeConf = (v: unknown): "alta" | "media" | "bassa" => {
+    const s = String(v || "").toLowerCase();
+    if (s === "alta" || s === "high") return "alta";
+    if (s === "bassa" || s === "low") return "bassa";
+    return "media";
+  };
+
+  const result: GiornataAIPreview = { campiMancanti, testoOriginale: testo };
+  for (const key of GIORNATA_FIELD_KEYS) {
+    const raw = fields[key];
+    if (!raw || !String(raw.value || "").trim()) continue;
+    result[key as GiornataFieldKey] = {
+      value: String(raw.value).trim(),
+      confidence: normalizeConf(raw.confidence),
+      source: String(raw.source || "Deduzione automatica").trim(),
+    };
+  }
+
+  return result;
+}
+
+// ─── QC relazioni stratigrafiche con AI ──────────────────────────────────────
+
+export async function analizzaRelazioniQC(
+  usList: UnitaStratigrafica[],
+): Promise<string> {
+  if (!AI_AVAILABLE) {
+    throw new Error("Nessun provider AI configurato.");
+  }
+
+  let systemPrompt = "Sei un assistente specializzato in archeologia stratigrafica.";
+  let qcRelazioniPrompt = "";
+  try {
+    systemPrompt = getSetting("system_prompt") || systemPrompt;
+    qcRelazioniPrompt = getSetting("qc_relazioni_prompt") || "";
+  } catch { /* keep defaults */ }
+
+  // Build a compact summary of all US and their relation fields
+  function parseSchedaDataAI(raw: string | null | undefined): Record<string, unknown> {
+    if (!raw) return {};
+    try { return JSON.parse(raw) as Record<string, unknown>; } catch { return {}; }
+  }
+
+  function codesFromRaw(raw: unknown): string {
+    if (!raw) return "";
+    if (Array.isArray(raw)) return raw.join(", ");
+    const s = String(raw).trim();
+    try {
+      const p = JSON.parse(s);
+      if (Array.isArray(p)) return p.join(", ");
+    } catch { /* plain text */ }
+    return s;
+  }
+
+  const rows = usList.map((us) => {
+    const sd = parseSchedaDataAI(us.schedaData);
+    return [
+      `US: ${us.codiceUS}`,
+      us.copre ? `  copre: ${codesFromRaw(us.copre)}` : "",
+      us.coperto_da ? `  coperto_da: ${codesFromRaw(us.coperto_da)}` : "",
+      sd.taglia ? `  taglia: ${codesFromRaw(sd.taglia)}` : "",
+      sd.tagliatoDa ? `  tagliato_da: ${codesFromRaw(sd.tagliatoDa)}` : "",
+      sd.riempie ? `  riempie: ${codesFromRaw(sd.riempie)}` : "",
+      sd.riempitoDa ? `  riempita_da: ${codesFromRaw(sd.riempitoDa)}` : "",
+      sd.siAppoggiaA ? `  si_appoggia_a: ${codesFromRaw(sd.siAppoggiaA)}` : "",
+      sd.gliSiAppoggia ? `  gli_si_appoggia: ${codesFromRaw(sd.gliSiAppoggia)}` : "",
+      us.si_lega_a ? `  si_lega_a: ${codesFromRaw(us.si_lega_a)}` : "",
+      us.uguale_a ? `  uguale_a: ${codesFromRaw(us.uguale_a)}` : "",
+      sd.posterioreA ? `  posteriore_a: ${codesFromRaw(sd.posterioreA)}` : "",
+      sd.anterioreA ? `  anteriore_a: ${codesFromRaw(sd.anterioreA)}` : "",
+    ].filter(Boolean).join("\n");
+  });
+
+  const prompt = `${qcRelazioniPrompt ? qcRelazioniPrompt + "\n\n" : ""}Analizza le seguenti relazioni stratigrafiche e individua eventuali incongruenze:\n\n${rows.join("\n\n")}`;
+
+  try {
+    const result = await callAI(prompt, 2000, systemPrompt);
+    return result.trim();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error("analizzaRelazioniQC fallita", { err: msg });
+    throw new Error(`Impossibile eseguire il QC AI delle relazioni. Causa: ${msg}`);
   }
 }

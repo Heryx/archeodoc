@@ -1,0 +1,67 @@
+{
+  "$comment": "Fonte di verita' unica per la validazione dell'interoperabilita' QGIS <-> ArcheoDoc. Letta sia dal plugin QGIS (Python) sia dal server ArcheoDoc (TypeScript, via shared/qgis_interop/rules.ts). Non duplicare questi valori altrove: se cambia una regola, cambia solo qui.",
+  "version": 1,
+  "usCodeField": {
+    "$comment": "Nomi di campo attributo accettati come contenente il codice US su un layer vettoriale, in ordine di preferenza. Deve restare sincronizzato con guessUSCode in client/src/components/webmap/modules/FeaturePopup.tsx.",
+    "candidates": [
+      "codice_us",
+      "codiceus",
+      "codice",
+      "us_code",
+      "us",
+      "us_id",
+      "id_us",
+      "codiceUS",
+      "codiceUs"
+    ],
+    "recommended": "us_code"
+  },
+  "usCodePrefixes": {
+    "$comment": "Prefissi US canonici riconosciuti da shared/normalize_us_code.ts. Un valore che non normalizza a nessuno di questi (e non e' puramente numerico) genera un warning nel checker, non un errore bloccante: normalizeUSCode() e' tollerante.",
+    "canonical": ["US", "USM", "USR", "USS", "UVS", "UT", "SAS", "F", "T", "SB", "SF"]
+  },
+  "usCodeLooseValidationRegex": {
+    "$comment": "Pattern permissivo usato dal checker QGIS per un controllo rapido offline, senza reimplementare normalize_us_code.ts in Python. Un valore che NON matcha viene segnalato come warning 'formato codice US insolito', da verificare manualmente.",
+    "pattern": "^(US|USM|USR|USS|UVS|UT|SAS|F|T|SB|SF)?\\s?0*\\d+[A-Za-z]?$",
+    "flags": "i"
+  },
+  "requiredCrs": {
+    "$comment": "CRS richiesto per i layer vettoriali che devono collegarsi alle US. Il progetto QGIS puo' lavorare in qualsiasi CRS, ma il checker segnala se un layer con campo US differisce dal CRS del progetto o non ha CRS definito.",
+    "vectorLayersMustShareProjectCrs": true,
+    "requireCrsDefined": true
+  },
+  "vectorFormats": {
+    "supported": ["gpkg", "shp", "geojson", "kml", "csv"],
+    "$comment": "csv e' supportato solo se privo di geometria (tabella attributi pura) oppure con colonne WKT/lat-lon; il checker lo segnala come layer 'solo attributi'."
+  },
+  "rasterFormats": {
+    "supported": ["tif", "tiff", "png", "jpg", "jpeg"],
+    "externalWorldFileExtensions": {
+      "tif": null,
+      "tiff": null,
+      "png": ["pgw", "pngw", "wld"],
+      "jpg": ["jgw", "wld"],
+      "jpeg": ["jgw", "wld"]
+    },
+    "$comment": "tif/tiff sono georeferenziati internamente (GeoTIFF); png/jpg richiedono un world file esterno o un .aux.xml. Il checker segnala un raster come 'non georeferenziato' se manca sia il world file sia i tag interni."
+  },
+  "geometryValidity": {
+    "rejectSelfIntersections": true,
+    "warnOnMultipartWhereSingleExpected": true,
+    "requireNonEmptyGeometry": true
+  },
+  "duplicateUsCodePolicy": {
+    "$comment": "Una US puo' legittimamente corrispondere a piu' feature sullo stesso layer (es. poligoni non contigui che appartengono alla stessa unita' stratigrafica): non e' un errore, solo un'informazione utile. Idem tra layer diversi (es. perimetro + campione).",
+    "sameLayerDuplicateIsError": false,
+    "crossLayerDuplicateIsAllowed": true
+  },
+  "interopFolder": {
+    "$comment": "Sottocartella creata dal plugin QGIS accanto al file di progetto (.qgz/.qgs), mai dentro il progetto stesso. Contiene solo file generati automaticamente, rigenerati ad ogni check: l'utente non li modifica a mano. NON usare un nome che inizia con '.': Chromium ignora le cartelle nascoste quando si seleziona una directory con l'input webkitdirectory, quindi il manifest non verrebbe mai caricato dal browser.",
+    "name": "archeodoc",
+    "files": {
+      "manifest": "manifest.json",
+      "usLinks": "us_links.json",
+      "report": "report.json"
+    }
+  }
+}

@@ -10,7 +10,22 @@ import {
   getStorageForProject,
   type ProjectDefinition,
 } from "../projects";
-import { getUSModel, listUSModels } from "../us_models";
+import { getUSModel, listUSModels, createCustomUSModel, updateCustomUSModel, normalizeFieldKey } from "../us_models";
+import { usTemplatePath as _usTemplatePathUtil, resolveUSTemplatePath as _resolveUSTemplatePath } from "../us_template_path";
+import {
+  elencoUsTemplatePath,
+  elencoUsTemplateOriginalPath,
+  readElencoTemplateChoice,
+  writeElencoTemplateChoice,
+  clearElencoTemplateChoice,
+} from "../elenco_us_template_path";
+import { detectTemplatePlaceholders, humanizeFieldKey } from "../docx_template_utils";
+import { extractTemplateLoopColumns } from "../docx_table_read";
+import { findSimilarField } from "../field_similarity";
+import { resolveElencoColumns, buildElencoRowValues, knownFieldsForCantiere } from "../elenco_columns";
+import { analyzeElencoTemplate, repairElencoTemplate, describeRepairs } from "../elenco_template_repair";
+import { rewriteTemplatePlaceholder } from "../docx_template_rewrite";
+import { matchFieldsWithAI, AI_AVAILABLE } from "../ai";
 import { BASE_US_MODEL_KEY } from "@shared/us_models";
 import { buildEntityZodSchema } from "@shared/validation/buildZodSchema";
 import { getUsTopLevelThesaurusFromSchema } from "@shared/us_schema_thesaurus";
@@ -24,6 +39,8 @@ import {
 } from "../geopackage_import";
 import { exportSketchesToGeoPackage } from "../geopackage_export";
 import { insertImageIntoDocx } from "../docx_image_insert";
+import { syncInverseRelations, computePendingInverses, applyPendingInverses } from "../relations_sync";
+import { applyUsInlineFieldEdit } from "../us_field_edit";
 
 type TransferMode = "copy" | "move";
 type USSaveMode = "draft" | "final";
@@ -154,6 +171,7 @@ type FieldworkHelpers = {
   ) => unknown;
   fileToTipo: (mimeType: string, originalName: string) => string;
   moveUploadedFileToCantiereDir: (project: ProjectDefinition, cantiereId: number, file: Express.Multer.File) => string;
+  moveUploadedFileToCantiereDateDir: (project: ProjectDefinition, cantiereId: number, dateStr: string, file: Express.Multer.File) => string;
   cleanupUploadedTempFiles: (files: Express.Multer.File[] | undefined) => void;
 };
 
@@ -173,6 +191,7 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
     transferCantiere,
     fileToTipo,
     moveUploadedFileToCantiereDir,
+    moveUploadedFileToCantiereDateDir,
     cleanupUploadedTempFiles,
   } = helpers;
 
@@ -474,7 +493,7 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
     const model = getUSModel(ctx.project, assignedKey);
     res.json({
       cantiereId: cid,
-      modelKey: model.key,
+      modelKey: assignedKey,
       model,
       availableModels: listUSModels(ctx.project),
     });
@@ -503,6 +522,447 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
       modelKey: model.key,
       model,
     });
+  }));
+
+  // ─── Template DOCX scheda US ─────────────────────────────────────────────────
+
+  const usTemplatePath = _usTemplatePathUtil;
+
+  // ── Endpoint template GENERICO (retrocompatibilità) ──────────────────────────
+
+  // GET — verifica se esiste un template caricato (generico o per-modello)
+  app.get("/api/cantieri/:cid/us-template", withProject((ctx, _req, res) => {
+    const templatePath = usTemplatePath(ctx.project);
+    const exists = fs.existsSync(templatePath);
+    if (!exists) return res.json({ exists: false });
+    const stat = fs.statSync(templatePath);
+    res.json({ exists: true, sizeBytes: stat.size, updatedAt: stat.mtime.toISOString() });
+  }));
+
+  // POST — carica un template DOCX generico
+  app.post("/api/cantieri/:cid/us-template", upload.single("template"), withProject((ctx, req, res) => {
+    const file = (req as any).file as Express.Multer.File | undefined;
+    if (!file) return res.status(400).json({ error: "Nessun file ricevuto" });
+    if (!file.originalname.toLowerCase().endsWith(".docx")) {
+      fs.unlinkSync(file.path);
+      return res.status(400).json({ error: "Il file deve essere un .docx" });
+    }
+    const dest = usTemplatePath(ctx.project);
+    if (!fs.existsSync(path.dirname(dest))) fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.renameSync(file.path, dest);
+    const stat = fs.statSync(dest);
+    res.json({ ok: true, sizeBytes: stat.size, updatedAt: stat.mtime.toISOString() });
+  }));
+
+  // DELETE — rimuove il template generico
+  app.delete("/api/cantieri/:cid/us-template", withProject((ctx, _req, res) => {
+    const templatePath = usTemplatePath(ctx.project);
+    if (!fs.existsSync(templatePath)) return res.status(404).json({ error: "Template non trovato" });
+    fs.unlinkSync(templatePath);
+    res.json({ ok: true });
+  }));
+
+  // GET — diagnostica placeholder template generico
+  app.get("/api/cantieri/:cid/us-template/placeholders", withProject(async (ctx, _req, res) => {
+    const templatePath = usTemplatePath(ctx.project);
+    if (!fs.existsSync(templatePath)) return res.status(404).json({ error: "Template non trovato" });
+    try {
+      const tags = await detectTemplatePlaceholders(templatePath);
+      res.json({ ok: true, tags });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Errore diagnostica", detail: String(e) });
+    }
+  }));
+
+  // ── Endpoint template PER-MODELLO ─────────────────────────────────────────────
+
+  // GET — verifica se esiste un template per un modello specifico
+  app.get("/api/cantieri/:cid/us-template/:modelKey", withProject((ctx, req, res) => {
+    const modelKey = String(req.params.modelKey);
+    const templatePath = usTemplatePath(ctx.project, modelKey);
+    const exists = fs.existsSync(templatePath);
+    if (!exists) return res.json({ exists: false, modelKey });
+    const stat = fs.statSync(templatePath);
+    res.json({ exists: true, modelKey, sizeBytes: stat.size, updatedAt: stat.mtime.toISOString() });
+  }));
+
+  // POST — carica un template DOCX per un modello specifico
+  // POST — crea modello custom dai placeholder del template DOCX caricato
+  // DEVE stare prima di /:modelKey per non essere intercettato come modelKey="create-model"
+  app.post("/api/cantieri/:cid/us-template/create-model", withProject(async (ctx, req, res) => {
+    const templatePath = usTemplatePath(ctx.project);
+    if (!fs.existsSync(templatePath)) {
+      return res.status(404).json({ error: "Nessun template DOCX caricato per questo cantiere" });
+    }
+
+    const modelName = String(req.body?.name || "").trim();
+    if (!modelName) {
+      return res.status(400).json({ error: "Nome modello obbligatorio" });
+    }
+
+    // Chiavi da ESCLUDERE dal modello: identificazione US (gestita dal form base),
+    // campi relazione (gestiti da USRelazioni), e metadati export/cantiere (non editabili).
+    const BASE_KNOWN_KEYS = new Set([
+      // Identificazione — gestita sempre dal blocco fisso in cima al form
+      "codiceUS", "settore", "area", "saggio", "quadrati", "localita", "anno",
+      // Relazioni — gestite da USRelazioni
+      "uguale_a", "si_lega_a", "coperto_da", "copre",
+      "tagliatoDa", "taglia", "riempitoDa", "riempie",
+      "gliSiAppoggia", "siAppoggiaA", "posterioreA", "anterioreA",
+      // Metadati export/cantiere — non editabili dall'utente
+      "cantiereCodice", "cantiereNome", "dataExport",
+      "nCatalogoGenerale", "nCatalogoInternazionale",
+      "soprintendenza", "haFoto",
+    ]);
+
+    try {
+      const PizZip = (await import("pizzip")).default;
+      const Docxtemplater = (await import("docxtemplater")).default;
+      const InspectModule = (await import("docxtemplater/js/inspect-module.js")).default;
+      const content = fs.readFileSync(templatePath);
+      const zip = new PizZip(content);
+      const iModule = new InspectModule();
+      const doc = new Docxtemplater(zip, {
+        paragraphLoop: true, linebreaks: true, nullGetter: () => "", modules: [iModule],
+      });
+      doc.compile();
+      const tags: Record<string, unknown> = iModule.getAllTags();
+
+      // Placeholder che per convenzione sono testo lungo (textarea)
+      const TEXTAREA_KEYS = new Set([
+        "osservazioni","interpretazione","descrizione","definizione","criteriDistinzione",
+        "modoFormazione","modoFormazioneOrigine","materialiRinvenuti","campioni",
+        "datiQuantitativiReperti","altroScavo","sequenzaFisica","piante","sezioni",
+        "prospetti","tabelleMaterialiRa","tabelleMaterialiN",
+      ]);
+
+      // Filtra i placeholder che non sono campi base noti (relazioni, metadati export)
+      const extraFields = Object.keys(tags)
+        .filter((k) => !BASE_KNOWN_KEYS.has(k))
+        .map((k) => ({
+          key: k,
+          label: humanizeFieldKey(k),
+          type: (TEXTAREA_KEYS.has(k) ? "textarea" : "text") as "text" | "textarea",
+        }));
+
+      const model = createCustomUSModel(ctx.project, {
+        name: modelName,
+        description: `Modello creato da template DOCX il ${new Date().toLocaleDateString("it-IT")}`,
+        fields: extraFields,
+      });
+
+      // Copia il template generico come template specifico del nuovo modello
+      const modelTemplateDest = usTemplatePath(ctx.project, model.key);
+      if (!fs.existsSync(modelTemplateDest)) {
+        fs.copyFileSync(templatePath, modelTemplateDest);
+      }
+
+      res.json({ ok: true, model, detectedPlaceholders: Object.keys(tags), extraFields });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Errore analisi template", detail: String(e) });
+    }
+  }));
+
+  // POST — carica un template DOCX per un modello specifico
+  app.post("/api/cantieri/:cid/us-template/:modelKey", upload.single("template"), withProject((ctx, req, res) => {
+    const modelKey = String(req.params.modelKey);
+    const file = (req as any).file as Express.Multer.File | undefined;
+    if (!file) return res.status(400).json({ error: "Nessun file ricevuto" });
+    if (!file.originalname.toLowerCase().endsWith(".docx")) {
+      fs.unlinkSync(file.path);
+      return res.status(400).json({ error: "Il file deve essere un .docx" });
+    }
+    const dest = usTemplatePath(ctx.project, modelKey);
+    if (!fs.existsSync(path.dirname(dest))) fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.renameSync(file.path, dest);
+    const stat = fs.statSync(dest);
+    res.json({ ok: true, modelKey, sizeBytes: stat.size, updatedAt: stat.mtime.toISOString() });
+  }));
+
+  // DELETE — rimuove il template di un modello specifico
+  app.delete("/api/cantieri/:cid/us-template/:modelKey", withProject((ctx, req, res) => {
+    const modelKey = String(req.params.modelKey);
+    const templatePath = usTemplatePath(ctx.project, modelKey);
+    if (!fs.existsSync(templatePath)) return res.status(404).json({ error: "Template non trovato" });
+    fs.unlinkSync(templatePath);
+    res.json({ ok: true, modelKey });
+  }));
+
+  // GET — diagnostica placeholder template per modello specifico
+  app.get("/api/cantieri/:cid/us-template/:modelKey/placeholders", withProject(async (ctx, req, res) => {
+    const modelKey = String(req.params.modelKey);
+    const templatePath = usTemplatePath(ctx.project, modelKey);
+    if (!fs.existsSync(templatePath)) return res.status(404).json({ error: "Template non trovato per questo modello" });
+    try {
+      const tags = await detectTemplatePlaceholders(templatePath);
+      res.json({ ok: true, modelKey, tags });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Errore diagnostica", detail: String(e) });
+    }
+  }));
+
+  // ── Endpoint template ELENCO US (tabella) ─────────────────────────────────────
+
+  // GET — verifica se esiste un template elenco caricato
+  app.get("/api/cantieri/:cid/elenco-template", withProject((ctx, _req, res) => {
+    const templatePath = elencoUsTemplatePath(ctx.project);
+    const exists = fs.existsSync(templatePath);
+    if (!exists) return res.json({ exists: false });
+    const stat = fs.statSync(templatePath);
+    res.json({ exists: true, sizeBytes: stat.size, updatedAt: stat.mtime.toISOString() });
+  }));
+
+  // POST — carica/sostituisce il template elenco US
+  app.post("/api/cantieri/:cid/elenco-template", upload.single("template"), withProject((ctx, req, res) => {
+    const file = (req as any).file as Express.Multer.File | undefined;
+    if (!file) return res.status(400).json({ error: "Nessun file ricevuto" });
+    if (!file.originalname.toLowerCase().endsWith(".docx")) {
+      fs.unlinkSync(file.path);
+      return res.status(400).json({ error: "Il file deve essere un .docx" });
+    }
+    const dest = elencoUsTemplatePath(ctx.project);
+    if (!fs.existsSync(path.dirname(dest))) fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.renameSync(file.path, dest);
+    // Nuovo template ⇒ decade backup e scelta sulle colonne extra.
+    clearElencoTemplateChoice(ctx.project);
+    const stat = fs.statSync(dest);
+    res.json({ ok: true, sizeBytes: stat.size, updatedAt: stat.mtime.toISOString() });
+  }));
+
+  // DELETE — rimuove il template elenco US
+  app.delete("/api/cantieri/:cid/elenco-template", withProject((ctx, _req, res) => {
+    const templatePath = elencoUsTemplatePath(ctx.project);
+    if (!fs.existsSync(templatePath)) return res.status(404).json({ error: "Template non trovato" });
+    fs.unlinkSync(templatePath);
+    clearElencoTemplateChoice(ctx.project);
+    res.json({ ok: true });
+  }));
+
+  // ── Riparazione template Elenco US (loop incompleto / placeholder non validi) ─────────────
+
+  // GET — analisi del template: righe fuori dal ciclo, placeholder sconosciuti, scelta salvata
+  app.get("/api/cantieri/:cid/elenco-template/repair", withProject(async (ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const cantiere = ctx.storage.getCantiere(cid);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+    if (!fs.existsSync(elencoUsTemplatePath(ctx.project))) {
+      return res.json({ plan: null, summary: [], choice: null, canRestore: false });
+    }
+    const plan = await analyzeElencoTemplate(ctx.project, cantiere);
+    res.json({
+      plan: plan ? { orphanRows: plan.orphanRows, unknownPlaceholders: plan.unknownPlaceholders, needsRepair: plan.needsRepair } : null,
+      summary: plan?.needsRepair ? describeRepairs(plan) : [],
+      choice: readElencoTemplateChoice(ctx.project),
+      canRestore: fs.existsSync(elencoUsTemplateOriginalPath(ctx.project)),
+    });
+  }));
+
+  // POST — applica la scelta: "repair" corregge il template (con backup), "as-is" lo lascia com'è
+  app.post("/api/cantieri/:cid/elenco-template/repair", withProject(async (ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const cantiere = ctx.storage.getCantiere(cid);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const templatePath = elencoUsTemplatePath(ctx.project);
+    if (!fs.existsSync(templatePath)) return res.status(404).json({ error: "Template non trovato" });
+
+    const mode = req.body?.mode === "repair" ? "repair" : req.body?.mode === "as-is" ? "as-is" : null;
+    if (!mode) return res.status(400).json({ error: "mode deve essere 'repair' o 'as-is'" });
+
+    try {
+      if (mode === "repair") {
+        const { applied } = await repairElencoTemplate(ctx.project, cantiere);
+        res.json({ ok: true, applied, choice: readElencoTemplateChoice(ctx.project) });
+      } else {
+        writeElencoTemplateChoice(ctx.project, { mode: "as-is", repairs: [], decidedAt: new Date().toISOString() });
+        res.json({ ok: true, applied: [], choice: readElencoTemplateChoice(ctx.project) });
+      }
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Errore riparazione template" });
+    }
+  }));
+
+  // POST — ripristina il template originale (annulla la riparazione e la scelta)
+  app.post("/api/cantieri/:cid/elenco-template/restore-original", withProject((ctx, _req, res) => {
+    const templatePath = elencoUsTemplatePath(ctx.project);
+    const originalPath = elencoUsTemplateOriginalPath(ctx.project);
+    if (!fs.existsSync(originalPath)) return res.status(404).json({ error: "Nessun template originale da ripristinare" });
+    fs.copyFileSync(originalPath, templatePath);
+    clearElencoTemplateChoice(ctx.project);
+    res.json({ ok: true });
+  }));
+
+  // GET — diagnostica placeholder template elenco US
+  app.get("/api/cantieri/:cid/elenco-template/placeholders", withProject(async (ctx, _req, res) => {
+    const templatePath = elencoUsTemplatePath(ctx.project);
+    if (!fs.existsSync(templatePath)) return res.status(404).json({ error: "Template non trovato" });
+    try {
+      const tags = await detectTemplatePlaceholders(templatePath);
+      res.json({ ok: true, tags });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Errore diagnostica", detail: String(e) });
+    }
+  }));
+
+  // GET — colonne dinamiche dell'elenco US (dal template caricato, o le 3 colonne base se assente)
+  app.get("/api/cantieri/:cid/elenco-us/table", withProject(async (ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const cantiere = ctx.storage.getCantiere(cid);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const giornataIdRaw = req.query.giornataId;
+    const giornataId = typeof giornataIdRaw === "string" && giornataIdRaw.trim() ? Number(giornataIdRaw) : undefined;
+    const usList = ctx.storage.getUSList(cid, giornataId);
+
+    const columns = await resolveElencoColumns(ctx.project, cantiere, usList);
+    const rows = usList.map((us) => ({
+      id: us.id,
+      daRivedere: !!us.daRivedere,
+      values: buildElencoRowValues(columns, us, cantiere),
+    }));
+
+    res.json({ columns, rows });
+  }));
+
+  // GET — suggerimenti campi mancanti/simili per i placeholder del template elenco US (check deterministico)
+  app.get("/api/cantieri/:cid/elenco-template/field-suggestions", withProject(async (ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const cantiere = ctx.storage.getCantiere(cid);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const templatePath = elencoUsTemplatePath(ctx.project);
+    if (!fs.existsSync(templatePath)) return res.status(404).json({ error: "Template non trovato" });
+
+    const loopColumns = await extractTemplateLoopColumns(templatePath);
+    if (!loopColumns) {
+      return res.status(400).json({
+        error: "Il template elenco US non contiene un blocco di tabella con i tag {#tag}...{/tag}",
+      });
+    }
+
+    const flatKeys = Array.from(new Set(loopColumns.columnKeys.flat().filter((k): k is string => !!k)));
+    const knownFields = knownFieldsForCantiere(ctx.project, cantiere);
+    const knownKeySet = new Set(knownFields.map((f) => f.key));
+
+    const suggestions = flatKeys
+      .filter((key) => !knownKeySet.has(key))
+      .map((placeholder) => {
+        const match = findSimilarField(placeholder, knownFields);
+        const status: "new" | "possible" | "certain" = !match ? "new" : match.score >= 0.95 ? "certain" : "possible";
+        return { placeholder, status, match };
+      });
+
+    res.json({ suggestions });
+  }));
+
+  // POST — verifica con AI (in aggiunta al check deterministico) i placeholder rimasti "new"
+  app.post("/api/cantieri/:cid/elenco-template/field-suggestions/ai-check", withProject(async (ctx, req, res) => {
+    if (!AI_AVAILABLE) {
+      return res.status(400).json({ error: "Nessun provider AI configurato" });
+    }
+    const cid = Number(req.params.cid);
+    const cantiere = ctx.storage.getCantiere(cid);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const placeholders: string[] = Array.isArray(req.body?.placeholders)
+      ? req.body.placeholders.filter((p: unknown) => typeof p === "string")
+      : [];
+    if (placeholders.length === 0) return res.json({ suggestions: [] });
+
+    const knownFields = knownFieldsForCantiere(ctx.project, cantiere);
+
+    try {
+      const matches = await matchFieldsWithAI(placeholders, knownFields);
+      const suggestions = placeholders.map((placeholder) => ({ placeholder, match: matches[placeholder] ?? null }));
+      res.json({ suggestions });
+    } catch (e: any) {
+      res.status(502).json({ error: e?.message || "Errore verifica AI" });
+    }
+  }));
+
+  // POST — applica le decisioni prese sui placeholder (usa campo esistente / crea nuovo campo)
+  app.post("/api/cantieri/:cid/elenco-template/apply-field-decisions", withProject(async (ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const cantiere = ctx.storage.getCantiere(cid);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const templatePath = elencoUsTemplatePath(ctx.project);
+    if (!fs.existsSync(templatePath)) return res.status(404).json({ error: "Template non trovato" });
+
+    type FieldDecision = {
+      placeholder: string;
+      action: "use-existing" | "create-new";
+      existingKey?: string;
+      label?: string;
+    };
+    const decisions: FieldDecision[] = Array.isArray(req.body?.decisions) ? req.body.decisions : [];
+
+    const rewritten: string[] = [];
+    const errors: { placeholder: string; error: string }[] = [];
+    const newFields: { placeholder: string; key: string; label: string }[] = [];
+
+    for (const decision of decisions) {
+      if (!decision?.placeholder) continue;
+      try {
+        if (decision.action === "use-existing") {
+          if (!decision.existingKey) throw new Error("Campo esistente non specificato");
+          await rewriteTemplatePlaceholder(templatePath, decision.placeholder, decision.existingKey);
+          rewritten.push(decision.placeholder);
+        } else if (decision.action === "create-new") {
+          const label = decision.label?.trim() || humanizeFieldKey(decision.placeholder);
+          newFields.push({ placeholder: decision.placeholder, key: decision.placeholder, label });
+        }
+      } catch (e: any) {
+        errors.push({ placeholder: decision.placeholder, error: e?.message || "Errore sconosciuto" });
+      }
+    }
+
+    let modelUpdated: ReturnType<typeof getUSModel> | undefined;
+    if (newFields.length > 0) {
+      const activeModelKey = cantiere.usModelKey || BASE_US_MODEL_KEY;
+      const activeModel = getUSModel(ctx.project, activeModelKey);
+
+      if (activeModel.source !== "custom") {
+        for (const f of newFields) {
+          errors.push({
+            placeholder: f.placeholder,
+            error: `Il modello attivo "${activeModel.name}" non è personalizzabile: crea prima un modello personalizzato (dal dialog Modello US) prima di aggiungere campi dall'elenco.`,
+          });
+        }
+      } else {
+        const existingKeys = new Set(activeModel.fields.map((f) => f.key));
+        const fieldsToAdd = newFields.filter((f) => !existingKeys.has(normalizeFieldKey(f.key)));
+        try {
+          modelUpdated = updateCustomUSModel(ctx.project, activeModel.key, {
+            fields: [
+              ...activeModel.fields,
+              ...fieldsToAdd.map((f) => ({ key: f.key, label: f.label, type: "text" as const })),
+            ],
+          });
+        } catch (e: any) {
+          for (const f of newFields) {
+            errors.push({ placeholder: f.placeholder, error: e?.message || "Errore creazione campo" });
+          }
+        }
+
+        // La chiave campo effettiva può differire dal placeholder originale (normalizzazione
+        // interna al modello, es. camelCase collassato): se cambia, riallinea il template.
+        if (modelUpdated) {
+          for (const f of fieldsToAdd) {
+            const finalKey = normalizeFieldKey(f.key);
+            if (finalKey === f.placeholder) continue;
+            try {
+              await rewriteTemplatePlaceholder(templatePath, f.placeholder, finalKey);
+              rewritten.push(f.placeholder);
+            } catch (e: any) {
+              errors.push({ placeholder: f.placeholder, error: e?.message || "Errore riallineamento placeholder" });
+            }
+          }
+        }
+      }
+    }
+
+    res.json({ ok: errors.length === 0, rewritten, modelUpdated, errors });
   }));
 
   app.patch("/api/cantieri/:cid", withProject((ctx, req, res) => {
@@ -707,9 +1167,118 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
     }
   }));
 
+  // ── Meteo da Open-Meteo ────────────────────────────────────────────────────
+  app.get("/api/cantieri/:cid/meteo", withProject(async (ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const data = String(req.query.data || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) {
+      return res.status(400).json({ error: "Parametro data mancante o non valido (YYYY-MM-DD)" });
+    }
+    const cantiere = ctx.storage.getCantiere(cid);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    // Geocodifica localita con Nominatim (OpenStreetMap)
+    // Accetta localita override da query param (inserita manualmente dall'utente)
+    const localitaOverride = String(req.query.localita || "").trim();
+    const localita = localitaOverride || (cantiere.localita || "").replace(/\([A-Z]{2}\)\s*$/, "").trim();
+    if (!localita) return res.status(400).json({ error: "Inserisci manualmente la località", needsLocalita: true });
+
+    try {
+      const geoUrl = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(localita)}&format=json&limit=1`;
+      const geoResp = await fetch(geoUrl, { headers: { "User-Agent": "ArcheoDoc/1.0 (archeodoc)" } });
+      const geoData = await geoResp.json() as Array<{ lat: string; lon: string; display_name: string }>;
+      if (!geoData.length) return res.status(404).json({ error: `Nessun risultato geografico per: ${localita}`, needsLocalita: true });
+      const { lat, lon, display_name } = geoData[0];
+
+      // Recupera dati meteo storici/forecast da Open-Meteo
+      // L'archive API ha dati fino a 2 giorni fa; per date recenti/future usiamo forecast
+      const todayItaly = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Rome" }));
+      const todayStr = todayItaly.toISOString().slice(0, 10);
+      const twoDaysAgo = new Date(todayItaly); twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+      const twoDaysAgoStr = twoDaysAgo.toISOString().slice(0, 10);
+      const isHistorical = data <= twoDaysAgoStr;
+      const baseUrl = isHistorical
+        ? "https://archive-api.open-meteo.com/v1/archive"
+        : "https://api.open-meteo.com/v1/forecast";
+      const meteoUrl = `${baseUrl}?latitude=${lat}&longitude=${lon}&daily=precipitation_sum,windspeed_10m_max,weather_code&start_date=${data}&end_date=${data}&timezone=Europe%2FRome`;
+      const meteoResp = await fetch(meteoUrl);
+      const meteoData = await meteoResp.json() as {
+        daily?: { weather_code?: number[]; precipitation_sum?: number[]; windspeed_10m_max?: number[] };
+        error?: boolean; reason?: string;
+      };
+      if (meteoData.error) return res.status(502).json({ error: meteoData.reason || "Errore Open-Meteo" });
+
+      const wcode = meteoData.daily?.weather_code?.[0] ?? -1;
+      const prec  = meteoData.daily?.precipitation_sum?.[0] ?? 0;
+      const wind  = meteoData.daily?.windspeed_10m_max?.[0] ?? 0;
+
+      // WMO weather code → condMeteo value
+      // https://open-meteo.com/en/docs#weathervariables
+      let condMeteo: string;
+      if (wcode === 0) condMeteo = "soleggiato";                          // Clear sky
+      else if (wcode <= 2) condMeteo = "variabile";                       // Mainly/partly cloudy
+      else if (wcode === 3) condMeteo = "nuvoloso";                       // Overcast
+      else if (wcode <= 48) condMeteo = "nuvoloso";                       // Fog/rime
+      else if (wcode <= 57) condMeteo = "pioggia";                        // Drizzle
+      else if (wcode <= 67) condMeteo = "pioggia";                        // Rain
+      else if (wcode <= 77) condMeteo = "nuvoloso";                       // Snow/ice
+      else if (wcode <= 82) condMeteo = "pioggia";                        // Rain showers
+      else if (wcode <= 86) condMeteo = "nuvoloso";                       // Snow showers
+      else condMeteo = "pioggia";                                         // Thunderstorm
+
+      if (wind > 40) condMeteo = "ventoso";
+
+      return res.json({ condMeteo, wcode, precipitazioni: prec, vento: wind, luogo: display_name });
+    } catch (e: any) {
+      return res.status(502).json({ error: `Errore recupero meteo: ${e.message}` });
+    }
+  }));
+
   // Giornate
   app.get("/api/cantieri/:cid/giornate", withProject((ctx, req, res) => {
     res.json(ctx.storage.getGiornate(Number(req.params.cid)));
+  }));
+
+  app.get("/api/cantieri/:cid/giornate/autocomplete", withProject((ctx, req, res) => {
+    const giornate = ctx.storage.getGiornate(Number(req.params.cid));
+    const collect = (vals: (string | null | undefined)[]): string[] => {
+      const seen = new Set<string>();
+      const out: string[] = [];
+      for (const v of vals) {
+        if (!v) continue;
+        const trimmed = v.trim();
+        if (trimmed && !seen.has(trimmed)) { seen.add(trimmed); out.push(trimmed); }
+      }
+      return out.sort();
+    };
+    const collectTokens = (vals: (string | null | undefined)[]): string[] => {
+      const seen = new Set<string>();
+      const out: string[] = [];
+      for (const v of vals) {
+        if (!v) continue;
+        let items: string[] = [];
+        try { items = JSON.parse(v); } catch { items = v.split(/[,;]+/); }
+        for (const item of items) {
+          const t = typeof item === "string" ? item.trim() : String(item).trim();
+          if (t && !seen.has(t)) { seen.add(t); out.push(t); }
+        }
+      }
+      return out.sort();
+    };
+    res.json({
+      settore: collect(giornate.map((g) => g.settore)),
+      archeologoCoordinatore: collect(giornate.map((g) => g.archeologoCoordinatore)),
+      topografo: collect(giornate.map((g) => g.topografo)),
+      direttoreScavo: collect(giornate.map((g: any) => g.direttoreScavo)),
+      antropologo: collect(giornate.map((g: any) => g.antropologo)),
+      respMateriali: collect(giornate.map((g: any) => g.respMateriali)),
+      funzionarioSabap: collect(giornate.map((g: any) => g.funzionarioSabap)),
+      archeologoSorveglianza: collect(giornate.map((g: any) => g.archeologoSorveglianza)),
+      archeologi: collectTokens(giornate.map((g) => g.archeologi)),
+      scavatori: collectTokens(giornate.map((g) => g.scavatori)),
+      escavatore: collect(giornate.map((g) => g.escavatore)),
+      obiettivo: collect(giornate.map((g) => g.obiettivo)),
+    });
   }));
 
   app.post("/api/cantieri/:cid/giornate", withProject((ctx, req, res) => {
@@ -859,10 +1428,29 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
         schedaModelKey: modelKey,
         schedaData: serializeDataRecord(filteredSchedaData),
       } as any);
+      syncInverseRelations(ctx.storage, us.id);
       res.json(us);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
+  }));
+
+  app.get("/api/us/:id/pending-inverses", withProject((ctx, req, res) => {
+    const id = Number(req.params.id);
+    const existing = ctx.storage.getUS(id);
+    if (!existing) return res.status(404).json({ error: "US non trovata" });
+    const pending = computePendingInverses(ctx.storage, id);
+    res.json(pending);
+  }));
+
+  app.post("/api/us/:id/apply-inverses", withProject((ctx, req, res) => {
+    const id = Number(req.params.id);
+    const existing = ctx.storage.getUS(id);
+    if (!existing) return res.status(404).json({ error: "US non trovata" });
+    const inverses = req.body?.inverses;
+    if (!Array.isArray(inverses)) return res.status(400).json({ error: "Campo 'inverses' mancante o non array" });
+    applyPendingInverses(ctx.storage, inverses);
+    res.json({ ok: true, applied: inverses.length });
   }));
 
   app.patch("/api/us/:id", withProject((ctx, req, res) => {
@@ -876,7 +1464,8 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
     if (typeof payload.schedaModelKey === "string" && payload.schedaModelKey.trim()) {
       const modelExists = listUSModels(ctx.project).some((m) => m.key === payload.schedaModelKey);
       if (!modelExists) {
-        return res.status(400).json({ error: "Modello US non valido" });
+        // Model was removed (e.g. archeosistemi-us no longer exists): silently reset to project default
+        payload.schedaModelKey = ctx.project.defaultUsModelKey || BASE_US_MODEL_KEY;
       }
     }
 
@@ -919,6 +1508,11 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
       });
     }
 
+    // Un salvataggio "completo" (non bozza) risolve la segnalazione "da rivedere" impostata dall'import.
+    if (saveMode === "final") {
+      payload.daRivedere = false;
+    }
+
     payload.schedaData = serializeDataRecord(stripTopLevelKeysFromSchedaData(nextSchedaData));
     const normalizedPayloadTopLevel = pickUSBaseFromPayload(payload, {});
     normalizedPayloadTopLevel.tipo = normalizeUsTipoWithVocabulary(normalizedPayloadTopLevel.tipo, usThesaurus.tipo);
@@ -930,6 +1524,30 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
     Object.assign(payload, normalizedPayloadTopLevel);
 
     const updated = ctx.storage.updateUS(id, payload);
+    if (!updated) return res.status(404).json({ error: "US non trovata" });
+
+    // Auto-populate inverse stratigraphic relations on other US records
+    syncInverseRelations(ctx.storage, id);
+
+    // Re-fetch after sync (other US may have been updated, but return the saved one)
+    const final = ctx.storage.getUS(id) ?? updated;
+    res.json(final);
+  }));
+
+  // PATCH — modifica di una singola cella dell'elenco US (edit inline nella tabella).
+  // Decide automaticamente se la chiave è una colonna nota di primo livello o un campo
+  // custom del modello attivo (in tal caso va in schedaData, coerentemente con il resto
+  // dell'app: vedi buildUSFlatFields, che fa sempre prevalere schedaData sulla colonna).
+  app.patch("/api/us/:id/field", withProject((ctx, req, res) => {
+    const id = Number(req.params.id);
+    const existing = ctx.storage.getUS(id);
+    if (!existing) return res.status(404).json({ error: "US non trovata" });
+
+    const key = typeof req.body?.key === "string" ? req.body.key.trim() : "";
+    if (!key) return res.status(400).json({ error: "key obbligatoria" });
+    const value = req.body?.value != null ? String(req.body.value) : "";
+
+    const updated = applyUsInlineFieldEdit(ctx.storage, ctx.project, id, key, value);
     if (!updated) return res.status(404).json({ error: "US non trovata" });
     res.json(updated);
   }));
@@ -1205,12 +1823,14 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
     }
 
     const giornataId = req.body.giornataId ? Number(req.body.giornataId) : undefined;
+    let giornataDate: string | undefined;
     if (giornataId !== undefined) {
       const giornata = ctx.storage.getGiornata(giornataId);
       if (!giornata || giornata.cantiereId !== cantiereId) {
         cleanupUploadedTempFiles(files);
         return res.status(400).json({ error: "giornataId non valida per il cantiere selezionato" });
       }
+      giornataDate = giornata.data || undefined;
     }
 
     const usId = req.body.usId ? Number(req.body.usId) : undefined;
@@ -1222,18 +1842,23 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
       }
     }
 
+    const sasId = req.body.sasId ? Number(req.body.sasId) : undefined;
+
     const movedRelativePaths: string[] = [];
     try {
       const created: any[] = [];
       for (const file of files) {
         const tipo = fileToTipo(file.mimetype, file.originalname);
-        const relativePath = moveUploadedFileToCantiereDir(ctx.project, cantiereId, file);
+        const relativePath = giornataDate
+          ? moveUploadedFileToCantiereDateDir(ctx.project, cantiereId, giornataDate, file)
+          : moveUploadedFileToCantiereDir(ctx.project, cantiereId, file);
         movedRelativePaths.push(relativePath);
 
         const allegato = ctx.storage.createAllegato({
           cantiereId,
           giornataId,
           usId,
+          sasId,
           tipo,
           nomeFile: file.originalname,
           percorso: relativePath,
@@ -1270,6 +1895,76 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
 
   app.get("/api/cantieri/:cid/allegati", withProject((ctx, req, res) => {
     const giornataId = req.query.giornataId ? Number(req.query.giornataId) : undefined;
-    res.json(ctx.storage.getAllegati(Number(req.params.cid), giornataId));
+    const usId = req.query.usId ? Number(req.query.usId) : undefined;
+    const sasId = req.query.sasId ? Number(req.query.sasId) : undefined;
+    res.json(ctx.storage.getAllegati(Number(req.params.cid), giornataId, usId, sasId));
+  }));
+
+  // Delete allegato
+  app.delete("/api/allegati/:id", withProject((ctx, req, res) => {
+    const id = Number(req.params.id);
+    const allegato = ctx.storage.getALlegatoById(id);
+    if (!allegato) return res.status(404).json({ error: "Allegato non trovato" });
+    removeAttachmentIfExists(ctx.project, allegato.percorso);
+    ctx.storage.deleteAllegato(id);
+    if (allegato.usId) {
+      const allegatiUS = ctx.storage.getAllegati(allegato.cantiereId, undefined, allegato.usId);
+      const haFoto = allegatiUS.some((a) => a.tipo === "foto") ? 1 : 0;
+      const haDisegno = allegatiUS.some((a) => a.tipo === "planimetria" || a.tipo === "disegno") ? 1 : 0;
+      ctx.storage.updateUS(allegato.usId, { haFoto, haDisegno });
+    }
+    res.json({ ok: true });
+  }));
+
+  // Batch rename allegati: assegna nomi US+data a foto selezionate
+  app.post("/api/allegati/batch-rename", withProject((ctx, req, res) => {
+    const { allegatiIds, usCode, data: dateStr, cantiereId: rawCid } = req.body;
+
+    if (!Array.isArray(allegatiIds) || allegatiIds.length === 0) {
+      return res.status(400).json({ error: "Nessun allegato selezionato" });
+    }
+    const cantiereId = Number(rawCid);
+    if (!Number.isInteger(cantiereId) || cantiereId <= 0) {
+      return res.status(400).json({ error: "cantiereId non valido" });
+    }
+    const safeUsCode = String(usCode ?? "").trim().replace(/[^\w.-]/g, "");
+    if (!safeUsCode) return res.status(400).json({ error: "Codice US richiesto" });
+    const safeDate = String(dateStr ?? "").replace(/[^0-9-]/g, "").slice(0, 10);
+    if (!safeDate) return res.status(400).json({ error: "Data richiesta" });
+
+    const renamed: { id: number; nomeFile: string }[] = [];
+    let seq = 1;
+
+    for (const rawId of allegatiIds) {
+      const id = Number(rawId);
+      if (!Number.isInteger(id) || id <= 0) continue;
+      const allegato = ctx.storage.getALlegatoById(id);
+      if (!allegato || allegato.cantiereId !== cantiereId) continue;
+
+      const oldPercorso = String(allegato.percorso || "").replace(/\\/g, "/");
+      const ext = path.posix.extname(allegato.nomeFile || "").toLowerCase() || ".jpg";
+      const newName = `US${safeUsCode}_${safeDate}_${String(seq).padStart(3, "0")}${ext}`;
+      seq++;
+
+      const dir = path.posix.dirname(oldPercorso);
+      const newPercorso = dir && dir !== "." ? `${dir}/${newName}` : newName;
+
+      const oldAbsolute = resolvePathInside(ctx.project.mediaDir, oldPercorso);
+      if (oldAbsolute && fs.existsSync(oldAbsolute)) {
+        const newAbsolute = resolvePathInside(ctx.project.mediaDir, newPercorso);
+        if (newAbsolute && oldAbsolute !== newAbsolute) {
+          try {
+            fs.renameSync(oldAbsolute, newAbsolute);
+          } catch {
+            continue;
+          }
+        }
+      }
+
+      ctx.storage.updateAllegato(id, { nomeFile: newName, percorso: newPercorso });
+      renamed.push({ id, nomeFile: newName });
+    }
+
+    res.json({ renamed });
   }));
 }

@@ -272,7 +272,7 @@ function usDeterministicFields(us: USData): { topLevel: ProposedTopLevelFields; 
     affidabilitaStratigrafica: us.affidabilitaStratigrafica,
     motivazioneAffidabilita: us.motivazioneAffidabilita,
     responsabileSabap: us.responsabileSABAPUMB,
-    responsabileArcheosistemi: us.responsabileArcheosistemi,
+    responsabileScavo: us.responsabileScavo,
     direttoreScientifico: us.direttoreScientifico,
     responsabileSettore: us.responsabileSettore,
     compilatoreScheda: us.compilatoreScheda,

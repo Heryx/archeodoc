@@ -20,7 +20,7 @@ Regole:
 5) Non aggiungere testo fuori dal JSON.
 
 Campi ammessi:
-- Testo base: definizione, descrizione, interpretazione, criteriDistinzione, modoFormazione, consistenza, colore, misure, statoConservazione, danneggiatoDa, datazione, epoca, periodoFase, datiQuantitativiReperti, campionatureN, responsabileSabap, responsabileArcheosistemi, localita, anno, area, piante, sezioni, prospetti, nCatalogoGenerale, nCatalogoInternazionale, settore
+- Testo base: definizione, descrizione, interpretazione, criteriDistinzione, modoFormazione, consistenza, colore, misure, statoConservazione, danneggiatoDa, datazione, epoca, periodoFase, datiQuantitativiReperti, campionatureN, responsabileSabap, responsabileScavo, localita, anno, area, piante, sezioni, prospetti, nCatalogoGenerale, nCatalogoInternazionale, settore
 - Numerici: quota, quotaPianoCampagna
 - Relazioni: coperto_da, copre, si_lega_a, uguale_a, gliSiAppoggia, siAppoggia, tagliatoDa, taglia, riempitoDa, riempie, sequenzaFisica
 - Campi selezione: densitaInorganici, densitaOrganici, elementiDatanti, flottazioneTipo, setacciaturaTipo, affidabilitaStratigrafica

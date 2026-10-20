@@ -209,23 +209,32 @@ export function AIKeysCard({
         <div className="space-y-1.5">
           <Label>Provider preferito</Label>
           <div className="flex gap-2 flex-wrap">
-            {(["auto", "gemini", "openai", "claude"] as const).map((provider) => (
-              <button
-                key={provider}
-                type="button"
-                onClick={() => setAiProvider(provider)}
-                className={`px-3 py-1.5 rounded-md text-sm border transition-colors ${
-                  aiProvider === provider
-                    ? "border-primary bg-primary/10 text-primary font-medium"
-                    : "border-border text-muted-foreground hover:border-primary/50"
-                }`}
-              >
-                {provider === "auto" ? "Auto (consigliato)" : provider === "gemini" ? "Gemini" : provider === "openai" ? "OpenAI (GPT)" : "Claude"}
-              </button>
-            ))}
+            {(["auto", "gemini", "openai", "claude"] as const).map((provider) => {
+              const keyMissing =
+                (provider === "gemini" && !settings?.geminiKeySet) ||
+                (provider === "openai" && !settings?.openaiKeySet) ||
+                (provider === "claude" && !settings?.anthropicKeySet);
+              return (
+                <button
+                  key={provider}
+                  type="button"
+                  onClick={() => setAiProvider(provider)}
+                  className={`px-3 py-1.5 rounded-md text-sm border transition-colors ${
+                    aiProvider === provider
+                      ? "border-primary bg-primary/10 text-primary font-medium"
+                      : "border-border text-muted-foreground hover:border-primary/50"
+                  }`}
+                >
+                  {provider === "auto" ? "Auto (consigliato)" : provider === "gemini" ? "Gemini" : provider === "openai" ? "OpenAI (GPT)" : "Claude"}
+                  {keyMissing && <span className="ml-1.5 text-[10px] text-amber-600">chiave mancante</span>}
+                </button>
+              );
+            })}
           </div>
           <p className="text-xs text-muted-foreground">
-            In modalita <strong>Auto</strong>, la priorità è: Gemini → OpenAI → Claude.
+            In modalita <strong>Auto</strong>, la priorità è: Gemini → OpenAI → Claude. Se scegli un
+            provider di cui non hai inserito la chiave API, l'app continua a usare automaticamente un
+            altro provider configurato.
           </p>
         </div>
 

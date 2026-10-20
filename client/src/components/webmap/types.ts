@@ -1,5 +1,7 @@
 export type GeometryKind = "Point" | "LineString" | "Polygon" | "Mixed" | "Unknown";
 
+export type WebMapPanelTab = "geopackage" | "sources" | "shapefile" | "qgis-project" | "snapshot";
+
 export type LayerStyle = {
   fillColor: string;
   strokeColor: string;
@@ -10,10 +12,13 @@ export type LayerStyle = {
 export type LayerSourceKind = "vector" | "raster";
 
 export type RasterLayerConfig = {
-  protocol: "xyz" | "wms" | "wmts";
-  tiles: string[];
+  protocol: "xyz" | "wms" | "wmts" | "image";
+  tiles?: string[];
   tileSize?: number;
   attribution?: string;
+  /** Solo protocol "image": URL dell'immagine e angoli geografici [lng,lat] in ordine topLeft, topRight, bottomRight, bottomLeft. */
+  imageUrl?: string;
+  imageCoordinates?: [[number, number], [number, number], [number, number], [number, number]];
 };
 
 export type FeatureGeometry = {
@@ -68,6 +73,13 @@ export type MapLayer = {
   style: LayerStyle;
   featureCollection: FeatureCollection;
   rasterConfig?: RasterLayerConfig;
+  groupId?: string | null;
+};
+
+export type LayerGroup = {
+  id: string;
+  name: string;
+  expanded: boolean;
 };
 
 export type BasemapId = "none" | "osm" | "satellite_esri" | "topo";
@@ -102,6 +114,7 @@ export type ActiveModuleKey = keyof Omit<ActiveModules, "demSource" | "terrainEx
 
 export type WebMapState = {
   layers: MapLayer[];
+  groups: LayerGroup[];
   activeLayerId: string | null;
   selectedFeatureId: number | null;
   basemap: BasemapId;
@@ -123,7 +136,12 @@ export type WebMapAction =
   | { type: "TOGGLE_MODULE"; module: ActiveModuleKey }
   | { type: "SET_DEM_SOURCE"; source: DemSource }
   | { type: "SET_TERRAIN_EXAGGERATION"; value: number }
-  | { type: "SET_STYLE_RENDERER"; config: StyleRendererConfig | null };
+  | { type: "SET_STYLE_RENDERER"; config: StyleRendererConfig | null }
+  | { type: "ADD_GROUP"; group: LayerGroup }
+  | { type: "RENAME_GROUP"; id: string; name: string }
+  | { type: "REMOVE_GROUP"; id: string }
+  | { type: "SET_LAYER_GROUP"; layerId: string; groupId: string | null }
+  | { type: "TOGGLE_GROUP_EXPANDED"; id: string };
 
 export type MapSnapshotRecord = {
   id: number;
@@ -151,7 +169,7 @@ export type WebMapLayer = {
   tableName: string;
   displayName: string;
   sourceFileName: string;
-  sourceFormat: "gpkg" | "geojson" | "kml" | "csv";
+  sourceFormat: "gpkg" | "geojson" | "kml" | "csv" | "shp" | "png" | "jpg" | "jpeg";
   sridOriginal: number | null;
   featureCount: number;
   geometryType: string | null;
@@ -160,4 +178,7 @@ export type WebMapLayer = {
   zIndex: number;
   createdAt: string;
   updatedAt: string;
+  kind?: "vector" | "raster";
+  rasterPath?: string | null;
+  rasterBounds?: [[number, number], [number, number], [number, number], [number, number]] | null;
 };

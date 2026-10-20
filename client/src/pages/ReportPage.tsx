@@ -91,7 +91,7 @@ export function ReportPage({ cidOverride, embedded = false }: ReportPageProps = 
   const [selectedWeek, setSelectedWeek] = useState<number | null>(null);
   const [selectedWeeks, setSelectedWeeks] = useState<number[]>([]);
   const [multiOpen, setMultiOpen] = useState(false);
-
+  const [tipoRelazione, setTipoRelazione] = useState<"template" | "narrativo" | "strutturato">("template");
   const { data: giornate = [], isLoading } = useQuery<GiornataReport[]>({
     queryKey: ["/api/cantieri", cid, "giornate", activeProjectId],
     queryFn: async () => (await apiRequest("GET", `/api/cantieri/${cid}/giornate`)).json(),
@@ -132,12 +132,17 @@ export function ReportPage({ cidOverride, embedded = false }: ReportPageProps = 
   const generateReport = async (gid: number) => {
     setGenerating(gid);
     try {
-      await (await apiRequest("POST", `/api/giornate/${gid}/analizza-ai`, {})).json();
+      const res = await apiRequest("POST", `/api/giornate/${gid}/analizza-ai`, {});
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error || `Errore server (${res.status})`);
+      }
+      await res.json();
       qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "giornate", activeProjectId] });
       setExpanded(gid);
       toast({ title: "Report giornaliero generato" });
-    } catch {
-      toast({ title: "Errore generazione report", variant: "destructive" });
+    } catch (err: any) {
+      toast({ title: "Errore generazione report", description: err?.message || String(err), variant: "destructive" });
     } finally {
       setGenerating(null);
     }
@@ -159,7 +164,8 @@ export function ReportPage({ cidOverride, embedded = false }: ReportPageProps = 
 
   const exportSettimana = useMutation({
     mutationFn: async (weekNumber: number) => {
-      const res = await apiRequest("POST", `/api/cantieri/${cid}/report/export-settimana`, { weekNumber });
+      const res = await apiRequest("POST", `/api/cantieri/${cid}/report/export-settimana`, { weekNumber, tipoRelazione });
+      if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.error || `Errore server ${res.status}`); }
       return res.blob();
     },
     onSuccess: (blob, weekNumber) => {
@@ -176,7 +182,8 @@ export function ReportPage({ cidOverride, embedded = false }: ReportPageProps = 
 
   const exportMultiSettimane = useMutation({
     mutationFn: async (weekNumbers: number[]) => {
-      const res = await apiRequest("POST", `/api/cantieri/${cid}/report/export-multi-settimane`, { weekNumbers });
+      const res = await apiRequest("POST", `/api/cantieri/${cid}/report/export-multi-settimane`, { weekNumbers, tipoRelazione });
+      if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.error || `Errore server ${res.status}`); }
       return res.blob();
     },
     onSuccess: (blob) => {
@@ -195,7 +202,8 @@ export function ReportPage({ cidOverride, embedded = false }: ReportPageProps = 
 
   const exportTutto = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", `/api/cantieri/${cid}/report/export-diario-completo`, {});
+      const res = await apiRequest("POST", `/api/cantieri/${cid}/report/export-diario-completo`, { tipoRelazione });
+      if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.error || `Errore server ${res.status}`); }
       return res.blob();
     },
     onSuccess: (blob) => {
@@ -287,6 +295,19 @@ export function ReportPage({ cidOverride, embedded = false }: ReportPageProps = 
         <>
           <div className="rounded-md border border-border bg-card/40 p-3 space-y-3 mb-4">
             <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Export aggregati</div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground shrink-0">Tipo relazione:</span>
+              <select
+                className="rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+                value={tipoRelazione}
+                onChange={(e) => setTipoRelazione(e.target.value as typeof tipoRelazione)}
+              >
+                <option value="template">Template personalizzato (se caricato)</option>
+                <option value="narrativo">Solo narrazione AI</option>
+                <option value="strutturato">Report strutturato con tabelle</option>
+              </select>
+            </div>
 
             <div className="flex items-center gap-2">
               <select

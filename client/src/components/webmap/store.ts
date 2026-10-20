@@ -1,6 +1,6 @@
 import { createContext, useContext, useReducer, useRef, type Dispatch, type MutableRefObject } from "react";
 import type maplibregl from "maplibre-gl";
-import type { LayerStyle, MapLayer, WebMapAction, WebMapState } from "./types";
+import type { LayerGroup, LayerStyle, MapLayer, WebMapAction, WebMapState } from "./types";
 
 export const DEFAULT_STYLE: LayerStyle = {
   fillColor: "#2563eb",
@@ -28,9 +28,10 @@ export function pickColor(index: number) {
 
 const initialState: WebMapState = {
   layers: [],
+  groups: [],
   activeLayerId: null,
   selectedFeatureId: null,
-  basemap: "osm",
+  basemap: "none",
   modules: {
     terrain: false,
     demSource: "jaxa",
@@ -163,6 +164,35 @@ function reducer(state: WebMapState, action: WebMapAction): WebMapState {
       };
     case "SET_STYLE_RENDERER":
       return { ...state, styleRenderer: action.config };
+    case "ADD_GROUP":
+      return { ...state, groups: [...state.groups, action.group] };
+    case "RENAME_GROUP":
+      return {
+        ...state,
+        groups: state.groups.map((group) => (group.id === action.id ? { ...group, name: action.name } : group)),
+      };
+    case "REMOVE_GROUP":
+      return {
+        ...state,
+        groups: state.groups.filter((group) => group.id !== action.id),
+        layers: state.layers.map((layer) =>
+          layer.groupId === action.id ? { ...layer, groupId: null } : layer,
+        ),
+      };
+    case "SET_LAYER_GROUP":
+      return {
+        ...state,
+        layers: state.layers.map((layer) =>
+          layer.id === action.layerId ? { ...layer, groupId: action.groupId } : layer,
+        ),
+      };
+    case "TOGGLE_GROUP_EXPANDED":
+      return {
+        ...state,
+        groups: state.groups.map((group) =>
+          group.id === action.id ? { ...group, expanded: !group.expanded } : group,
+        ),
+      };
     default:
       return state;
   }

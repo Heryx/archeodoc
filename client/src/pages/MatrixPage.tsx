@@ -118,7 +118,7 @@ export function MatrixPage() {
         </div>
       ) : (
         <Suspense fallback={<div className="h-40 rounded-lg bg-muted animate-pulse" />}>
-          <HarrisMatrix usList={usList} mode={mode} />
+          <HarrisMatrix usList={usList} mode={mode} cantiereId={cid} />
         </Suspense>
       )}
     </div>

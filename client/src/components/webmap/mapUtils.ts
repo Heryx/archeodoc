@@ -201,6 +201,28 @@ export function addLayerToMap(map: maplibregl.Map, layer: MapLayer) {
   const lineId = lineLayerId(layer.id);
   const pointId = pointLayerId(layer.id);
 
+  if (layer.sourceKind === "raster" && layer.rasterConfig?.protocol === "image") {
+    if (!map.getSource(sid)) {
+      map.addSource(sid, {
+        type: "image",
+        url: layer.rasterConfig.imageUrl,
+        coordinates: layer.rasterConfig.imageCoordinates,
+      } as any);
+    }
+
+    if (!map.getLayer(rid)) {
+      map.addLayer({
+        id: rid,
+        type: "raster",
+        source: sid,
+        paint: {
+          "raster-opacity": layer.opacity,
+        },
+      });
+    }
+    return;
+  }
+
   if (layer.sourceKind === "raster" && layer.rasterConfig) {
     if (!map.getSource(sid)) {
       map.addSource(sid, {
