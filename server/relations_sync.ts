@@ -28,11 +28,11 @@ const SCHEDA_DATA_FIELDS = [
 ] as const;
 type SchedaDataField = (typeof SCHEDA_DATA_FIELDS)[number];
 
-type RelField = TopLevelField | SchedaDataField;
+export type RelField = TopLevelField | SchedaDataField;
 
 // For each field, its inverse field.
 // Symmetric fields (si_lega_a, uguale_a) map to themselves.
-const INVERSE_MAP: Record<RelField, RelField> = {
+export const INVERSE_MAP: Record<RelField, RelField> = {
   copre: "coperto_da",
   coperto_da: "copre",
   si_lega_a: "si_lega_a",

@@ -40,6 +40,7 @@ import {
   type HarrisMatrixMode,
 } from "../matrix_export";
 import { exportEmJson } from "../em_json";
+import { applyEmImport, EmImportError, planEmImport } from "../em_json_import";
 import { calcolaSettimaneProgetto } from "@shared/weekUtils";
 
 const AVAILABLE_PLACEHOLDER_KEYS = [
@@ -870,6 +871,32 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
       res.send(buf);
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Errore export matrix PDF" });
+    }
+  }));
+
+  app.post("/api/cantieri/:id/matrix/import-emjson/preview", withProject(async (ctx, req, res) => {
+    const id = Number(req.params.id);
+    if (!ctx.storage.getCantiere(id)) return res.status(404).json({ error: "Cantiere non trovato" });
+    const text = typeof req.body?.text === "string" ? req.body.text : "";
+    if (!text) return res.status(400).json({ error: "Campo 'text' mancante" });
+    try {
+      res.json(planEmImport(text, ctx.storage.getUSList(id)));
+    } catch (error: any) {
+      res.status(error instanceof EmImportError ? 400 : 500).json({ error: error.message || "Errore lettura em.json" });
+    }
+  }));
+
+  app.post("/api/cantieri/:id/matrix/import-emjson/apply", withProject(async (ctx, req, res) => {
+    const id = Number(req.params.id);
+    const cantiere = ctx.storage.getCantiere(id);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+    const text = typeof req.body?.text === "string" ? req.body.text : "";
+    const selected = Array.isArray(req.body?.selected) ? req.body.selected.map(String) : [];
+    if (!text) return res.status(400).json({ error: "Campo 'text' mancante" });
+    try {
+      res.json(applyEmImport(ctx.storage, cantiere, text, selected));
+    } catch (error: any) {
+      res.status(error instanceof EmImportError ? 400 : 500).json({ error: error.message || "Errore import em.json" });
     }
   }));
 

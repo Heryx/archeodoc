@@ -1,12 +1,13 @@
-import { Suspense, lazy, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { Suspense, lazy, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useParams } from "wouter";
-import { Download, FileSpreadsheet, GitBranch, Layers } from "lucide-react";
+import { Download, FileSpreadsheet, GitBranch, Layers, Upload } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { buildProjectUrl, getCurrentProjectId, getProjectHeader } from "@/lib/project";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import type { HarrisMatrixMode } from "@/components/us/HarrisMatrix";
+import { EmImportDialog, type EmImportPlan } from "@/components/us/EmImportDialog";
 
 const HarrisMatrix = lazy(async () => {
   const module = await import("@/components/us/HarrisMatrix");
@@ -21,12 +22,61 @@ export function MatrixPage() {
   const [downloadKind, setDownloadKind] = useState<"docx" | "pdf" | "em.json" | null>(null);
   const [pdfPage, setPdfPage] = useState<"libero" | "a4-portrait" | "a4-landscape">("libero");
   const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const emFileInput = useRef<HTMLInputElement>(null);
+  const [emImport, setEmImport] = useState<{ fileName: string; text: string; plan: EmImportPlan } | null>(null);
+  const [emApplying, setEmApplying] = useState(false);
 
   const { data: usList = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/cantieri", cid, "us", "matrix-page", activeProjectId],
     queryFn: async () => (await apiRequest("GET", `/api/cantieri/${cid}/us`)).json(),
     enabled: !!cid,
   });
+
+  async function onEmFileChosen(file: File | undefined) {
+    if (!file || !cid) return;
+    try {
+      const text = await file.text();
+      const res = await apiRequest("POST", `/api/cantieri/${cid}/matrix/import-emjson/preview`, { text });
+      setEmImport({ fileName: file.name, text, plan: await res.json() });
+    } catch (error: any) {
+      toast({
+        title: "File .em.json non leggibile",
+        description: error?.message || "Operazione non riuscita",
+        variant: "destructive",
+      });
+    } finally {
+      if (emFileInput.current) emFileInput.current.value = "";
+    }
+  }
+
+  async function applyEmImport(selected: string[]) {
+    if (!emImport || !cid) return;
+    setEmApplying(true);
+    try {
+      const res = await apiRequest("POST", `/api/cantieri/${cid}/matrix/import-emjson/apply`, {
+        text: emImport.text,
+        selected,
+      });
+      const r = await res.json();
+      await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
+      toast({
+        title: "Import da EM Studio completato",
+        description: `${r.createdUnits} US create, ${r.addedRelations} rapporti aggiunti, ${r.updatedPeriods} periodi aggiornati${
+          r.skipped?.length ? `, ${r.skipped.length} saltati` : ""
+        }`,
+      });
+      setEmImport(null);
+    } catch (error: any) {
+      toast({
+        title: "Import non riuscito",
+        description: error?.message || "Operazione non riuscita",
+        variant: "destructive",
+      });
+    } finally {
+      setEmApplying(false);
+    }
+  }
 
   async function exportMatrix(format: "docx" | "pdf" | "em.json") {
     if (!cid) return;
@@ -113,6 +163,22 @@ export function MatrixPage() {
             <GitBranch size={15} />
             {downloadKind === "em.json" ? "Esporto..." : "EM Studio"}
           </Button>
+          <input
+            ref={emFileInput}
+            type="file"
+            accept=".json,application/json"
+            className="hidden"
+            onChange={(e) => onEmFileChosen(e.target.files?.[0])}
+          />
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={() => emFileInput.current?.click()}
+            disabled={isLoading}
+            title="Importa un file .em.json salvato da EM Studio"
+          >
+            <Upload size={15} /> Importa EM
+          </Button>
           <Button variant="outline" className="gap-2" onClick={() => navigate(`/cantiere/${cid}/us`)}>
             <Layers size={15} /> Torna alle schede US
           </Button>
@@ -146,6 +212,14 @@ export function MatrixPage() {
           <HarrisMatrix usList={usList} mode={mode} cantiereId={cid} />
         </Suspense>
       )}
+      <EmImportDialog
+        open={!!emImport}
+        fileName={emImport?.fileName ?? ""}
+        plan={emImport?.plan ?? null}
+        isApplying={emApplying}
+        onConfirm={applyEmImport}
+        onClose={() => setEmImport(null)}
+      />
     </div>
   );
 }
