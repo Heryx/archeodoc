@@ -189,6 +189,22 @@ export function buildEmJson(
       unitsByPeriod.set(k, [...(unitsByPeriod.get(k) ?? []), node.key]);
     }
 
+    // Le unita' virtuali con un periodo entrano nella stessa corsia delle US.
+    for (const em of options.emGraph?.nodes ?? []) {
+      let periodo = "";
+      try {
+        const dati = em.dati ? JSON.parse(em.dati) : {};
+        if (typeof dati?.periodo === "string") periodo = dati.periodo.trim();
+      } catch {
+        // dati non leggibili
+      }
+      if (!periodo || !["USVs", "USVn", "VSF"].includes(em.nodeType)) continue;
+      const k = normName(periodo);
+      displayName.set(k, displayName.get(k) ?? periodo);
+      levelsByPeriod.set(k, levelsByPeriod.get(k) ?? []);
+      unitsByPeriod.set(k, [...(unitsByPeriod.get(k) ?? []), em.uid]);
+    }
+
     const registry = [...(options.periodi ?? [])].sort((a, b) => b.ordine - a.ordine || b.id - a.id);
     const declared = new Set<string>();
     const epochs: Array<{ name: string; description?: string; data: Record<string, unknown>; key: string }> = [];
@@ -200,7 +216,8 @@ export function buildEmJson(
       if (p.endTime !== null && p.endTime !== undefined) data.end_time = p.endTime;
       epochs.push({ name: p.nome, description: p.descrizione?.trim() || undefined, data, key });
     }
-    const mean = (values: number[]) => values.reduce((s, v) => s + v, 0) / values.length;
+    const mean = (values: number[]) =>
+      values.length ? values.reduce((s, v) => s + v, 0) / values.length : Number.MAX_SAFE_INTEGER;
     const extra = Array.from(levelsByPeriod.keys())
       .filter((key) => !declared.has(key))
       .sort((a, b) => mean(levelsByPeriod.get(a)!) - mean(levelsByPeriod.get(b)!) || a.localeCompare(b, "it"));

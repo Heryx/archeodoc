@@ -22,6 +22,7 @@ import {
   Settings,
   BarChart3,
   GitBranch,
+  Network,
   Package,
   BookOpenText,
   BookOpen,
@@ -316,6 +317,13 @@ export function Sidebar() {
           icon: GitBranch,
           label: "Harris Matrix",
           isActive: (path: string) => path === `/cantiere/${cid}/matrix` || path.startsWith(`/cantiere/${cid}/matrix/`),
+          isPanel: false,
+        },
+        {
+          href: `/cantiere/${cid}/extended-matrix`,
+          icon: Network,
+          label: "Extended Matrix",
+          isActive: (path: string) => path === `/cantiere/${cid}/extended-matrix`,
           isPanel: false,
         },
         {
