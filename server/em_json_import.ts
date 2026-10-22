@@ -11,7 +11,7 @@
  * contraddicono quelli gia' presenti in ArcheoDoc sono segnalati come conflitti
  * e non si applicano.
  */
-import type { Cantiere, UnitaStratigrafica } from "@shared/schema";
+import type { Cantiere, Periodo, UnitaStratigrafica } from "@shared/schema";
 import { normalizeUSCode } from "@shared/normalize_us_code";
 import { BASE_US_MODEL_KEY } from "@shared/us_models";
 import type { IStorage } from "./storage";
@@ -60,6 +60,16 @@ export type EmImportRelation = {
   needsNewUnit: boolean;
 };
 
+export type EmImportEpoch = {
+  key: string;
+  nome: string;
+  descrizione: string | null;
+  startTime: number | null;
+  endTime: number | null;
+  /** new = periodo assente dal registro; dates = periodo noto a cui mancano le date. */
+  kind: "new" | "dates";
+};
+
 export type EmImportConflict = { source: string; target: string; emEdgeType: string; reason: string };
 
 export type EmImportPeriod = {
@@ -77,6 +87,7 @@ export type EmImportPlan = {
   newUnits: EmImportUnit[];
   newRelations: EmImportRelation[];
   periods: EmImportPeriod[];
+  epochs: EmImportEpoch[];
   conflicts: EmImportConflict[];
   /** Tipi di nodo/arco del file che ArcheoDoc non gestisce ancora (ignorati). */
   ignored: { nodeTypes: Record<string, number>; edgeTypes: Record<string, number> };
@@ -86,7 +97,7 @@ type EmDoc = {
   header?: { format?: string; version?: string; generator?: { tool?: string; version?: string } };
   graph?: {
     name?: string;
-    nodes?: Array<{ id: string; node_type: string; name?: string; description?: string }>;
+    nodes?: Array<{ id: string; node_type: string; name?: string; description?: string; data?: Record<string, unknown> }>;
     edges?: Array<{ id?: string; edge_type: string; source: string; target: string }>;
   };
 };
@@ -114,6 +125,7 @@ function parseDoc(text: string): EmDoc {
 }
 
 const unitKey = (code: string) => normalizeUSCode(code);
+const periodKeyOf = (value: string) => value.trim().replace(/\s+/g, " ").toLowerCase();
 
 function pairKey(a: string, b: string) {
   return a < b ? `${a}|${b}` : `${b}|${a}`;
@@ -136,7 +148,11 @@ function indexExistingRelations(usList: UnitaStratigrafica[]) {
   return { typed, directed };
 }
 
-export function planEmImport(text: string, usList: UnitaStratigrafica[]): EmImportPlan {
+export function planEmImport(
+  text: string,
+  usList: UnitaStratigrafica[],
+  periodi: Periodo[] = [],
+): EmImportPlan {
   const doc = parseDoc(text);
   const graph = doc.graph!;
   const byKey = new Map<string, UnitaStratigrafica>();
@@ -149,6 +165,10 @@ export function planEmImport(text: string, usList: UnitaStratigrafica[]): EmImpo
   const ignoredEdges: Record<string, number> = {};
   const emUnits = new Map<string, EmImportUnit>(); // id EM -> unita'
   const epochs = new Map<string, string>(); // id EM -> nome
+  const epochNodes: EmImportEpoch[] = [];
+  const periodKey = (value: string) => value.trim().replace(/\s+/g, " ").toLowerCase();
+  const registry = new Map(periodi.map((p) => [periodKey(p.nome), p]));
+  const asYear = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? Math.round(value) : null);
   for (const node of graph.nodes!) {
     const name = (node.name ?? node.id).trim();
     if (STRATIGRAPHIC_TYPES.has(node.node_type)) {
@@ -160,6 +180,31 @@ export function planEmImport(text: string, usList: UnitaStratigrafica[]): EmImpo
       });
     } else if (node.node_type === "EpochNode" || node.node_type === "epoch") {
       epochs.set(node.id, name);
+      const known = registry.get(periodKey(name));
+      const startTime = asYear(node.data?.start_time);
+      const endTime = asYear(node.data?.end_time);
+      if (!known) {
+        epochNodes.push({
+          key: `epoch|${periodKey(name)}`,
+          nome: name,
+          descrizione: node.description?.trim() || null,
+          startTime,
+          endTime,
+          kind: "new",
+        });
+      } else if (
+        (known.startTime === null && startTime !== null) ||
+        (known.endTime === null && endTime !== null)
+      ) {
+        epochNodes.push({
+          key: `epoch|${periodKey(name)}`,
+          nome: name,
+          descrizione: known.descrizione,
+          startTime: known.startTime ?? startTime,
+          endTime: known.endTime ?? endTime,
+          kind: "dates",
+        });
+      }
     } else {
       ignoredNodes[node.node_type] = (ignoredNodes[node.node_type] ?? 0) + 1;
     }
@@ -249,12 +294,14 @@ export function planEmImport(text: string, usList: UnitaStratigrafica[]): EmImpo
     newUnits,
     newRelations,
     periods,
+    epochs: epochNodes,
     conflicts,
     ignored: { nodeTypes: ignoredNodes, edgeTypes: ignoredEdges },
   };
 }
 
 export type EmImportResult = {
+  createdPeriods: number;
   createdUnits: number;
   addedRelations: number;
   updatedPeriods: number;
@@ -268,9 +315,31 @@ export function applyEmImport(
   selected: string[],
 ): EmImportResult {
   const usList = storage.getUSList(cantiere.id);
-  const plan = planEmImport(text, usList);
+  const plan = planEmImport(text, usList, storage.getPeriodi(cantiere.id));
   const wanted = new Set(selected);
-  const result: EmImportResult = { createdUnits: 0, addedRelations: 0, updatedPeriods: 0, skipped: [] };
+  const result: EmImportResult = { createdPeriods: 0, createdUnits: 0, addedRelations: 0, updatedPeriods: 0, skipped: [] };
+
+  // Registro periodi: prima i piu' antichi (start_time crescente), i senza data in coda.
+  const chosenEpochs = plan.epochs
+    .filter((e) => wanted.has(e.key))
+    .sort((a, b) => (a.startTime ?? Infinity) - (b.startTime ?? Infinity));
+  let ordine = storage.getPeriodi(cantiere.id).reduce((m, p) => Math.max(m, p.ordine), 0);
+  for (const epoch of chosenEpochs) {
+    const known = storage.getPeriodi(cantiere.id).find((p) => periodKeyOf(p.nome) === periodKeyOf(epoch.nome));
+    if (epoch.kind === "dates" && known) {
+      storage.updatePeriodo(known.id, { startTime: epoch.startTime, endTime: epoch.endTime });
+    } else if (!known) {
+      storage.createPeriodo({
+        cantiereId: cantiere.id,
+        nome: epoch.nome,
+        descrizione: epoch.descrizione,
+        ordine: ++ordine,
+        startTime: epoch.startTime,
+        endTime: epoch.endTime,
+      });
+      result.createdPeriods += 1;
+    }
+  }
 
   const modelKey = cantiere.usModelKey || BASE_US_MODEL_KEY;
   for (const unit of plan.newUnits) {

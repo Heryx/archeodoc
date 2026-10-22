@@ -12,6 +12,7 @@ import {
   documentazioni,
   documentazioneSnapshots,
   qcLogs,
+  periodi,
   persone,
   type Cantiere,
   type InsertCantiere,
@@ -33,6 +34,8 @@ import {
   type InsertDocumentazioneSnapshot,
   type QcLog,
   type InsertQcLog,
+  type Periodo,
+  type InsertPeriodo,
   type Persona,
   type InsertPersona,
 } from "@shared/schema";
@@ -378,6 +381,20 @@ function migrate(sqlite: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_documentazione_snapshots_posizione
       ON documentazione_snapshots (documentazione_id, posizione);
 
+    CREATE TABLE IF NOT EXISTS periodi (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cantiere_id INTEGER NOT NULL,
+      nome TEXT NOT NULL,
+      descrizione TEXT,
+      ordine INTEGER NOT NULL DEFAULT 0,
+      start_time INTEGER,
+      end_time INTEGER,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_periodi_cantiere_nome
+      ON periodi (cantiere_id, nome);
+
     CREATE TABLE IF NOT EXISTS cantieri_geo (
       id INTEGER PRIMARY KEY,
       cantiere_id INTEGER NOT NULL UNIQUE,
@@ -569,6 +586,13 @@ export interface IStorage {
   updateUS(id: number, data: Partial<InsertUS>): UnitaStratigrafica | undefined;
   deleteUS(id: number): boolean;
 
+  // Periodi
+  getPeriodi(cantiereId: number): Periodo[];
+  getPeriodo(id: number): Periodo | undefined;
+  createPeriodo(data: InsertPeriodo): Periodo;
+  updatePeriodo(id: number, data: Partial<InsertPeriodo>): Periodo | undefined;
+  deletePeriodo(id: number): boolean;
+
   // SAS
   getSasRecords(cantiereId: number): SasRecord[];
   getSasRecord(id: number): SasRecord | undefined;
@@ -667,6 +691,7 @@ class SQLiteStorage implements IStorage {
     if (!existing) return false;
 
     this.db.transaction((tx) => {
+      tx.delete(periodi).where(eq(periodi.cantiereId, id)).run();
       tx.delete(qcLogs).where(eq(qcLogs.cantiereId, id)).run();
       tx.delete(mapSnapshots).where(eq(mapSnapshots.cantiereId, id)).run();
       // Le documentazione_snapshots vengono eliminate via ON DELETE CASCADE su documentazione_id
@@ -709,6 +734,32 @@ class SQLiteStorage implements IStorage {
       tx.delete(giornate).where(eq(giornate.id, id)).run();
     });
     return true;
+  }
+
+  // Periodi
+  getPeriodi(cantiereId: number) {
+    return this.db
+      .select()
+      .from(periodi)
+      .where(eq(periodi.cantiereId, cantiereId))
+      .orderBy(asc(periodi.ordine), asc(periodi.id))
+      .all();
+  }
+
+  getPeriodo(id: number) {
+    return this.db.select().from(periodi).where(eq(periodi.id, id)).get();
+  }
+
+  createPeriodo(data: InsertPeriodo) {
+    return this.db.insert(periodi).values({ ...data, createdAt: now() }).returning().get();
+  }
+
+  updatePeriodo(id: number, data: Partial<InsertPeriodo>) {
+    return this.db.update(periodi).set(data).where(eq(periodi.id, id)).returning().get();
+  }
+
+  deletePeriodo(id: number) {
+    return this.db.delete(periodi).where(eq(periodi.id, id)).run().changes > 0;
   }
 
   // US

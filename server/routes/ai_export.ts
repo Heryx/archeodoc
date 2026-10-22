@@ -880,7 +880,7 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     const text = typeof req.body?.text === "string" ? req.body.text : "";
     if (!text) return res.status(400).json({ error: "Campo 'text' mancante" });
     try {
-      res.json(planEmImport(text, ctx.storage.getUSList(id)));
+      res.json(planEmImport(text, ctx.storage.getUSList(id), ctx.storage.getPeriodi(id)));
     } catch (error: any) {
       res.status(error instanceof EmImportError ? 400 : 500).json({ error: error.message || "Errore lettura em.json" });
     }
@@ -912,6 +912,7 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
       const json = exportEmJson(cantiere, usList, {
         mode,
         edgeMode: req.query.edges === "physical" ? "physical" : "sequence",
+        periodi: ctx.storage.getPeriodi(id),
       });
       const filename = `${matrixExportFileBase(cantiere, String(id))}_${mode}.em.json`;
       res.setHeader("Content-Type", "application/json; charset=utf-8");

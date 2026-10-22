@@ -26,7 +26,47 @@ type USFormFieldsProps = {
   usFullList?: any[];
   /** Called when user clicks a relation tag to navigate to that US */
   onNavigateToUS?: (code: string) => void;
+  /** Nomi dei periodi del cantiere (registro + gia' usati nelle US) per il menu a tendina */
+  periodiSuggestions?: string[];
 };
+
+function PeriodoInputs({
+  form,
+  setForm,
+  periodiSuggestions,
+}: {
+  form: USFormModel;
+  setForm: Dispatch<SetStateAction<USFormModel>>;
+  periodiSuggestions: string[];
+}) {
+  return (
+    <>
+      <datalist id="us-periodi-suggest">
+        {periodiSuggestions.map((nome) => (
+          <option key={nome} value={nome} />
+        ))}
+      </datalist>
+      <div>
+        <Label>Periodo iniziale</Label>
+        <Input
+          list="us-periodi-suggest"
+          data-testid="input-periodo-iniziale"
+          placeholder={periodiSuggestions.length ? "Scegli o scrivi un periodo" : "Es. Periodo II"}
+          value={form.periodoIniziale}
+          onChange={(e) => setForm((f) => ({ ...f, periodoIniziale: e.target.value }))}
+        />
+      </div>
+      <div>
+        <Label>Periodo finale</Label>
+        <Input
+          list="us-periodi-suggest"
+          value={form.periodoFinale}
+          onChange={(e) => setForm((f) => ({ ...f, periodoFinale: e.target.value }))}
+        />
+      </div>
+    </>
+  );
+}
 
 function setFieldValue(
   setForm: Dispatch<SetStateAction<USFormModel>>,
@@ -81,6 +121,7 @@ export function USFormFields({
   usCodeSuggestions = [],
   usFullList = [],
   onNavigateToUS,
+  periodiSuggestions = [],
 }: USFormFieldsProps) {
   const [showGuide, setShowGuide] = useState(false);
   const tipoNormalized = normalizeUsTipoWithVocabulary(form.tipo, usThesaurus?.tipo);
@@ -168,6 +209,15 @@ if (isCustomModel && activeModel) {
                 </SelectContent>
               </Select>
             </div>
+          </div>
+        </section>
+
+        <section className="rounded-md border border-border bg-background">
+          <div className="border-b border-border bg-muted/20 px-3 py-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Periodo / epoca</p>
+          </div>
+          <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-2">
+            <PeriodoInputs form={form} setForm={setForm} periodiSuggestions={periodiSuggestions} />
           </div>
         </section>
 
@@ -498,17 +548,7 @@ if (isCustomModel && activeModel) {
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Cronologia e reperti</p>
         </div>
         <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-2">
-          <div>
-            <Label>Periodo iniziale</Label>
-            <Input
-              value={form.periodoIniziale}
-              onChange={(e) => setForm((f) => ({ ...f, periodoIniziale: e.target.value }))}
-            />
-          </div>
-          <div>
-            <Label>Periodo finale</Label>
-            <Input value={form.periodoFinale} onChange={(e) => setForm((f) => ({ ...f, periodoFinale: e.target.value }))} />
-          </div>
+          <PeriodoInputs form={form} setForm={setForm} periodiSuggestions={periodiSuggestions} />
           <div className="md:col-span-2">
             <Label>Materiali rinvenuti</Label>
             <Input

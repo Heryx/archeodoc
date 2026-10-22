@@ -8,7 +8,7 @@
  * recente di B, cioe' A sta sopra B (stessa direzione degli archi "from -> to"
  * della matrix di ArcheoDoc).
  */
-import type { Cantiere, UnitaStratigrafica } from "@shared/schema";
+import type { Cantiere, Periodo, UnitaStratigrafica } from "@shared/schema";
 import {
   buildMatrixGraph,
   type HarrisMatrixMode,
@@ -28,8 +28,10 @@ export type EmJsonEdgeMode = "sequence" | "physical";
 export type EmJsonOptions = {
   mode?: HarrisMatrixMode;
   edgeMode?: EmJsonEdgeMode;
-  /** Epoca per ogni periodoIniziale presente (senza date, in ordine stratigrafico). */
+  /** Epoche per ogni periodo del registro e per ogni periodoIniziale scritto nelle US. */
   includeEpochs?: boolean;
+  /** Registro periodi del cantiere (nome, ordine, date). */
+  periodi?: Periodo[];
 };
 
 export type EmJsonNode = {
@@ -135,25 +137,51 @@ export function buildEmJson(
     }
   }
 
-  // Epoche: una per ogni periodo dichiarato, dalla piu' recente (livello medio
-  // piu' alto) alla piu' antica; senza start_time EMStudio ne rispetta l'ordine.
+  // Epoche: prima quelle del registro periodi (dalla piu' recente, con le date
+  // se presenti), poi i nomi scritti solo nelle US, dal piu' recente per livello
+  // medio. Senza start_time EMStudio ne rispetta l'ordine di dichiarazione.
   if (options.includeEpochs !== false) {
+    const normName = (value: string) => value.trim().replace(/\s+/g, " ").toLowerCase();
     const levelsByPeriod = new Map<string, number[]>();
     const unitsByPeriod = new Map<string, string[]>();
+    const displayName = new Map<string, string>();
     for (const node of matrixNodes) {
       const periodo = usByKey.get(node.key)?.periodoIniziale?.trim();
       if (!periodo) continue;
-      levelsByPeriod.set(periodo, [...(levelsByPeriod.get(periodo) ?? []), node.level]);
-      unitsByPeriod.set(periodo, [...(unitsByPeriod.get(periodo) ?? []), node.key]);
+      const k = normName(periodo);
+      displayName.set(k, displayName.get(k) ?? periodo);
+      levelsByPeriod.set(k, [...(levelsByPeriod.get(k) ?? []), node.level]);
+      unitsByPeriod.set(k, [...(unitsByPeriod.get(k) ?? []), node.key]);
+    }
+
+    const registry = [...(options.periodi ?? [])].sort((a, b) => b.ordine - a.ordine || b.id - a.id);
+    const declared = new Set<string>();
+    const epochs: Array<{ name: string; description?: string; data: Record<string, unknown>; key: string }> = [];
+    for (const p of registry) {
+      const key = normName(p.nome);
+      declared.add(key);
+      const data: Record<string, unknown> = {};
+      if (p.startTime !== null && p.startTime !== undefined) data.start_time = p.startTime;
+      if (p.endTime !== null && p.endTime !== undefined) data.end_time = p.endTime;
+      epochs.push({ name: p.nome, description: p.descrizione?.trim() || undefined, data, key });
     }
     const mean = (values: number[]) => values.reduce((s, v) => s + v, 0) / values.length;
-    const periods = Array.from(levelsByPeriod.keys()).sort(
-      (a, b) => mean(levelsByPeriod.get(a)!) - mean(levelsByPeriod.get(b)!) || a.localeCompare(b, "it"),
-    );
-    for (const periodo of periods) {
-      const epochId = `EP_${slug(periodo)}`;
-      nodes.push({ id: epochId, node_type: "EpochNode", name: periodo, data: {} });
-      for (const unit of unitsByPeriod.get(periodo)!) pushEdge("has_first_epoch", unit, epochId);
+    const extra = Array.from(levelsByPeriod.keys())
+      .filter((key) => !declared.has(key))
+      .sort((a, b) => mean(levelsByPeriod.get(a)!) - mean(levelsByPeriod.get(b)!) || a.localeCompare(b, "it"));
+    for (const key of extra) epochs.push({ name: displayName.get(key)!, data: {}, key });
+
+    for (const epoch of epochs) {
+      const units = unitsByPeriod.get(epoch.key) ?? [];
+      // Un periodo registrato ma senza US resta dichiarato: e' una corsia vuota ma valida.
+      let epochId = `EP_${slug(epoch.name)}`;
+      for (let n = 2; nodes.some((existing) => existing.id === epochId); n += 1) {
+        epochId = `EP_${slug(epoch.name)}_${n}`;
+      }
+      const node: EmJsonNode = { id: epochId, node_type: "EpochNode", name: epoch.name, data: epoch.data };
+      if (epoch.description) node.description = epoch.description;
+      nodes.push(node);
+      for (const unit of units) pushEdge("has_first_epoch", unit, epochId);
     }
   }
 

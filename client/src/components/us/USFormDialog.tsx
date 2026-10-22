@@ -1,4 +1,6 @@
-﻿import { useState, type Dispatch, type SetStateAction } from "react";
+﻿import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 import { useLocation } from "wouter";
 import { BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -81,6 +83,19 @@ export function USFormDialog({
   const [location] = useLocation();
   const thesaurusHref = buildPanelHref(location, "thesaurus");
 
+  const { data: periodiData } = useQuery<{
+    periodi: { nome: string }[];
+    unregistered: { nome: string }[];
+  }>({
+    queryKey: ["/api/cantieri", cid, "periodi"],
+    queryFn: async () => (await apiRequest("GET", `/api/cantieri/${cid}/periodi`)).json(),
+    enabled: !!cid && open,
+  });
+  const periodiSuggestions = useMemo(
+    () => [...(periodiData?.periodi ?? []), ...(periodiData?.unregistered ?? [])].map((p) => p.nome),
+    [periodiData],
+  );
+
   function handleImport(data: GoogleImportPayload) {
     if (data.mode === "structured") {
       setForm((previous) => ({ ...previous, ...data.mapped }));
@@ -124,6 +139,7 @@ export function USFormDialog({
               </div>
             )}
             <USFormFields
+              periodiSuggestions={periodiSuggestions}
               form={form}
               setForm={setForm}
               giornate={giornate}

@@ -11,8 +11,17 @@ const mk = (id: number, codiceUS: string, extra: Record<string, unknown> = {}) =
 function fakeStorage(initial: UnitaStratigrafica[]) {
   const rows = initial.map((u) => ({ ...u }));
   let nextId = 100;
+  const periodi: any[] = [];
   return {
     rows,
+    periodi,
+    getPeriodi: () => periodi,
+    createPeriodo: (d: any) => {
+      const row = { id: periodi.length + 1, ...d };
+      periodi.push(row);
+      return row;
+    },
+    updatePeriodo: (id: number, d: any) => Object.assign(periodi.find((p) => p.id === id)!, d),
     getUSList: () => rows,
     getUS: (id: number) => rows.find((r) => r.id === id),
     createUS: (data: any) => {
@@ -90,4 +99,33 @@ test("import: file non validi", () => {
     () => planEmImport(JSON.stringify({ header: { format: "em.json", version: "2.0" }, graph: { nodes: [], edges: [] } }), []),
     /Versione/,
   );
+});
+
+test("import: epoche con date entrano nel registro periodi, in ordine cronologico", () => {
+  const doc = buildEmJson(cantiere, base(), { includeEpochs: false });
+  doc.graph.nodes.push(
+    { id: "EP2", node_type: "EpochNode", name: "Eta moderna", data: { start_time: 1500, end_time: 1800 } },
+    { id: "EP1", node_type: "EpochNode", name: "Eta romana", description: "impero", data: { start_time: -27, end_time: 476 } },
+    { id: "EP3", node_type: "EpochNode", name: "Senza data", data: {} },
+  );
+  doc.graph.edges.push({ id: "h1", edge_type: "has_first_epoch", source: "1", target: "EP1" });
+  const text = JSON.stringify(doc);
+
+  const plan = planEmImport(text, base(), []);
+  assert.deepEqual(plan.epochs.map((e) => [e.nome, e.kind]), [["Eta moderna", "new"], ["Eta romana", "new"], ["Senza data", "new"]]);
+
+  const storage = fakeStorage(base());
+  const result = applyEmImport(storage, cantiere, text, [...plan.epochs.map((e) => e.key), ...plan.periods.map((p) => p.key)]);
+  assert.equal(result.createdPeriods, 3);
+  const byOrder = [...storage.periodi].sort((a: any, b: any) => a.ordine - b.ordine).map((p: any) => p.nome);
+  assert.deepEqual(byOrder, ["Eta romana", "Eta moderna", "Senza data"]);
+  assert.equal(storage.periodi.find((p: any) => p.nome === "Eta romana").descrizione, "impero");
+  assert.equal(storage.rows.find((r: any) => r.codiceUS === "1").periodoIniziale, "Eta romana");
+
+  // seconda lettura: nulla di nuovo
+  assert.deepEqual(planEmImport(text, storage.rows, storage.periodi).epochs, []);
+  // un periodo noto senza date riceve quelle del file
+  storage.periodi[0].startTime = null;
+  const again = planEmImport(text, storage.rows, storage.periodi);
+  assert.deepEqual(again.epochs.map((e) => [e.nome, e.kind]), [["Eta romana", "dates"]]);
 });

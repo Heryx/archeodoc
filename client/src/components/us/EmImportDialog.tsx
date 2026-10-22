@@ -27,6 +27,14 @@ export type EmImportPlan = {
     needsNewUnit: boolean;
   }[];
   periods: { key: string; code: string; from: string | null; to: string }[];
+  epochs: {
+    key: string;
+    nome: string;
+    descrizione: string | null;
+    startTime: number | null;
+    endTime: number | null;
+    kind: "new" | "dates";
+  }[];
   conflicts: { source: string; target: string; emEdgeType: string; reason: string }[];
   ignored: { nodeTypes: Record<string, number>; edgeTypes: Record<string, number> };
 };
@@ -52,6 +60,7 @@ export function EmImportDialog({ open, fileName, plan, isApplying, onConfirm, on
   const initial = useMemo(() => {
     const keys = new Set<string>();
     if (!plan) return keys;
+    plan.epochs.forEach((e) => keys.add(e.key));
     plan.newUnits.forEach((u) => keys.add(`unit|${u.key}`));
     plan.newRelations.forEach((r) => keys.add(r.key));
     plan.periods.filter((p) => !p.from).forEach((p) => keys.add(p.key));
@@ -69,7 +78,11 @@ export function EmImportDialog({ open, fileName, plan, isApplying, onConfirm, on
     });
 
   const nothing =
-    !!plan && !plan.newUnits.length && !plan.newRelations.length && !plan.periods.length;
+    !!plan &&
+    !plan.newUnits.length &&
+    !plan.newRelations.length &&
+    !plan.periods.length &&
+    !plan.epochs.length;
 
   const Row = ({ id, children }: { id: string; children: React.ReactNode }) => (
     <label className="flex items-start gap-3 rounded-md border border-border p-2 cursor-pointer hover:bg-muted/40 transition-colors">
@@ -98,6 +111,25 @@ export function EmImportDialog({ open, fileName, plan, isApplying, onConfirm, on
               <p className="text-sm text-muted-foreground">
                 Il file non contiene nulla di nuovo rispetto al cantiere.
               </p>
+            )}
+
+            {plan.epochs.length > 0 && (
+              <section className="space-y-1.5">
+                <h3 className="text-sm font-semibold">Periodi nel registro ({plan.epochs.length})</h3>
+                {plan.epochs.map((e) => (
+                  <Row key={e.key} id={e.key}>
+                    <span className="font-semibold">{e.nome}</span>
+                    <Badge variant="secondary" className="ml-2 text-xs font-normal">
+                      {e.kind === "new" ? "nuovo" : "aggiunge le date"}
+                    </Badge>
+                    {(e.startTime !== null || e.endTime !== null) && (
+                      <span className="text-muted-foreground ml-2">
+                        {e.startTime ?? "?"} → {e.endTime ?? "?"}
+                      </span>
+                    )}
+                  </Row>
+                ))}
+              </section>
             )}
 
             {plan.newUnits.length > 0 && (

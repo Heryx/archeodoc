@@ -254,6 +254,25 @@ export const insertQcLogSchema = createInsertSchema(qcLogs).omit({ id: true, cre
 export type InsertQcLog = z.infer<typeof insertQcLogSchema>;
 export type QcLog = typeof qcLogs.$inferSelect;
 
+// Periodi / epoche di un cantiere. Le US li richiamano per nome
+// (periodoIniziale / periodoFinale); `ordine` 1 = il piu' antico.
+export const periodi = sqliteTable("periodi", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  cantiereId: integer("cantiere_id").notNull(),
+  nome: text("nome").notNull(),
+  descrizione: text("descrizione"),
+  ordine: integer("ordine").notNull().default(0),
+  /** Anni (negativi = a.C.), come start_time / end_time delle EpochNode di EM. */
+  startTime: integer("start_time"),
+  endTime: integer("end_time"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const insertPeriodoSchema = createInsertSchema(periodi).omit({ id: true, createdAt: true });
+// @ts-ignore -- drizzle-zod/drizzle-orm type mismatch, runtime is correct
+export type InsertPeriodo = z.infer<typeof insertPeriodoSchema>;
+export type Periodo = typeof periodi.$inferSelect;
+
 // Snapshot WebMap / planimetrie salvate
 export const mapSnapshots = sqliteTable("map_snapshots", {
   id: integer("id").primaryKey({ autoIncrement: true }),

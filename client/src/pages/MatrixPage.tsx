@@ -1,13 +1,14 @@
 import { Suspense, lazy, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useParams } from "wouter";
-import { Download, FileSpreadsheet, GitBranch, Layers, Upload } from "lucide-react";
+import { Download, FileSpreadsheet, GitBranch, Layers, Layers3, Upload } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { buildProjectUrl, getCurrentProjectId, getProjectHeader } from "@/lib/project";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import type { HarrisMatrixMode } from "@/components/us/HarrisMatrix";
 import { EmImportDialog, type EmImportPlan } from "@/components/us/EmImportDialog";
+import { PeriodiDialog } from "@/components/us/PeriodiDialog";
 
 const HarrisMatrix = lazy(async () => {
   const module = await import("@/components/us/HarrisMatrix");
@@ -26,6 +27,7 @@ export function MatrixPage() {
   const emFileInput = useRef<HTMLInputElement>(null);
   const [emImport, setEmImport] = useState<{ fileName: string; text: string; plan: EmImportPlan } | null>(null);
   const [emApplying, setEmApplying] = useState(false);
+  const [periodiOpen, setPeriodiOpen] = useState(false);
 
   const { data: usList = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/cantieri", cid, "us", "matrix-page", activeProjectId],
@@ -60,9 +62,10 @@ export function MatrixPage() {
       });
       const r = await res.json();
       await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "periodi"] });
       toast({
         title: "Import da EM Studio completato",
-        description: `${r.createdUnits} US create, ${r.addedRelations} rapporti aggiunti, ${r.updatedPeriods} periodi aggiornati${
+        description: `${r.createdUnits} US create, ${r.addedRelations} rapporti aggiunti, ${r.createdPeriods} periodi nel registro, ${r.updatedPeriods} US con periodo aggiornato${
           r.skipped?.length ? `, ${r.skipped.length} saltati` : ""
         }`,
       });
@@ -163,6 +166,14 @@ export function MatrixPage() {
             <GitBranch size={15} />
             {downloadKind === "em.json" ? "Esporto..." : "EM Studio"}
           </Button>
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={() => setPeriodiOpen(true)}
+            title="Periodi ed epoche del cantiere"
+          >
+            <Layers3 size={15} /> Periodi
+          </Button>
           <input
             ref={emFileInput}
             type="file"
@@ -212,6 +223,7 @@ export function MatrixPage() {
           <HarrisMatrix usList={usList} mode={mode} cantiereId={cid} />
         </Suspense>
       )}
+      {cid && <PeriodiDialog open={periodiOpen} onClose={() => setPeriodiOpen(false)} cid={cid} />}
       <EmImportDialog
         open={!!emImport}
         fileName={emImport?.fileName ?? ""}
