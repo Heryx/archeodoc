@@ -8,6 +8,8 @@
  * della matrix di ArcheoDoc).
  */
 import type { Cantiere, Periodo, UnitaStratigrafica } from "@shared/schema";
+import { normalizeUSCode } from "@shared/normalize_us_code";
+import type { EmGraphParts } from "./em_native";
 import {
   buildMatrixGraph,
   type HarrisMatrixMode,
@@ -31,6 +33,8 @@ export type EmJsonOptions = {
   includeEpochs?: boolean;
   /** Registro periodi del cantiere (nome, ordine, date). */
   periodi?: Periodo[];
+  /** Unita' virtuali e paradati del cantiere. */
+  emGraph?: EmGraphParts;
 };
 
 export type EmJsonNode = {
@@ -133,6 +137,38 @@ export function buildEmJson(
       pushEdge(PHYSICAL_EDGE[edge.type], edge.from, edge.to);
     } else {
       pushEdge("is_after", edge.from, edge.to);
+    }
+  }
+
+  // Unita' virtuali e paradati nativi: nodi e archi; le US si richiamano per codice.
+  if (options.emGraph) {
+    const idByUsKey = new Map<string, string>();
+    for (const node of matrixNodes) idByUsKey.set(normalizeUSCode(node.label), node.key);
+    const emIds = new Set(options.emGraph.nodes.map((n) => n.uid));
+    for (const em of options.emGraph.nodes) {
+      let dati: Record<string, unknown> = {};
+      try {
+        const parsed = em.dati ? JSON.parse(em.dati) : {};
+        if (parsed && typeof parsed === "object") dati = parsed;
+      } catch {
+        // dati non leggibili: nodo esportato senza
+      }
+      if (em.nodeType === "property" && dati.property_type === undefined) dati.property_type = em.nome ?? em.uid;
+      const node: EmJsonNode = {
+        id: em.uid,
+        node_type: em.nodeType,
+        name: em.nome?.trim() || em.uid,
+        data: dati,
+      };
+      if (em.descrizione?.trim()) node.description = em.descrizione.trim();
+      nodes.push(node);
+    }
+    const endpoint = (e: { kind: "us" | "em"; ref: string }) =>
+      e.kind === "em" ? (emIds.has(e.ref) ? e.ref : undefined) : idByUsKey.get(e.ref);
+    for (const edge of options.emGraph.edges) {
+      const source = endpoint(edge.source);
+      const target = endpoint(edge.target);
+      if (source && target) pushEdge(edge.edgeType, source, target);
     }
   }
 

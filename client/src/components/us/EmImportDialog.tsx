@@ -35,6 +35,8 @@ export type EmImportPlan = {
     endTime: number | null;
     kind: "new" | "dates";
   }[];
+  emNodes: { key: string; uid: string; nodeType: string; nome: string | null; descrizione: string | null }[];
+  emLinks: { key: string; label: string; source: string; target: string; needsNewNode: boolean }[];
   conflicts: { source: string; target: string; emEdgeType: string; reason: string }[];
   ignored: { nodeTypes: Record<string, number>; edgeTypes: Record<string, number> };
 };
@@ -61,6 +63,8 @@ export function EmImportDialog({ open, fileName, plan, isApplying, onConfirm, on
     const keys = new Set<string>();
     if (!plan) return keys;
     plan.epochs.forEach((e) => keys.add(e.key));
+    plan.emNodes.forEach((n) => keys.add(n.key));
+    plan.emLinks.forEach((l) => keys.add(l.key));
     plan.newUnits.forEach((u) => keys.add(`unit|${u.key}`));
     plan.newRelations.forEach((r) => keys.add(r.key));
     plan.periods.filter((p) => !p.from).forEach((p) => keys.add(p.key));
@@ -82,7 +86,9 @@ export function EmImportDialog({ open, fileName, plan, isApplying, onConfirm, on
     !plan.newUnits.length &&
     !plan.newRelations.length &&
     !plan.periods.length &&
-    !plan.epochs.length;
+    !plan.epochs.length &&
+    !plan.emNodes.length &&
+    !plan.emLinks.length;
 
   const Row = ({ id, children }: { id: string; children: React.ReactNode }) => (
     <label className="flex items-start gap-3 rounded-md border border-border p-2 cursor-pointer hover:bg-muted/40 transition-colors">
@@ -127,6 +133,37 @@ export function EmImportDialog({ open, fileName, plan, isApplying, onConfirm, on
                         {e.startTime ?? "?"} → {e.endTime ?? "?"}
                       </span>
                     )}
+                  </Row>
+                ))}
+              </section>
+            )}
+
+            {plan.emNodes.length > 0 && (
+              <section className="space-y-1.5">
+                <h3 className="text-sm font-semibold">Unità virtuali e paradati ({plan.emNodes.length})</h3>
+                {plan.emNodes.map((n) => (
+                  <Row key={n.key} id={n.key}>
+                    <span className="font-mono font-semibold">{n.uid}</span>
+                    <Badge variant="secondary" className="ml-2 text-xs font-normal">{n.nodeType}</Badge>
+                    {(n.nome || n.descrizione) && (
+                      <span className="text-muted-foreground ml-2">
+                        {[n.nome, n.descrizione].filter(Boolean).join(": ")}
+                      </span>
+                    )}
+                  </Row>
+                ))}
+              </section>
+            )}
+
+            {plan.emLinks.length > 0 && (
+              <section className="space-y-1.5">
+                <h3 className="text-sm font-semibold">Collegamenti ({plan.emLinks.length})</h3>
+                {plan.emLinks.map((l) => (
+                  <Row key={l.key} id={l.key}>
+                    <span className="font-mono font-semibold">{l.source}</span>
+                    <Badge variant="secondary" className="mx-2 text-xs font-normal">{l.label}</Badge>
+                    <span className="font-mono">{l.target}</span>
+                    {l.needsNewNode && <span className="text-xs text-amber-600 ml-2">richiede un nodo nuovo</span>}
                   </Row>
                 ))}
               </section>

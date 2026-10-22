@@ -15,6 +15,8 @@ function fakeStorage(initial: UnitaStratigrafica[]) {
   return {
     rows,
     periodi,
+    getEmNodi: () => [] as any[],
+    getEmArchi: () => [] as any[],
     getPeriodi: () => periodi,
     createPeriodo: (d: any) => {
       const row = { id: periodi.length + 1, ...d };
@@ -69,7 +71,8 @@ test("import: nuove US, nuovi rapporti, conflitti e periodi", () => {
   assert.ok(plan.newRelations.some((r) => r.source === "3" && r.target === "US4" && r.needsNewUnit));
   assert.ok(plan.conflicts.some((c) => c.source === "2" && c.target === "1"));
   assert.deepEqual(plan.periods.map((p) => [p.code, p.to]), [["3", "Periodo II"]]);
-  assert.equal(plan.ignored.nodeTypes.USVs, 1);
+  assert.deepEqual(plan.emNodes.map((n) => [n.uid, n.nodeType]), [["USVs1", "USVs"]]);
+  assert.equal(plan.ignored.nodeTypes.USVs, undefined);
 
   const storage = fakeStorage(base());
   const selected = [

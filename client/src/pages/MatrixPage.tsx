@@ -65,7 +65,7 @@ export function MatrixPage() {
       await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "periodi"] });
       toast({
         title: "Import Extended Matrix completato",
-        description: `${r.createdUnits} US create, ${r.addedRelations} rapporti aggiunti, ${r.createdPeriods} periodi nel registro, ${r.updatedPeriods} US con periodo aggiornato${
+        description: `${r.createdUnits} US create, ${r.createdEmNodes} nodi EM, ${r.addedEmLinks} collegamenti EM, ${r.addedRelations} rapporti aggiunti, ${r.createdPeriods} periodi nel registro, ${r.updatedPeriods} US con periodo aggiornato${
           r.skipped?.length ? `, ${r.skipped.length} saltati` : ""
         }`,
       });

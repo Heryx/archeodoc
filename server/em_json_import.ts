@@ -17,6 +17,7 @@ import { BASE_US_MODEL_KEY } from "@shared/us_models";
 import type { IStorage } from "./storage";
 import { buildMatrixEdges } from "./matrix_export";
 import { applyPendingInverses, INVERSE_MAP, type RelField } from "./relations_sync";
+import { EM_NODE_TYPES, loadEmGraph, type EmGraphParts } from "./em_native";
 
 /** Tipi di nodo EM che corrispondono a US reali di scavo. */
 const STRATIGRAPHIC_TYPES = new Set(["US", "USM", "USD", "SF", "USN", "USNt", "USNs", "USR"]);
@@ -70,6 +71,26 @@ export type EmImportEpoch = {
   kind: "new" | "dates";
 };
 
+export type EmImportNode = {
+  key: string;
+  uid: string;
+  nodeType: string;
+  nome: string | null;
+  descrizione: string | null;
+  dati: Record<string, unknown>;
+};
+
+export type EmImportLink = {
+  key: string;
+  edgeType: string;
+  label: string;
+  source: string;
+  target: string;
+  needsNewNode: boolean;
+  /** Estremi come salvati in ArcheoDoc: US per codice normalizzato, nodi EM per nome. */
+  ends: { sourceKind: "us" | "em"; sourceRef: string; targetKind: "us" | "em"; targetRef: string };
+};
+
 export type EmImportConflict = { source: string; target: string; emEdgeType: string; reason: string };
 
 export type EmImportPeriod = {
@@ -88,6 +109,9 @@ export type EmImportPlan = {
   newRelations: EmImportRelation[];
   periods: EmImportPeriod[];
   epochs: EmImportEpoch[];
+  /** Unita' virtuali e paradati del file non ancora nel cantiere. */
+  emNodes: EmImportNode[];
+  emLinks: EmImportLink[];
   conflicts: EmImportConflict[];
   /** Tipi di nodo/arco del file che ArcheoDoc non gestisce ancora (ignorati). */
   ignored: { nodeTypes: Record<string, number>; edgeTypes: Record<string, number> };
@@ -148,10 +172,20 @@ function indexExistingRelations(usList: UnitaStratigrafica[]) {
   return { typed, directed };
 }
 
+/** Archi che coinvolgono nodi EM nativi (unita' virtuali e paradati). */
+const EM_EDGE_LABEL: Record<string, string> = {
+  is_after: "sta sopra a",
+  extracted_from: "estratto da",
+  combines: "combina",
+  has_property: "ha la proprietà",
+  has_data_provenance: "ha provenienza",
+};
+
 export function planEmImport(
   text: string,
   usList: UnitaStratigrafica[],
   periodi: Periodo[] = [],
+  emGraph: EmGraphParts = { nodes: [], edges: [] },
 ): EmImportPlan {
   const doc = parseDoc(text);
   const graph = doc.graph!;
@@ -178,6 +212,8 @@ export function planEmImport(
         nodeType: node.node_type,
         description: node.description?.trim() || null,
       });
+    } else if ((EM_NODE_TYPES as readonly string[]).includes(node.node_type)) {
+      // unita' virtuali e paradati: trattati dopo, con i loro archi
     } else if (node.node_type === "EpochNode" || node.node_type === "epoch") {
       epochs.set(node.id, name);
       const known = registry.get(periodKey(name));
@@ -225,7 +261,80 @@ export function planEmImport(
   const seenRel = new Set<string>();
   let unchanged = 0;
 
+  // Unita' virtuali e paradati: nodi nuovi e collegamenti.
+  const emTypeIds = new Set<string>();
+  const emNodeById = new Map<string, { uid: string; isNew: boolean }>();
+  const emNodes: EmImportNode[] = [];
+  const dbEmByUid = new Map(emGraph.nodes.map((n) => [n.uid, n]));
+  const usedUids = new Set<string>();
+  const conflictsEm: EmImportConflict[] = [];
+  for (const node of graph.nodes!) {
+    if (!(EM_NODE_TYPES as readonly string[]).includes(node.node_type)) continue;
+    emTypeIds.add(node.id);
+    const label = (node.name ?? "").trim();
+    let uid = node.node_type === "property" || !label ? node.id : label;
+    if (usedUids.has(uid) || byKey.has(unitKey(uid)) || newKeys.has(unitKey(uid))) uid = node.id;
+    usedUids.add(uid);
+    const known = dbEmByUid.get(uid);
+    if (known) {
+      if (known.nodeType === node.node_type) emNodeById.set(node.id, { uid, isNew: false });
+      else {
+        conflictsEm.push({
+          source: uid,
+          target: "",
+          emEdgeType: node.node_type,
+          reason: `Esiste già un nodo "${uid}" di tipo ${known.nodeType}`,
+        });
+      }
+      continue;
+    }
+    emNodeById.set(node.id, { uid, isNew: true });
+    const { start_time: _s, end_time: _e, ...dati } = (node.data ?? {}) as Record<string, unknown>;
+    emNodes.push({
+      key: `emn|${uid}`,
+      uid,
+      nodeType: node.node_type,
+      nome: label && label !== uid ? label : null,
+      descrizione: node.description?.trim() || null,
+      dati,
+    });
+  }
+  const emLinks: EmImportLink[] = [];
+  const seenEmLink = new Set<string>();
+  const dbEmLinks = new Set(
+    emGraph.edges.map((e) => `${e.edgeType}|${e.source.kind}:${e.source.ref}|${e.target.kind}:${e.target.ref}`),
+  );
+  const endpointOf = (id: string) => {
+    const em = emNodeById.get(id);
+    if (em) return { kind: "em" as const, ref: em.uid, label: em.uid, isNew: em.isNew };
+    const unit = emUnits.get(id);
+    if (unit && unit.key) return { kind: "us" as const, ref: unit.key, label: unit.code, isNew: newKeys.has(unit.key) };
+    return undefined;
+  };
+
   for (const edge of graph.edges!) {
+    if (EM_EDGE_LABEL[edge.edge_type] && (emTypeIds.has(edge.source) || emTypeIds.has(edge.target))) {
+      const a = endpointOf(edge.source);
+      const b = endpointOf(edge.target);
+      if (!a || !b) continue;
+      const linkKey = `${edge.edge_type}|${a.kind}:${a.ref}|${b.kind}:${b.ref}`;
+      if (dbEmLinks.has(linkKey)) {
+        unchanged += 1;
+      } else if (!seenEmLink.has(linkKey)) {
+        seenEmLink.add(linkKey);
+        emLinks.push({
+          key: `eml|${linkKey}`,
+          edgeType: edge.edge_type,
+          label: EM_EDGE_LABEL[edge.edge_type],
+          source: a.label,
+          target: b.label,
+          needsNewNode: a.isNew || b.isNew,
+          ends: { sourceKind: a.kind, sourceRef: a.ref, targetKind: b.kind, targetRef: b.ref },
+        });
+      }
+      continue;
+    }
+
     if (edge.edge_type === "has_first_epoch") {
       const unit = emUnits.get(edge.source);
       const epochName = epochs.get(edge.target);
@@ -295,12 +404,16 @@ export function planEmImport(
     newRelations,
     periods,
     epochs: epochNodes,
-    conflicts,
+    emNodes,
+    emLinks,
+    conflicts: [...conflicts, ...conflictsEm],
     ignored: { nodeTypes: ignoredNodes, edgeTypes: ignoredEdges },
   };
 }
 
 export type EmImportResult = {
+  createdEmNodes: number;
+  addedEmLinks: number;
   createdPeriods: number;
   createdUnits: number;
   addedRelations: number;
@@ -315,9 +428,9 @@ export function applyEmImport(
   selected: string[],
 ): EmImportResult {
   const usList = storage.getUSList(cantiere.id);
-  const plan = planEmImport(text, usList, storage.getPeriodi(cantiere.id));
+  const plan = planEmImport(text, usList, storage.getPeriodi(cantiere.id), loadEmGraph(storage, cantiere.id));
   const wanted = new Set(selected);
-  const result: EmImportResult = { createdPeriods: 0, createdUnits: 0, addedRelations: 0, updatedPeriods: 0, skipped: [] };
+  const result: EmImportResult = { createdEmNodes: 0, addedEmLinks: 0, createdPeriods: 0, createdUnits: 0, addedRelations: 0, updatedPeriods: 0, skipped: [] };
 
   // Registro periodi: prima i piu' antichi (start_time crescente), i senza data in coda.
   const chosenEpochs = plan.epochs
@@ -375,6 +488,36 @@ export function applyEmImport(
       { targetId: to.id, targetCode: to.codiceUS, field: INVERSE_MAP[field as RelField], valueToAdd: from.codiceUS },
     ]);
     result.addedRelations += 1;
+  }
+
+  // Unita' virtuali e paradati (dopo le US, che possono esserne un estremo)
+  for (const node of plan.emNodes) {
+    if (!wanted.has(node.key)) continue;
+    storage.createEmNodo({
+      cantiereId: cantiere.id,
+      uid: node.uid,
+      nodeType: node.nodeType,
+      nome: node.nome,
+      descrizione: node.descrizione,
+      dati: Object.keys(node.dati).length ? JSON.stringify(node.dati) : null,
+    });
+    result.createdEmNodes += 1;
+  }
+  const emUids = new Set(storage.getEmNodi(cantiere.id).map((n) => n.uid));
+  const haveEnd = (kind: "us" | "em", ref: string) => (kind === "em" ? emUids.has(ref) : byKey.has(ref));
+  for (const link of plan.emLinks) {
+    if (!wanted.has(link.key)) continue;
+    const { sourceKind, sourceRef, targetKind, targetRef } = link.ends;
+    if (!haveEnd(sourceKind, sourceRef) || !haveEnd(targetKind, targetRef)) {
+      result.skipped.push(`${link.source} ${link.label} ${link.target}: nodo o US mancante`);
+      continue;
+    }
+    const already = storage
+      .getEmArchi(cantiere.id)
+      .some((e) => e.edgeType === link.edgeType && e.sourceKind === sourceKind && e.sourceRef === sourceRef && e.targetKind === targetKind && e.targetRef === targetRef);
+    if (already) continue;
+    storage.createEmArco({ cantiereId: cantiere.id, edgeType: link.edgeType, sourceKind, sourceRef, targetKind, targetRef });
+    result.addedEmLinks += 1;
   }
 
   for (const period of plan.periods) {

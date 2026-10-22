@@ -81,3 +81,50 @@ test("validazioni: tipi ammessi, duplicati, rinomina e cancellazione", async () 
     assert.deepEqual(storage.getEmArchi(cid), []);
   });
 });
+
+test("esporta e reimporta unita' virtuali e paradati (formato .em.json)", async () => {
+  const { buildEmJson } = await import("../server/em_json");
+  const { loadEmGraph } = await import("../server/em_native");
+  const { planEmImport, applyEmImport } = await import("../server/em_json_import");
+  let doc: any;
+  let cantiere: any;
+  await withStorage((storage, cid) => {
+    cantiere = storage.getCantiere(cid);
+    saveEmNode(storage, cid, { nodeType: "USVs", links: { sopraA: ["US 1"], sottoA: ["US 3"] } });
+    const d = saveEmNode(storage, cid, { nodeType: "document", descrizione: "Rilievo 1987" });
+    const x = saveEmNode(storage, cid, { nodeType: "extractor", links: { fonti: [d.uid] } });
+    saveEmNode(storage, cid, {
+      nodeType: "property", nome: "material", descrizione: "tufo", dati: { property_type: "material" },
+      links: { appartieneA: ["USVs1"], provenienza: [x.uid] },
+    });
+    doc = buildEmJson(cantiere, storage.getUSList(cid), { emGraph: loadEmGraph(storage, cid), includeEpochs: false });
+  });
+
+  const byType = (t: string) => doc.graph.nodes.filter((n: any) => n.node_type === t);
+  assert.equal(byType("USVs").length, 1);
+  assert.equal(byType("property")[0].name, "material");
+  assert.equal(byType("property")[0].description, "tufo");
+  assert.ok(doc.graph.edges.some((e: any) => e.edge_type === "is_after" && e.source === "USVs1" && e.target === "1"));
+  assert.ok(doc.graph.edges.some((e: any) => e.edge_type === "is_after" && e.source === "3" && e.target === "USVs1"));
+  assert.ok(doc.graph.edges.some((e: any) => e.edge_type === "extracted_from" && e.source === "X.1" && e.target === "D.1"));
+  assert.ok(doc.graph.edges.some((e: any) => e.edge_type === "has_property" && e.source === "USVs1"));
+
+  // in un cantiere con le stesse US ma senza nodi EM: tutto da importare, poi piu' nulla
+  await withStorage((storage, cid) => {
+    const text = JSON.stringify(doc);
+    const plan = planEmImport(text, storage.getUSList(cid), [], loadEmGraph(storage, cid));
+    assert.deepEqual(plan.emNodes.map((n) => n.uid).sort(), ["D.1", "USVs1", "X.1", expect_prop(plan)].sort());
+    assert.equal(plan.emLinks.length, 5);
+    const res = applyEmImport(storage, storage.getCantiere(cid), text, [...plan.emNodes.map((n) => n.key), ...plan.emLinks.map((l) => l.key)]);
+    assert.equal(res.createdEmNodes, 4);
+    assert.equal(res.addedEmLinks, 5);
+    const again = planEmImport(text, storage.getUSList(cid), [], loadEmGraph(storage, cid));
+    assert.deepEqual([again.emNodes.length, again.emLinks.length], [0, 0]);
+    const v = listEmNodes(storage, cid).find((n) => n.uid === "USVs1")!;
+    assert.deepEqual([v.links.sopraA, v.links.sottoA], [["1"], ["3"]]);
+  });
+});
+
+function expect_prop(plan: { emNodes: { uid: string; nodeType: string }[] }) {
+  return plan.emNodes.find((n) => n.nodeType === "property")!.uid;
+}

@@ -40,6 +40,7 @@ import {
   type HarrisMatrixMode,
 } from "../matrix_export";
 import { exportEmJson } from "../em_json";
+import { loadEmGraph } from "../em_native";
 import { applyEmImport, EmImportError, planEmImport } from "../em_json_import";
 import { calcolaSettimaneProgetto } from "@shared/weekUtils";
 
@@ -880,7 +881,7 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     const text = typeof req.body?.text === "string" ? req.body.text : "";
     if (!text) return res.status(400).json({ error: "Campo 'text' mancante" });
     try {
-      res.json(planEmImport(text, ctx.storage.getUSList(id), ctx.storage.getPeriodi(id)));
+      res.json(planEmImport(text, ctx.storage.getUSList(id), ctx.storage.getPeriodi(id), loadEmGraph(ctx.storage, id)));
     } catch (error: any) {
       res.status(error instanceof EmImportError ? 400 : 500).json({ error: error.message || "Errore lettura em.json" });
     }
@@ -913,6 +914,7 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
         mode,
         edgeMode: req.query.edges === "physical" ? "physical" : "sequence",
         periodi: ctx.storage.getPeriodi(id),
+        emGraph: loadEmGraph(ctx.storage, id),
       });
       const filename = `${matrixExportFileBase(cantiere, String(id))}_${mode}.em.json`;
       res.setHeader("Content-Type", "application/json; charset=utf-8");
