@@ -126,3 +126,15 @@ test("storage SQLite reale: registro periodi, assegnazione, ordine e rinomina", 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("clearPeriodFromUs toglie il periodo da iniziale e finale, solo per quel nome", async () => {
+  const { clearPeriodFromUs } = await import("../server/periodi");
+  const storage = fake(list());
+  // Moderno: US 1 (iniziale) e US 2 (finale " Moderno "); Medievale e Romano non cambiano
+  assert.equal(clearPeriodFromUs(storage, 1, "moderno"), 2);
+  assert.equal(storage.rows[0].periodoIniziale, null);
+  assert.equal(storage.rows[1].periodoFinale, null);
+  assert.equal(storage.rows[1].periodoIniziale, "Medievale");
+  assert.equal(storage.rows[2].periodoIniziale, "Romano");
+  assert.equal(clearPeriodFromUs(storage, 1, "Moderno"), 0);
+});

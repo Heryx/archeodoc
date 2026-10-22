@@ -130,6 +130,7 @@ export function PeriodiDialog({ open, onClose, cid }: Props) {
   const [newNome, setNewNome] = useState("");
   const [assignNome, setAssignNome] = useState("");
   const [assignCodes, setAssignCodes] = useState("");
+  const [toDelete, setToDelete] = useState<PeriodoRow | null>(null);
 
   const { data, isLoading } = useQuery<PeriodiData>({
     queryKey: ["/api/cantieri", cid, "periodi"],
@@ -215,6 +216,25 @@ export function PeriodiDialog({ open, onClose, cid }: Props) {
               >
                 Registrali (ordine dalla stratigrafia)
               </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={run.isPending}
+                onClick={() => {
+                  const totale = data.unregistered.reduce((s, p) => s + p.count, 0);
+                  if (
+                    window.confirm(
+                      `Togliere questi periodi da ${totale} riferimenti nelle US? Le schede resteranno senza periodo.`,
+                    )
+                  ) {
+                    run.mutate(() =>
+                      apiRequest("POST", `${base}/clear`, { nomi: data.unregistered.map((p) => p.nome) }),
+                    );
+                  }
+                }}
+              >
+                Toglili dalle US
+              </Button>
             </div>
           )}
 
@@ -242,7 +262,11 @@ export function PeriodiDialog({ open, onClose, cid }: Props) {
                   last={index === rows.length - 1}
                   onPatch={(patch) => run.mutate(() => apiRequest("PATCH", `/api/periodi/${row.id}`, patch))}
                   onMove={(dir) => move(index, dir)}
-                  onDelete={() => run.mutate(() => apiRequest("DELETE", `/api/periodi/${row.id}`))}
+                  onDelete={() =>
+                  row.usCount > 0
+                    ? setToDelete(row)
+                    : run.mutate(() => apiRequest("DELETE", `/api/periodi/${row.id}`))
+                }
                 />
               ))}
               <Button
@@ -305,6 +329,45 @@ export function PeriodiDialog({ open, onClose, cid }: Props) {
           </div>
         </div>
       </DialogContent>
+
+      <Dialog open={!!toDelete} onOpenChange={(v) => !v && setToDelete(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Eliminare «{toDelete?.nome}»?</DialogTitle>
+            <DialogDescription>
+              Il periodo è indicato in {toDelete?.usCount} US. Puoi toglierlo anche dalle schede, oppure eliminarlo
+              solo dal registro e lasciare il testo nelle US.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-2 pt-2">
+            <Button
+              variant="destructive"
+              disabled={run.isPending}
+              onClick={() => {
+                const row = toDelete;
+                setToDelete(null);
+                if (row) run.mutate(() => apiRequest("DELETE", `/api/periodi/${row.id}?clearUs=1`));
+              }}
+            >
+              Elimina e togli dalle {toDelete?.usCount} US
+            </Button>
+            <Button
+              variant="outline"
+              disabled={run.isPending}
+              onClick={() => {
+                const row = toDelete;
+                setToDelete(null);
+                if (row) run.mutate(() => apiRequest("DELETE", `/api/periodi/${row.id}`));
+              }}
+            >
+              Elimina solo dal registro
+            </Button>
+            <Button variant="ghost" onClick={() => setToDelete(null)}>
+              Annulla
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }

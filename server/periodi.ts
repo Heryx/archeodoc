@@ -85,6 +85,21 @@ export function reorderByStratigraphy(storage: IStorage, cantiereId: number): Pe
   return storage.getPeriodi(cantiereId);
 }
 
+/** Toglie un periodo (per nome) da periodo iniziale e finale delle US che lo richiamano. */
+export function clearPeriodFromUs(storage: IStorage, cantiereId: number, nome: string): number {
+  let cleared = 0;
+  for (const us of storage.getUSList(cantiereId)) {
+    const patch: Record<string, null> = {};
+    if (us.periodoIniziale && norm(us.periodoIniziale) === norm(nome)) patch.periodoIniziale = null;
+    if (us.periodoFinale && norm(us.periodoFinale) === norm(nome)) patch.periodoFinale = null;
+    if (Object.keys(patch).length) {
+      storage.updateUS(us.id, patch);
+      cleared += 1;
+    }
+  }
+  return cleared;
+}
+
 /** Rinomina un periodo e aggiorna le US che lo richiamavano per nome. */
 export function renamePeriod(storage: IStorage, periodo: Periodo, nuovoNome: string): number {
   let updated = 0;

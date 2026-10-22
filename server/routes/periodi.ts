@@ -6,12 +6,14 @@
  * POST   /api/cantieri/:id/periodi/assign           → { nome, codes: "100-118, 125" } assegna il periodo alle US
  * POST   /api/cantieri/:id/periodi/reorder          → { ids } ordine antico → recente, oppure { auto: true } dalla stratigrafia
  * PATCH  /api/periodi/:id                           → modifica (il nome si propaga alle US)
- * DELETE /api/periodi/:id                           → elimina dal registro (le US restano invariate)
+ * POST   /api/cantieri/:id/periodi/clear            → { nome } toglie il periodo dalle US che lo richiamano
+ * DELETE /api/periodi/:id?clearUs=1                 → elimina dal registro; con clearUs lo toglie anche dalle US
  */
 import type { Express } from "express";
 import type { WithProject } from "./types";
 import {
   assignPeriod,
+  clearPeriodFromUs,
   collectUnregistered,
   parseCodeList,
   registerPeriodsFromUs,
@@ -77,6 +79,18 @@ export function registerPeriodiRoutes(app: Express, withProject: WithProject) {
     res.json(assignPeriod(ctx.storage, id, nome, codes));
   }));
 
+  app.post("/api/cantieri/:id/periodi/clear", withProject((ctx, req, res) => {
+    const id = Number(req.params.id);
+    if (!ctx.storage.getCantiere(id)) return res.status(404).json({ error: "Cantiere non trovato" });
+    const nomi: string[] = Array.isArray(req.body?.nomi)
+      ? req.body.nomi.map(String)
+      : req.body?.nome
+        ? [String(req.body.nome)]
+        : [];
+    if (!nomi.length) return res.status(400).json({ error: "Indica il periodo" });
+    res.json({ usAggiornate: nomi.reduce((sum, nome) => sum + clearPeriodFromUs(ctx.storage, id, nome), 0) });
+  }));
+
   app.post("/api/cantieri/:id/periodi/reorder", withProject((ctx, req, res) => {
     const id = Number(req.params.id);
     if (!ctx.storage.getCantiere(id)) return res.status(404).json({ error: "Cantiere non trovato" });
@@ -115,8 +129,11 @@ export function registerPeriodiRoutes(app: Express, withProject: WithProject) {
   }));
 
   app.delete("/api/periodi/:id", withProject((ctx, req, res) => {
-    const ok = ctx.storage.deletePeriodo(Number(req.params.id));
-    if (!ok) return res.status(404).json({ error: "Periodo non trovato" });
-    res.json({ ok: true });
+    const periodo = ctx.storage.getPeriodo(Number(req.params.id));
+    if (!periodo) return res.status(404).json({ error: "Periodo non trovato" });
+    const usAggiornate =
+      req.query.clearUs === "1" ? clearPeriodFromUs(ctx.storage, periodo.cantiereId, periodo.nome) : 0;
+    ctx.storage.deletePeriodo(periodo.id);
+    res.json({ ok: true, usAggiornate });
   }));
 }
