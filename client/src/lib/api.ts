@@ -107,8 +107,9 @@ export type USImportApplyItem = {
 export async function getAiFillSuggestions(
   usId: number,
   source: AIFillSource = "entrambi",
+  signal?: AbortSignal,
 ): Promise<AiFillSuggestionsResponse> {
-  const response = await apiRequest("POST", `/api/us/${usId}/ai-fill`, { source });
+  const response = await apiRequest("POST", `/api/us/${usId}/ai-fill`, { source }, signal);
   return response.json();
 }
 
@@ -123,6 +124,7 @@ export async function getAiFillSuggestionsFromText(
 export async function getAiFillSuggestionsFromDocx(
   usId: number,
   file: File,
+  signal?: AbortSignal,
 ): Promise<AiFillSuggestionsResponse> {
   const formData = new FormData();
   formData.append("file", file);
@@ -131,6 +133,7 @@ export async function getAiFillSuggestionsFromDocx(
     method: "POST",
     headers: getProjectHeader(),
     body: formData,
+    signal,
   });
 
   if (!response.ok) {
@@ -144,10 +147,11 @@ export async function getAiFillSuggestionsFromDocx(
 export async function getAiFillSuggestionsFromGoogleDoc(
   usId: number,
   url?: string,
+  signal?: AbortSignal,
 ): Promise<AiFillSuggestionsResponse> {
   const response = await apiRequest("POST", `/api/us/${usId}/ai-fill-google-doc`, {
     url: String(url || "").trim() || undefined,
-  });
+  }, signal);
   return response.json();
 }
 
@@ -171,10 +175,11 @@ export async function previewUsImportFromGiornataText(
   cantiereId: number,
   giornataId: number,
   text?: string,
+  signal?: AbortSignal,
 ): Promise<USImportPreviewResponse> {
   const response = await apiRequest("POST", `/api/cantieri/${cantiereId}/giornate/${giornataId}/import-us-from-text`, {
     text,
-  });
+  }, signal);
   return response.json();
 }
 
@@ -182,10 +187,11 @@ export async function previewUsImportFromGoogleDoc(
   cantiereId: number,
   giornataId: number,
   url?: string,
+  signal?: AbortSignal,
 ): Promise<USImportPreviewResponse> {
   const response = await apiRequest("POST", `/api/cantieri/${cantiereId}/giornate/${giornataId}/import-us-from-google-doc`, {
     url: String(url || "").trim() || undefined,
-  });
+  }, signal);
   return response.json();
 }
 
@@ -193,6 +199,7 @@ export async function previewUsImportFromDocx(
   cantiereId: number,
   giornataId: number,
   file: File,
+  signal?: AbortSignal,
 ): Promise<USImportPreviewResponse> {
   const formData = new FormData();
   formData.append("file", file);
@@ -201,6 +208,7 @@ export async function previewUsImportFromDocx(
     method: "POST",
     headers: getProjectHeader(),
     body: formData,
+    signal,
   });
 
   if (!response.ok) {

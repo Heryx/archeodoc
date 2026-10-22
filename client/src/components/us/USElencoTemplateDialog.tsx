@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { apiRequest } from "@/lib/queryClient";
+import { useAiJobMutation } from "@/lib/aiJobs";
 import { useToast } from "@/hooks/use-toast";
 import { getCurrentProjectId } from "@/lib/project";
 import type { USModelDefinition } from "@shared/us_models";
@@ -181,11 +182,14 @@ export function USElencoTemplateDialog({ open, onOpenChange, cid, activeModel }:
     onError: (e: any) => toast({ title: "Errore verifica campi", description: e.message, variant: "destructive" }),
   });
 
-  const aiCheckMutation = useMutation({
-    mutationFn: async () => {
+  const aiCheckMutation = useAiJobMutation<void, { suggestions: { placeholder: string; match: AIFieldMatch | null }[] }>({
+    prefix: `template-ai-check:${endpoint}`,
+    keyOf: () => `template-ai-check:${endpoint}`,
+    labelOf: () => "Verifica campi template (IA)",
+    run: async (_vars, { signal }) => {
       const targets = (suggestions || []).filter((s) => s.status === "new").map((s) => s.placeholder);
       if (targets.length === 0) return { suggestions: [] as { placeholder: string; match: AIFieldMatch | null }[] };
-      const res = await apiRequest("POST", `${endpoint}/field-suggestions/ai-check`, { placeholders: targets });
+      const res = await apiRequest("POST", `${endpoint}/field-suggestions/ai-check`, { placeholders: targets }, signal);
       if (!res.ok) throw new Error((await res.json()).error || "Errore verifica AI");
       return res.json() as Promise<{ suggestions: { placeholder: string; match: AIFieldMatch | null }[] }>;
     },

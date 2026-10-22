@@ -292,6 +292,9 @@ export const documentazioni = sqliteTable("documentazioni", {
   dataFine: text("data_fine"),
   stato: text("stato", { enum: ["bozza", "completata"] }).notNull().default("bozza"),
   allegatoId: integer("allegato_id"),
+  // Contenuto dell'editor (JSON ProseMirror) e intestazione/piè di pagina (JSON)
+  contenuto: text("contenuto"),
+  intestazione: text("intestazione"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });

@@ -445,6 +445,8 @@ function migrate(sqlite: Database.Database) {
   ensureColumn(sqlite, "documentazioni", "stato", "stato TEXT NOT NULL DEFAULT 'bozza'");
   ensureColumn(sqlite, "documentazioni", "allegato_id", "allegato_id INTEGER");
   ensureColumn(sqlite, "documentazioni", "updated_at", "updated_at TEXT");
+  ensureColumn(sqlite, "documentazioni", "contenuto", "contenuto TEXT");
+  ensureColumn(sqlite, "documentazioni", "intestazione", "intestazione TEXT");
   ensureColumn(sqlite, "sas_records", "data", "data TEXT");
   ensureColumn(sqlite, "ra_records", "data", "data TEXT");
   ensureColumn(sqlite, "allegati", "sas_id", "sas_id INTEGER");

@@ -23,6 +23,7 @@ import path from "path";
 import { resolveUSTemplatePath } from "../us_template_path";
 import { elencoUsTemplatePath, readElencoTemplateChoice } from "../elenco_us_template_path";
 import { analyzeElencoTemplate, describeRepairs } from "../elenco_template_repair";
+import { resolveElencoColumns, buildElencoRowValues } from "../elenco_columns";
 import { getDocumentText } from "../google_docs";
 import { applyUSImportPreview, buildUSImportPreview } from "../us_extractor";
 import {
@@ -58,6 +59,34 @@ function parseMatrixMode(raw: unknown): HarrisMatrixMode {
 function parseZipExportScope(raw: unknown): "all" | "us" {
   if (raw === "us") return "us";
   return "all";
+}
+
+async function buildElencoUSSheet(project: any, cantiere: any, usList: any[]) {
+  const columns = await resolveElencoColumns(project, cantiere, usList);
+  const aoa: string[][] = [
+    columns.map((c) => c.label),
+    ...usList.map((us) => {
+      const values = buildElencoRowValues(columns, us, cantiere);
+      return columns.map((c) => values[c.key] ?? "");
+    }),
+  ];
+  const XLSX = await import("xlsx");
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  return { ws, columns, aoa, XLSX };
+}
+
+function writeElencoUSXlsx(
+  XLSX: typeof import("xlsx"),
+  ws: import("xlsx").WorkSheet,
+  columns: { label: string }[],
+  aoa: string[][],
+): Buffer {
+  ws["!cols"] = columns.map((c, i) => ({
+    wch: Math.min(60, Math.max(c.label.length, ...aoa.slice(1).map((r) => (r[i] || "").length), 8)),
+  }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Elenco US");
+  return XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
 }
 
 function parseAiFillSource(raw: unknown): "descrizione" | "diario" | "entrambi" | "text" {
@@ -672,6 +701,36 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     }
   }));
 
+  // Export Elenco US tabellare (xlsx / csv), stesse colonne mostrate nell'elenco
+  app.get("/api/cantieri/:cid/elenco-us/export-table", withProject(async (ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const cantiere = ctx.storage.getCantiere(cid);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const format = req.query.format === "csv" ? "csv" : "xlsx";
+    const giornataIdRaw = req.query.giornataId;
+    const giornataId = typeof giornataIdRaw === "string" && giornataIdRaw.trim() ? Number(giornataIdRaw) : undefined;
+    const usList = ctx.storage.getUSList(cid, giornataId);
+
+    try {
+      const base = `Elenco_US_${cantiere.codice.replace(/[\s/]/g, "_")}`;
+      const { ws, columns, aoa, XLSX } = await buildElencoUSSheet(ctx.project, cantiere, usList);
+      if (format === "csv") {
+        // BOM + separatore ";" per l'apertura corretta in Excel (locale italiano)
+        const csv = "﻿" + XLSX.utils.sheet_to_csv(ws, { FS: ";" });
+        res.setHeader("Content-Type", "text/csv; charset=utf-8");
+        res.setHeader("Content-Disposition", `attachment; filename="${base}.csv"`);
+        return res.send(csv);
+      }
+      const buf = writeElencoUSXlsx(XLSX, ws, columns, aoa);
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="${base}.xlsx"`);
+      res.send(buf);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  }));
+
   // Export US PDF
   app.get("/api/us/:id/export-pdf", withProject(async (ctx, req, res) => {
     const id = Number(req.params.id);
@@ -863,22 +922,49 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
       }
     }
 
-    // Schede US DOCX (solo quelle con scheda AI generata)
+    // Schede US DOCX (tutte le US; se manca la scheda AI si usano i dati strutturati)
     const schedeFolderName = "schede_us";
     for (const us of usList) {
-      if (!us.schedaAiGenerata) continue;
       try {
         const campiRaw = us.qcProblemi ? JSON.parse(us.qcProblemi).filter((p: any) => p.livello === "error").map((p: any) => p.messaggio) : [];
         const zipModelKey = cantiere?.usModelKey || us.schedaModelKey || "base-us";
         const zipTemplatePath = resolveUSTemplatePath(ctx.project, zipModelKey);
+        const schedaTesto = us.schedaAiGenerata || [
+          `CODICE US: ${us.codiceUS}`,
+          `TIPO: ${us.tipo || "-"}`,
+          `DEFINIZIONE: ${us.definizione || "-"}`,
+          `DESCRIZIONE: ${us.descrizione || "-"}`,
+          `INTERPRETAZIONE: ${us.interpretazione || "-"}`,
+        ].join("\n");
         const buf = zipTemplatePath
           ? await exportSchedaUSDocxFromTemplate(zipTemplatePath, us, cantiere)
-          : await exportSchedaUSDocx(us, cantiere, us.schedaAiGenerata, campiRaw, "", zipModelKey);
+          : await exportSchedaUSDocx(us, cantiere, schedaTesto, campiRaw, "", zipModelKey);
         const fname = `Scheda_${us.codiceUS.replace(/[\s/\\:*?"<>|]/g, "_")}.docx`;
         folder.folder(schedeFolderName)!.file(fname, buf);
       } catch {
         // skip
       }
+    }
+
+    // Elenco US: XLSX sempre, DOCX se esiste un template elenco caricato
+    const elencoFolder = folder.folder("elenco_us")!;
+    const elencoBase = `Elenco_US_${slug}`;
+    let elencoEsportato = false;
+    try {
+      const { ws, columns, aoa, XLSX } = await buildElencoUSSheet(ctx.project, cantiere, usList);
+      elencoFolder.file(`${elencoBase}.xlsx`, writeElencoUSXlsx(XLSX, ws, columns, aoa));
+      elencoEsportato = true;
+    } catch {
+      // skip
+    }
+    try {
+      const elencoTemplate = elencoUsTemplatePath(ctx.project);
+      if (fs.existsSync(elencoTemplate)) {
+        elencoFolder.file(`${elencoBase}.docx`, await exportElencoUSDocxFromTemplate(elencoTemplate, usList, cantiere));
+        elencoEsportato = true;
+      }
+    } catch {
+      // skip
     }
 
     // README.txt con info cantiere
@@ -890,7 +976,8 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
         `Localit\u00e0: ${cantiere.localita}\n` +
         `Esportato il: ${new Date().toLocaleString("it-IT")}\n\n` +
         `Diari generati: ${includeDiari ? `${giornate.filter((g) => !!g.aiReportText).length}/${giornate.length}` : "esclusi"}\n` +
-        `Schede US generate: ${usList.filter((u) => !!u.schedaAiGenerata).length}/${usList.length}\n`,
+        `Schede US esportate: ${usList.length} (con scheda AI: ${usList.filter((u) => !!u.schedaAiGenerata).length})\n` +
+        `Elenco US: ${elencoEsportato ? "incluso (cartella elenco_us)" : "non disponibile"}\n`,
     );
 
     const zipBuffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });

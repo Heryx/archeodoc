@@ -12,6 +12,7 @@ import {
   Sparkles, X, ChevronRight, ChevronLeft, Send, ExternalLink, Filter, ListChecks, Loader2, Square, Pencil, Download,
 } from "lucide-react";
 import { useAiAssistant } from "./AiAssistantContext";
+import { cancelAiJob, startAiJob, useAiJobActive } from "@/lib/aiJobs";
 import { invalidateUsRelatedQueries } from "@/lib/usCache";
 import {
   askAssistant,
@@ -39,7 +40,7 @@ const PAGE_CONTEXT_LABELS: Record<string, string> = {
   giornata: "Giornata di scavo",
   materiali: "Materiali",
   webmap: "WebMap",
-  documentazioni: "Documentazioni",
+  documentazioni: "Relazioni e consegne",
   sas: "Saggi",
   report: "Report",
   stats: "Statistiche",
@@ -69,7 +70,7 @@ export function AiAssistantPanel({ cid, pageContext }: { cid?: string; pageConte
   const [usRange, setUsRange] = useState("");
   const [editSel, setEditSel] = useState<Record<string, boolean>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  const jobIdRef = useRef<number | null>(null);
   const conversationIdRef = useRef<string>(
     typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : String(Date.now()),
   );
@@ -80,46 +81,54 @@ export function AiAssistantPanel({ cid, pageContext }: { cid?: string; pageConte
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [turns]);
 
-  const ask = useMutation({
-    mutationFn: async ({ prompt, history, usRange }: { prompt: string; history: AssistantChatMessage[]; usRange?: string }): Promise<AssistantResult> => {
-      const controller = new AbortController();
-      abortRef.current = controller;
-      try {
-        return await askAssistant(cid!, { prompt, history, pageContext, usRange }, controller.signal);
-      } finally {
-        if (abortRef.current === controller) abortRef.current = null;
-      }
-    },
-    onSuccess: (res) => {
-      setTurns((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: res.answer,
-          selection: res.selection,
-          proposedEdits: res.proposedEdits,
-          truncated: res.truncated,
-          contextInfo: res.contextInfo,
+  // La richiesta gira nel gestore globale dei job IA: continua anche a pannello chiuso
+  // e compare nella barra in basso.
+  const askKey = `assistente:${cid ?? ""}`;
+  const askPending = useAiJobActive(askKey);
+  const ask = {
+    isPending: askPending,
+    mutate: ({ prompt, history, usRange }: { prompt: string; history: AssistantChatMessage[]; usRange?: string }) => {
+      const id = startAiJob<AssistantResult>({
+        key: askKey,
+        label: `Assistente IA: ${prompt.length > 40 ? `${prompt.slice(0, 40)}…` : prompt}`,
+        interactive: true,
+        run: ({ signal }) => askAssistant(cid!, { prompt, history, pageContext, usRange }, signal),
+        onSuccess: (res) => {
+          jobIdRef.current = null;
+          setTurns((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content: res.answer,
+              selection: res.selection,
+              proposedEdits: res.proposedEdits,
+              truncated: res.truncated,
+              contextInfo: res.contextInfo,
+            },
+          ]);
+          if (res.proposedEdits.length > 0) {
+            setEditSel((prev) => {
+              const next = { ...prev };
+              for (const e of res.proposedEdits) if (next[editKey(e)] == null) next[editKey(e)] = true;
+              return next;
+            });
+          }
         },
-      ]);
-      if (res.proposedEdits.length > 0) {
-        setEditSel((prev) => {
-          const next = { ...prev };
-          for (const e of res.proposedEdits) if (next[editKey(e)] == null) next[editKey(e)] = true;
-          return next;
-        });
-      }
+        onCancel: () => {
+          jobIdRef.current = null;
+          setTurns((prev) => prev.slice(0, -1));
+          // Interrotto dall'utente: la domanda torna nel campo per poterla modificare.
+          setInput(prompt);
+        },
+        onError: (err: any) => {
+          jobIdRef.current = null;
+          setTurns((prev) => prev.slice(0, -1));
+          toast({ title: "Errore assistente IA", description: err?.message, variant: "destructive" });
+        },
+      });
+      jobIdRef.current = id;
     },
-    onError: (err: any, vars) => {
-      setTurns((prev) => prev.slice(0, -1));
-      if (err?.name === "AbortError") {
-        // Interrotto dall'utente: la domanda torna nel campo per poterla modificare.
-        setInput(vars.prompt);
-        return;
-      }
-      toast({ title: "Errore assistente IA", description: err?.message, variant: "destructive" });
-    },
-  });
+  };
 
   const applyEdits = useMutation({
     mutationFn: async (edits: AssistantProposedEdit[]) =>
@@ -157,7 +166,9 @@ export function AiAssistantPanel({ cid, pageContext }: { cid?: string; pageConte
     ask.mutate({ prompt, history, usRange: usRange.trim() || undefined });
   };
 
-  const stop = () => abortRef.current?.abort();
+  const stop = () => {
+    if (jobIdRef.current != null) cancelAiJob(jobIdRef.current);
+  };
 
   const startEdit = (index: number) => {
     setEditingIndex(index);
@@ -184,7 +195,9 @@ export function AiAssistantPanel({ cid, pageContext }: { cid?: string; pageConte
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-medium text-primary-foreground shadow-lg hover:bg-primary/90"
+        className={cn(
+          "fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-medium text-primary-foreground shadow-lg hover:bg-primary/90",
+        )}
         title="Apri assistente IA"
       >
         <Sparkles size={16} /> Assistente IA

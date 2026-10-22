@@ -23,8 +23,10 @@ import {
   previewUsImportFromGiornataText,
   type USImportApplyItem,
   type USImportPreview,
+  type USImportPreviewResponse,
   type USImportSource,
 } from "@/lib/api";
+import { startAiJob } from "@/lib/aiJobs";
 import { cn } from "@/lib/utils";
 
 type SourceTab = "text" | "docx" | "google-doc";
@@ -104,16 +106,42 @@ export function USImportFromJournalDialog({
     setSelectedMap(defaults);
   }
 
-  async function handlePreview() {
+  // L'analisi IA gira nel gestore globale: prosegue anche chiudendo la finestra
+  // e compare nella barra in basso; a fine job l'anteprima è pronta alla riapertura.
+  function handlePreview() {
+    const docx = selectedDocx;
+    const url = googleUrl.trim() || undefined;
+    const text = manualText.trim() || undefined;
+    const currentTab = tab;
     setIsLoadingPreview(true);
-    try {
-      const payload =
-        tab === "docx" && selectedDocx
-          ? await previewUsImportFromDocx(cantiereId, giornataId, selectedDocx)
-          : tab === "google-doc"
-            ? await previewUsImportFromGoogleDoc(cantiereId, giornataId, googleUrl.trim() || undefined)
-            : await previewUsImportFromGiornataText(cantiereId, giornataId, manualText.trim() || undefined);
+    const id = startAiJob<USImportPreviewResponse>({
+      key: `import-us-giornata:${giornataId}`,
+      label: `Import US da giornale (giornata #${giornataId})`,
+      run: async ({ signal }) =>
+        currentTab === "docx" && docx
+          ? previewUsImportFromDocx(cantiereId, giornataId, docx, signal)
+          : currentTab === "google-doc"
+            ? previewUsImportFromGoogleDoc(cantiereId, giornataId, url, signal)
+            : previewUsImportFromGiornataText(cantiereId, giornataId, text, signal),
+      onSuccess: (payload) => {
+        setIsLoadingPreview(false);
+        applyPreviewPayload(payload);
+      },
+      onError: (error: any) => {
+        setIsLoadingPreview(false);
+        toast({
+          title: "Errore anteprima import US",
+          description: String(error?.message || ""),
+          variant: "destructive",
+        });
+      },
+      onCancel: () => setIsLoadingPreview(false),
+    });
+    if (id == null) setIsLoadingPreview(false);
+  }
 
+  function applyPreviewPayload(payload: USImportPreviewResponse) {
+    {
       setPreview(payload.preview);
       if (payload.preview.source === "docx" && payload.filename) {
         setPreviewMeta(`File: ${payload.filename}`);
@@ -127,14 +155,6 @@ export function USImportFromJournalDialog({
         title: "Anteprima US pronta",
         description: `${payload.preview.items.length} US riconosciute da ${formatPreviewSource(payload.preview.source)}.`,
       });
-    } catch (error: any) {
-      toast({
-        title: "Errore anteprima import US",
-        description: String(error?.message || ""),
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoadingPreview(false);
     }
   }
 

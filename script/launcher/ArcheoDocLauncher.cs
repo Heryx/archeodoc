@@ -5,11 +5,13 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using Microsoft.Win32;
 
 class ArcheoDocLauncher
 {
     static string root;
     static string logPath;
+    static string loaderDir;
 
     static readonly string[] SourcePaths = {
         "client/src", "server", "shared", "package.json", "tsconfig.json",
@@ -37,8 +39,11 @@ class ArcheoDocLauncher
         Log(" ArcheoDoc avviato il " + DateTime.Now);
         Log("========================================");
 
+        StartLoader();
+
         if (!CheckNode())
         {
+            SetStatus("Node.js non trovato. Installalo da nodejs.org e riavvia.", false, true);
             Log(" ERRORE: Node.js non trovato.");
             Process.Start("notepad.exe", logPath);
             Environment.Exit(1);
@@ -46,6 +51,7 @@ class ArcheoDocLauncher
 
         EnsureDependencies();
         EnsureBuild();
+        SetStatus("Preparazione...", false, false);
         KillPreviousServer();
 
         Console.WriteLine();
@@ -63,37 +69,55 @@ class ArcheoDocLauncher
             return;
         }
 
-        // Avvia l'apertura del browser in background: appena il server risponde su porta 5000, apre la pagina
-        var browserThread = new System.Threading.Thread(() =>
-        {
-            var sw = Stopwatch.StartNew();
-            while (sw.ElapsedMilliseconds < 15000)
-            {
-                try
-                {
-                    var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create("http://127.0.0.1:5000/");
-                    req.Timeout = 200;
-                    using (var resp = (System.Net.HttpWebResponse)req.GetResponse())
-                    {
-                        if ((int)resp.StatusCode >= 200)
-                        {
-                            Process.Start(new ProcessStartInfo("http://localhost:5000") { UseShellExecute = true });
-                            return;
-                        }
-                    }
-                }
-                catch
-                {
-                    System.Threading.Thread.Sleep(50);
-                }
-            }
-            // Fallback
-            try { Process.Start(new ProcessStartInfo("http://localhost:5000") { UseShellExecute = true }); } catch { }
-        });
-        browserThread.IsBackground = true;
-        browserThread.Start();
+        // Il caricatore sonda la porta 5000 e apre l'app appena il server risponde
+        SetStatus("Avvio del server...", true, false);
 
         RunServer();
+    }
+
+    // Apre una finestra browser separata con una pagina di caricamento che mostra lo stato
+    // e passa all'app non appena il server risponde.
+    static void StartLoader()
+    {
+        try
+        {
+            string template = Path.Combine(root, "script", "loading.html");
+            if (!File.Exists(template)) return;
+            string dir = Path.Combine(Path.GetTempPath(), "archeodoc_loading");
+            Directory.CreateDirectory(dir);
+            string page = Path.Combine(dir, "loading.html");
+            File.Copy(template, page, true);
+            loaderDir = dir;
+            SetStatus("Avvio in corso...", false, false);
+
+            string url = new Uri(page).AbsoluteUri;
+            foreach (var browser in new[] { "msedge", "chrome" })
+            {
+                string key = @"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\" + browser + ".exe";
+                if (Registry.GetValue(key, "", null) == null) continue;
+                try
+                {
+                    Process.Start(new ProcessStartInfo(browser, "--app=\"" + url + "\"") { UseShellExecute = true });
+                    return;
+                }
+                catch { }
+            }
+            Process.Start(new ProcessStartInfo(page) { UseShellExecute = true });
+        }
+        catch { }
+    }
+
+    static void SetStatus(string text, bool ready, bool error)
+    {
+        if (loaderDir == null) return;
+        try
+        {
+            string safe = text.Replace("\\", "\\\\").Replace("\"", "\\\"");
+            string js = "window.ARCHEO_STATUS={text:\"" + safe + "\",ready:" + (ready ? "true" : "false")
+                + (error ? ",error:true" : "") + "};";
+            File.WriteAllText(Path.Combine(loaderDir, "status.js"), js, Encoding.UTF8);
+        }
+        catch { }
     }
 
     static void Log(string line)
@@ -152,10 +176,12 @@ class ArcheoDocLauncher
         }
 
         Console.WriteLine(" Verifica/installazione dipendenze (npm install)...");
+        SetStatus("Verifica delle dipendenze...", false, false);
         Log(" Verifica dipendenze...");
         int code = RunCommandToLog("npm", "install");
         if (code != 0)
         {
+            SetStatus("Errore durante l'installazione delle dipendenze. Vedi logs\\archeodoc.log", false, true);
             Log(" ERRORE durante l'installazione delle dipendenze.");
             Process.Start("notepad.exe", logPath);
             Environment.Exit(1);
@@ -206,9 +232,11 @@ class ArcheoDocLauncher
         }
 
         Console.WriteLine(" Sorgenti aggiornati, eseguo build...");
+        SetStatus("Aggiornamento in corso: compilazione dell'applicazione (puo' richiedere un minuto)...", false, false);
         int code = RunCommandToLog("npm", "run build");
         if (code != 0)
         {
+            SetStatus("Errore durante la build. Vedi logs\\archeodoc.log", false, true);
             Log(" ERRORE durante la build. Controlla logs\\archeodoc.log");
             Process.Start("notepad.exe", logPath);
             Environment.Exit(1);
@@ -288,6 +316,7 @@ class ArcheoDocLauncher
             p.BeginOutputReadLine();
             p.BeginErrorReadLine();
             p.WaitForExit();
+            SetStatus("Il server si e' fermato (codice " + p.ExitCode + "). Vedi logs\\archeodoc.log", false, true);
         }
     }
 }

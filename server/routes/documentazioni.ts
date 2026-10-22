@@ -3,6 +3,8 @@ import fs from "fs";
 import path from "path";
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from "docx";
 import { insertImageIntoDocx } from "../docx_image_insert";
+import { generateRelazioneTesto } from "../relazione_generate";
+import { buildRelazioneDocx, type PmNode, type RelazioneIntestazione } from "../relazione_export";
 import type { WithProject } from "./types";
 
 type DocumentazioneTipo = "giornaliera" | "settimanale" | "fine_scavo";
@@ -120,6 +122,24 @@ function computeImageSizeEmu(width: number | null, height: number | null): { wid
   };
 }
 
+// ID delle US richiamate (mark "usLink") nel contenuto JSON di un documento
+function collectUsLinks(contenuto: string | null): number[] {
+  if (!contenuto) return [];
+  let root: PmNode | null = null;
+  try { root = JSON.parse(contenuto); } catch { return []; }
+  const found = new Set<number>();
+  const visit = (node: PmNode | null | undefined) => {
+    if (!node) return;
+    for (const mark of node.marks || []) {
+      const id = Number(mark.attrs?.usId);
+      if (mark.type === "usLink" && Number.isFinite(id)) found.add(id);
+    }
+    (node.content || []).forEach(visit);
+  };
+  visit(root);
+  return Array.from(found);
+}
+
 export function registerDocumentazioniRoutes(app: Express, helpers: RegisterDocumentazioniHelpers) {
   const { withProject, resolvePathInside } = helpers;
 
@@ -211,6 +231,70 @@ export function registerDocumentazioniRoutes(app: Express, helpers: RegisterDocu
     });
   }));
 
+  // Genera il testo dal giornale di scavo (con o senza IA); l'inserimento nel documento lo fa il client
+  app.post("/api/cantieri/:cid/documentazioni/genera-testo", withProject(async (ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const cantiere = ctx.storage.getCantiere(cid);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const da = parseOptionalDate(req.body?.da);
+    const a = parseOptionalDate(req.body?.a);
+    const giornate = ctx.storage
+      .getGiornate(cid)
+      .filter((g) => (!da || g.data >= da) && (!a || g.data <= a))
+      .sort((x, y) => x.data.localeCompare(y.data));
+
+    try {
+      const result = await generateRelazioneTesto({
+        cantiere,
+        giornate,
+        usList: ctx.storage.getUSList(cid),
+        useAI: req.body?.useAI === true,
+        includiUS: req.body?.includiUS !== false,
+      });
+      res.json({ ...result, giornate: giornate.length });
+    } catch (error: any) {
+      res.status(400).json({ error: error?.message || "Errore nella generazione del testo" });
+    }
+  }));
+
+  // Backlink: per ogni US, i documenti che la richiamano con un [[link]]
+  app.get("/api/cantieri/:cid/relazioni-links", withProject((ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const links: Record<number, { id: number; titolo: string }[]> = {};
+    for (const doc of ctx.storage.getDocumentazioni(cid)) {
+      for (const usId of collectUsLinks(doc.contenuto)) {
+        (links[usId] ||= []).push({ id: doc.id, titolo: doc.titolo });
+      }
+    }
+    res.json({ links });
+  }));
+
+  app.patch("/api/cantieri/:cid/documentazioni/:id", withProject((ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const docId = Number(req.params.id);
+    const doc = ctx.storage.getDocumentazione(docId);
+    if (!doc || doc.cantiereId !== cid) {
+      return res.status(404).json({ error: "Documentazione non trovata" });
+    }
+
+    const patch: Record<string, unknown> = {};
+    const body = req.body || {};
+    if (typeof body.titolo === "string" && body.titolo.trim()) patch.titolo = body.titolo.trim();
+    if ("dataInizio" in body) patch.dataInizio = parseOptionalDate(body.dataInizio);
+    if ("dataFine" in body) patch.dataFine = parseOptionalDate(body.dataFine);
+    if (body.stato === "bozza" || body.stato === "completata") patch.stato = body.stato;
+    if ("contenuto" in body) {
+      patch.contenuto = body.contenuto == null ? null : JSON.stringify(body.contenuto);
+    }
+    if ("intestazione" in body) {
+      patch.intestazione = body.intestazione == null ? null : JSON.stringify(body.intestazione);
+    }
+
+    const updated = ctx.storage.updateDocumentazione(docId, patch);
+    res.json({ documentazione: updated });
+  }));
+
   app.delete("/api/cantieri/:cid/documentazioni/:id", withProject((ctx, req, res) => {
     const cid = Number(req.params.cid);
     const docId = Number(req.params.id);
@@ -294,58 +378,83 @@ export function registerDocumentazioniRoutes(app: Express, helpers: RegisterDocu
     const cantiere = ctx.storage.getCantiere(doc.cantiereId);
     if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
 
-    const links = ctx.storage.getDocumentazioneSnapshots(doc.id);
-    if (links.length === 0) {
-      return res.status(400).json({ error: "Nessuno snapshot collegato alla documentazione" });
-    }
-
     const warnings: string[] = [];
-    let buffer = await buildBaseDocumentazioneDocx({
-      tipo: doc.tipo as DocumentazioneTipo,
-      titolo: doc.titolo,
-      cantiereNome: cantiere.nome,
-      cantiereCodice: cantiere.codice,
-      dataInizio: doc.dataInizio,
-      dataFine: doc.dataFine,
-      snapshotCount: links.length,
-    });
+    let buffer: Buffer;
 
-    for (const link of links) {
-      const snapshot = ctx.storage.getMapSnapshot(link.snapshotId);
-      if (!snapshot) {
-        warnings.push(`Snapshot ${link.snapshotId} non trovato`);
-        continue;
+    if (doc.contenuto) {
+      // Documento scritto nell'editor: export dal contenuto strutturato
+      let contenuto: PmNode | null = null;
+      let intestazione: RelazioneIntestazione | null = null;
+      try { contenuto = JSON.parse(doc.contenuto); } catch { /* contenuto non valido */ }
+      try { intestazione = doc.intestazione ? JSON.parse(doc.intestazione) : null; } catch { /* ignora */ }
+
+      const built = await buildRelazioneDocx({
+        titolo: doc.titolo,
+        contenuto,
+        intestazione,
+        loadSnapshot: (snapshotId) => {
+          const snapshot = ctx.storage.getMapSnapshot(snapshotId);
+          if (!snapshot || snapshot.cantiereId !== doc.cantiereId) return null;
+          const type = snapshot.mimeType === "image/jpeg" ? "jpg" : snapshot.mimeType === "image/png" ? "png" : null;
+          const filePath = resolvePathInside(ctx.project.mediaDir, snapshot.percorso);
+          if (!type || !filePath || !fs.existsSync(filePath)) return null;
+          return { buffer: fs.readFileSync(filePath), type, width: snapshot.width, height: snapshot.height };
+        },
+      });
+      buffer = built.buffer;
+      warnings.push(...built.warnings);
+    } else {
+      const links = ctx.storage.getDocumentazioneSnapshots(doc.id);
+      if (links.length === 0) {
+        return res.status(400).json({ error: "Documento vuoto: scrivi del contenuto o collega uno snapshot" });
       }
+      buffer = await buildBaseDocumentazioneDocx({
+        tipo: doc.tipo as DocumentazioneTipo,
+        titolo: doc.titolo,
+        cantiereNome: cantiere.nome,
+        cantiereCodice: cantiere.codice,
+        dataInizio: doc.dataInizio,
+        dataFine: doc.dataFine,
+        snapshotCount: links.length,
+      });
 
-      const snapshotPath = resolvePathInside(ctx.project.mediaDir, snapshot.percorso);
-      if (!snapshotPath || !fs.existsSync(snapshotPath)) {
-        warnings.push(`File snapshot mancante: ${snapshot.titolo}`);
-        continue;
-      }
+      for (const link of links) {
+        const snapshot = ctx.storage.getMapSnapshot(link.snapshotId);
+        if (!snapshot) {
+          warnings.push(`Snapshot ${link.snapshotId} non trovato`);
+          continue;
+        }
 
-      const mimeType = snapshot.mimeType === "image/jpeg" ? "image/jpeg" : snapshot.mimeType === "image/png" ? "image/png" : null;
-      if (!mimeType) {
-        warnings.push(`Snapshot non supportato in DOCX (usa PNG/JPEG): ${snapshot.titolo}`);
-        continue;
-      }
+        const snapshotPath = resolvePathInside(ctx.project.mediaDir, snapshot.percorso);
+        if (!snapshotPath || !fs.existsSync(snapshotPath)) {
+          warnings.push(`File snapshot mancante: ${snapshot.titolo}`);
+          continue;
+        }
 
-      try {
-        const imageBuffer = fs.readFileSync(snapshotPath);
-        const size = computeImageSizeEmu(snapshot.width, snapshot.height);
-        const inserted = await insertImageIntoDocx({
-          docxBuffer: buffer,
-          imageBuffer,
-          imageMimeType: mimeType,
-          title: snapshot.titolo,
-          caption: snapshot.didascalia,
-          widthEmu: size.widthEmu,
-          heightEmu: size.heightEmu,
-          afterParagraphIndex: -1,
-        });
-        buffer = inserted.buffer;
-        warnings.push(...inserted.warnings);
-      } catch (error: any) {
-        warnings.push(`Errore inserimento snapshot ${snapshot.titolo}: ${error?.message || "sconosciuto"}`);
+        const mimeType = snapshot.mimeType === "image/jpeg" ? "image/jpeg" : snapshot.mimeType === "image/png" ? "image/png" : null;
+        if (!mimeType) {
+          warnings.push(`Snapshot non supportato in DOCX (usa PNG/JPEG): ${snapshot.titolo}`);
+          continue;
+        }
+
+        try {
+          const imageBuffer = fs.readFileSync(snapshotPath);
+          const size = computeImageSizeEmu(snapshot.width, snapshot.height);
+          const inserted = await insertImageIntoDocx({
+            docxBuffer: buffer,
+            imageBuffer,
+            imageMimeType: mimeType,
+            title: snapshot.titolo,
+            caption: snapshot.didascalia,
+            widthEmu: size.widthEmu,
+            heightEmu: size.heightEmu,
+            afterParagraphIndex: -1,
+          });
+          buffer = inserted.buffer;
+          warnings.push(...inserted.warnings);
+        } catch (error: any) {
+          warnings.push(`Errore inserimento snapshot ${snapshot.titolo}: ${error?.message || "sconosciuto"}`);
+        }
       }
     }
 

@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { ArrowDown, ArrowDownUp, ArrowUp, Download, FileUp, Filter, GitBranch, Package, Plus, Search, Settings2, ShieldCheck, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAiJobMutation } from "@/lib/aiJobs";
 import { buildProjectUrl, getCurrentProjectId, getProjectHeader } from "@/lib/project";
 import { BASE_US_MODEL_KEY, BUILTIN_US_MODELS, type USModelDefinition, type USModelField } from "@shared/us_models";
 import type { FieldDefinition, SchemaDefinition } from "@shared/types/schema";
@@ -674,9 +675,12 @@ export function USPage() {
     }
   };
 
-  const generateScheda = useMutation({
-    mutationFn: async (id: number) => {
-      const r = await apiRequest("POST", `/api/us/${id}/analizza-ai`, {});
+  const generateScheda = useAiJobMutation({
+    prefix: "us-scheda-ai:",
+    keyOf: (id: number) => `us-scheda-ai:${id}`,
+    labelOf: (id) => `Scheda IA US ${usList.find((u: any) => u.id === id)?.codiceUS || `#${id}`}`,
+    run: async (id, { signal }) => {
+      const r = await apiRequest("POST", `/api/us/${id}/analizza-ai`, {}, signal);
       return r.json();
     },
     onSuccess: () => {
@@ -702,30 +706,36 @@ export function USPage() {
     }
   };
 
-  const requestAiFill = useMutation({
-    mutationFn: async ({ usId, source }: { usId: number; source: AIFillSource }) => {
-      return getAiFillSuggestions(usId, source);
-    },
+  const usLabelOf = (usId: number) => usList.find((u: any) => u.id === usId)?.codiceUS || `#${usId}`;
+
+  // Le richieste IA passano dal gestore globale: proseguono se cambio pagina e compaiono nella barra in basso.
+  const requestAiFill = useAiJobMutation({
+    prefix: "us-ai-fill:",
+    keyOf: ({ usId }: { usId: number; source: AIFillSource }) => `us-ai-fill:${usId}`,
+    labelOf: ({ usId }) => `Compilazione IA US ${usLabelOf(usId)}`,
+    run: ({ usId, source }, { signal }) => getAiFillSuggestions(usId, source, signal),
     onSuccess: (result, vars) => {
       openAiSuggestionsPanel(vars.usId, result?.suggestions || {});
     },
     onError: () => toast({ title: "Errore compilazione assistita AI", variant: "destructive" }),
   });
 
-  const requestAiFillDocx = useMutation({
-    mutationFn: async ({ usId, file }: { usId: number; file: File }) => {
-      return getAiFillSuggestionsFromDocx(usId, file);
-    },
+  const requestAiFillDocx = useAiJobMutation({
+    prefix: "us-ai-fill:",
+    keyOf: ({ usId }: { usId: number; file: File }) => `us-ai-fill:${usId}`,
+    labelOf: ({ usId }) => `Analisi DOCX US ${usLabelOf(usId)}`,
+    run: ({ usId, file }, { signal }) => getAiFillSuggestionsFromDocx(usId, file, signal),
     onSuccess: (result, vars) => {
       openAiSuggestionsPanel(vars.usId, result?.suggestions || {});
     },
     onError: () => toast({ title: "Errore analisi file DOCX", variant: "destructive" }),
   });
 
-  const requestAiFillGoogle = useMutation({
-    mutationFn: async ({ usId, url }: { usId: number; url?: string }) => {
-      return getAiFillSuggestionsFromGoogleDoc(usId, url);
-    },
+  const requestAiFillGoogle = useAiJobMutation({
+    prefix: "us-ai-fill:",
+    keyOf: ({ usId }: { usId: number; url?: string }) => `us-ai-fill:${usId}`,
+    labelOf: ({ usId }) => `Analisi Google Docs US ${usLabelOf(usId)}`,
+    run: ({ usId, url }, { signal }) => getAiFillSuggestionsFromGoogleDoc(usId, url, signal),
     onSuccess: (result, vars) => {
       openAiSuggestionsPanel(vars.usId, result?.suggestions || {});
     },

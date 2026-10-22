@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { AiJobsBar } from "@/components/ai/AiJobsBar";
 import { Link, useLocation } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTheme } from "./ThemeProvider";
@@ -218,6 +219,12 @@ export function Sidebar() {
   }, [projectsData?.currentProjectId, activeProjectId]);
 
   const cantiereCorrente = cid ? cantieri.find((c: any) => String(c.id) === cid) : null;
+  useEffect(() => {
+    const nome = cantiereCorrente?.nome;
+    document.title = nome
+      ? `ArcheoDoc - Documentazione Scavo - ${nome}`
+      : "ArcheoDoc - Documentazione Scavo";
+  }, [cantiereCorrente?.nome]);
   const selectedProjectId = activeProjectId || projectsData?.currentProjectId;
   const currentProject = projectsData?.projects?.find((p: any) => p.id === selectedProjectId);
   const hasGitUpdates = checkUpdates.data?.hasUpdates === true;
@@ -270,7 +277,7 @@ export function Sidebar() {
         {
           href: `/cantiere/${cid}/documentazioni`,
           icon: FileText,
-          label: "Documentazioni",
+          label: "Relazioni e consegne",
           isActive: (path: string) =>
             path === `/cantiere/${cid}/documentazioni` || path.startsWith(`/cantiere/${cid}/documentazioni/`),
           isPanel: false,
@@ -509,7 +516,11 @@ export function Sidebar() {
         </nav>
       )}
 
-      <div className="px-3 pb-4 mt-auto border-t border-border pt-3 flex items-center justify-between">
+      <div className="mt-auto">
+        <AiJobsBar />
+      </div>
+
+      <div className="px-3 pb-4 border-t border-border pt-3 flex items-center justify-between">
         <span className="text-xs text-muted-foreground">v1.0</span>
         <div className="flex items-center gap-1">
           <button

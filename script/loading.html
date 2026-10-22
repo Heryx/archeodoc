@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>ArcheoDoc - Avvio in corso</title>
+<style>
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-family: "Segoe UI", system-ui, sans-serif; background: #f6f3ee; color: #3b3226;
+  }
+  h1 { font-size: 22px; font-weight: 600; margin: 28px 0 8px; }
+  #msg { font-size: 15px; color: #6b5f4d; min-height: 22px; text-align: center; max-width: 480px; }
+  .spinner {
+    width: 56px; height: 56px; border-radius: 50%;
+    border: 5px solid #e2d9c9; border-top-color: #8a5a2b;
+    animation: spin 0.9s linear infinite;
+  }
+  body.error .spinner { animation: none; border-color: #b3261e; }
+  body.error #msg { color: #b3261e; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+  <div class="spinner"></div>
+  <h1>ArcheoDoc</h1>
+  <div id="msg">Avvio in corso...</div>
+<script>
+  var APP_URL = "http://localhost:5000";
+  var msg = document.getElementById("msg");
+  var done = false;
+  var serverStarting = false;
+
+  // status.js (scritto da avvia.bat nella stessa cartella) imposta window.ARCHEO_STATUS
+  function readStatus() {
+    var s = document.createElement("script");
+    s.src = "status.js?t=" + Date.now();
+    s.onload = function () {
+      var st = window.ARCHEO_STATUS;
+      if (st && !done) {
+        serverStarting = !!st.ready;
+        msg.textContent = st.text || "";
+        document.body.className = st.error ? "error" : "";
+      }
+      s.remove();
+    };
+    s.onerror = function () { s.remove(); };
+    document.head.appendChild(s);
+  }
+
+  function checkServer() {
+    // sonda il server solo dopo che avvia.bat lo sta lanciando (evita di agganciare un vecchio processo)
+    if (done || !serverStarting) return;
+    var ctrl = new AbortController();
+    var t = setTimeout(function () { ctrl.abort(); }, 1500);
+    fetch(APP_URL + "/?probe=" + Date.now(), { mode: "no-cors", cache: "no-store", signal: ctrl.signal })
+      .then(function () {
+        clearTimeout(t);
+        done = true;
+        msg.textContent = "Pronto! Apertura dell'applicazione...";
+        location.replace(APP_URL);
+      })
+      .catch(function () { clearTimeout(t); });
+  }
+
+  setInterval(readStatus, 700);
+  setInterval(checkServer, 600);
+  readStatus();
+</script>
+</body>
+</html>

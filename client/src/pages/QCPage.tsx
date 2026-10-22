@@ -8,6 +8,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { setAiJobResult, startAiJob, useAiJobActive, useAiJobResult } from "@/lib/aiJobs";
 import { getCurrentProjectId } from "@/lib/project";
 import { QcGiornataCard } from "@/components/qc/QcGiornataCard";
 import { QcUSCard } from "@/components/qc/QcUSCard";
@@ -197,17 +198,41 @@ export function QCPage({ cidOverride, embedded = false }: QCPageProps = {}) {
     onError: () => toast({ title: "Errore QC US", variant: "destructive" }),
   });
 
-  const runAiRelazioniQcMutation = useMutation({
-    mutationFn: async () => (await apiRequest("POST", `/api/cantieri/${cid}/qc-relazioni-ai`, {})).json(),
-    onSuccess: (data: { testo?: string; error?: string }) => {
-      if (data.error) {
-        toast({ title: "Errore QC AI", description: data.error, variant: "destructive" });
-      } else {
-        setAiRelazioniResult(data.testo ?? "");
-      }
+  // Gira nel gestore globale dei job IA: continua anche chiudendo il pannello QC.
+  // Il risultato resta nello store (aiJobResults) e viene riletto alla riapertura.
+  const aiRelazioniKey = `qc-relazioni-ai:${cid}`;
+  const aiRelazioniPending = useAiJobActive(aiRelazioniKey);
+  const runAiRelazioniQcMutation = {
+    isPending: aiRelazioniPending,
+    mutate: () => {
+      startAiJob<{ testo?: string; error?: string }>({
+        key: aiRelazioniKey,
+        label: "QC relazioni stratigrafiche (IA)",
+        run: async ({ signal }) => (await apiRequest("POST", `/api/cantieri/${cid}/qc-relazioni-ai`, {}, signal)).json(),
+        onSuccess: (data) => {
+          if (data.error) {
+            toast({ title: "Errore QC AI", description: data.error, variant: "destructive" });
+          } else {
+            setAiJobResult(aiRelazioniKey, data.testo ?? "");
+            toast({ title: "QC relazioni IA completato" });
+          }
+        },
+        onError: (err: any) =>
+          toast({ title: "Errore QC AI relazioni", description: err?.message, variant: "destructive" }),
+      });
     },
-    onError: (err: any) => toast({ title: "Errore QC AI relazioni", description: err?.message, variant: "destructive" }),
-  });
+  };
+
+  // Riallinea il risultato locale con quello prodotto da un job concluso a pannello chiuso.
+  const storedAiRelazioni = useAiJobResult<string>(aiRelazioniKey);
+  useEffect(() => {
+    if (storedAiRelazioni != null) setAiRelazioniResult(storedAiRelazioni);
+  }, [storedAiRelazioni]);
+
+  const clearAiRelazioni = () => {
+    setAiRelazioniResult(null);
+    setAiJobResult(aiRelazioniKey, null);
+  };
 
   async function handleToggleDismiss(logId: number, dismissed: boolean) {
     try {
@@ -283,7 +308,7 @@ export function QCPage({ cidOverride, embedded = false }: QCPageProps = {}) {
             variant="outline"
             size="sm"
             className="gap-2"
-            onClick={() => { setAiRelazioniResult(null); runAiRelazioniQcMutation.mutate(); }}
+            onClick={() => { clearAiRelazioni(); runAiRelazioniQcMutation.mutate(); }}
             disabled={runAiRelazioniQcMutation.isPending || !qcEnabled}
           >
             <Bot size={14} className={runAiRelazioniQcMutation.isPending ? "animate-pulse" : ""} />
@@ -308,7 +333,7 @@ export function QCPage({ cidOverride, embedded = false }: QCPageProps = {}) {
             <button
               type="button"
               className="text-xs text-muted-foreground hover:text-foreground"
-              onClick={() => setAiRelazioniResult(null)}
+              onClick={clearAiRelazioni}
             >
               Chiudi
             </button>

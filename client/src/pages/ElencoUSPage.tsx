@@ -14,9 +14,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import {
   AlertTriangle, BookOpen, Download, ExternalLink, Eye, FileSpreadsheet, Settings2, Upload,
-  Search, SlidersHorizontal, Plus, Trash2, X,
+  Search, SlidersHorizontal, Plus, Trash2, X, ArrowUp, ArrowDown, ArrowUpDown, Check,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { USElencoTemplateDialog } from "@/components/us/USElencoTemplateDialog";
 import { ElencoTemplateRepairDialog } from "@/components/us/ElencoTemplateRepairDialog";
 import { USBatchImportDialog } from "@/components/us/USBatchImportDialog";
@@ -186,6 +187,9 @@ export function ElencoUSPage() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [advancedConditions, setAdvancedConditions] = useState<AdvancedCondition[]>([]);
   const conditionIdRef = useRef(0);
+  const qc = useQueryClient();
+  const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" }>({ key: "codiceUS", dir: "asc" });
+  const [showReview, setShowReview] = useState(false);
 
   const { data: cantiere } = useQuery<any>({
     queryKey: ["/api/cantieri", cid, activeProjectId],
@@ -228,8 +232,26 @@ export function ElencoUSPage() {
       });
     }
 
-    return out;
-  }, [rows, columns, searchQuery, advancedConditions, selectionFilter]);
+    const collator = new Intl.Collator("it", { numeric: true, sensitivity: "base" });
+    const key = sort.key || "codiceUS";
+    const dir = sort.dir === "desc" ? -1 : 1;
+    return [...out].sort((a, b) => dir * collator.compare(a.values[key] || "", b.values[key] || ""));
+  }, [rows, columns, searchQuery, advancedConditions, selectionFilter, sort]);
+
+  const toggleSort = (key: string) =>
+    setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
+
+  const resolveMutation = useMutation({
+    mutationFn: async (ids: number[] | null) =>
+      (await apiRequest("POST", `/api/cantieri/${cid}/us/segna-riviste`, ids ? { ids } : {})).json(),
+    onSuccess: (r: { count: number }) => {
+      qc.invalidateQueries({ queryKey: ["/api/cantieri", cid, "elenco-us"] });
+      qc.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
+      invalidateUsRelatedQueries(qc, cid);
+      toast({ title: `${r.count} US segnate come riviste` });
+    },
+    onError: (e: any) => toast({ title: "Errore", description: e?.message, variant: "destructive" }),
+  });
 
   const hasActiveFilters = !!searchQuery.trim() || advancedConditions.length > 0;
 
@@ -264,10 +286,13 @@ export function ElencoUSPage() {
     || cantiereModelData?.availableModels?.find((m) => m.key === BASE_US_MODEL_KEY)
     || BUILTIN_US_MODELS[0];
 
-  const handleExport = async () => {
+  const handleExport = async (format: "docx" | "xlsx" | "csv" = "docx") => {
     setExporting(true);
     try {
-      const response = await fetch(buildProjectUrl(`/api/cantieri/${cid}/elenco-us/export-docx`), {
+      const exportUrl = format === "docx"
+        ? `/api/cantieri/${cid}/elenco-us/export-docx`
+        : `/api/cantieri/${cid}/elenco-us/export-table?format=${format}`;
+      const response = await fetch(buildProjectUrl(exportUrl), {
         headers: getProjectHeader(),
       });
       if (response.status === 409) {
@@ -284,7 +309,7 @@ export function ElencoUSPage() {
       const blob = await response.blob();
       const disposition = response.headers.get("content-disposition") || "";
       const filenameMatch = disposition.match(/filename="?([^"]+)"?/i);
-      const filename = filenameMatch?.[1] || `Elenco_US_${cid}.docx`;
+      const filename = filenameMatch?.[1] || `Elenco_US_${cid}.${format}`;
 
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
@@ -314,9 +339,11 @@ export function ElencoUSPage() {
             {cantiere?.nome ? <>Cantiere: <span className="font-medium text-foreground">{cantiere.nome}</span> · </> : null}
             {rows.length} US registrate
             {rows.some((r) => r.daRivedere) && (
-              <Badge variant="outline" className="ml-2 gap-1 text-[10px] uppercase tracking-wide border-amber-300 text-amber-700 dark:border-amber-800 dark:text-amber-400">
-                <AlertTriangle size={10} /> {rows.filter((r) => r.daRivedere).length} da rivedere
-              </Badge>
+              <button type="button" onClick={() => setShowReview(true)} title="Mostra le US da rivedere">
+                <Badge variant="outline" className="ml-2 gap-1 text-[10px] uppercase tracking-wide border-amber-300 text-amber-700 dark:border-amber-800 dark:text-amber-400 cursor-pointer hover:bg-amber-100 dark:hover:bg-amber-950">
+                  <AlertTriangle size={10} /> {rows.filter((r) => r.daRivedere).length} da rivedere
+                </Badge>
+              </button>
             )}
           </p>
         </div>
@@ -330,11 +357,20 @@ export function ElencoUSPage() {
             <Settings2 size={15} /> Template elenco US
           </Button>
           <Button variant="outline" className="gap-2" onClick={() => setOpenImportDialog(true)}>
-            <Upload size={15} /> Importa da elenco Word
+            <Upload size={15} /> Importa elenco
           </Button>
-          <Button className="gap-2" onClick={() => void handleExport()} disabled={exporting}>
-            <Download size={15} /> {exporting ? "Esportazione..." : "Esporta elenco (docx)"}
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button className="gap-2" disabled={exporting}>
+                <Download size={15} /> {exporting ? "Esportazione..." : "Esporta elenco"}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => void handleExport("docx")}>Word (.docx)</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => void handleExport("xlsx")}>Excel (.xlsx)</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => void handleExport("csv")}>CSV (.csv)</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -432,7 +468,12 @@ export function ElencoUSPage() {
             <thead>
               <tr>
                 {columns.map((col) => (
-                  <th key={col.key} className="sticky top-0 z-20 bg-muted text-left px-3 py-2 font-medium whitespace-nowrap border-b border-border">{col.label}</th>
+                  <th key={col.key} className="sticky top-0 z-20 bg-muted text-left px-3 py-2 font-medium whitespace-nowrap border-b border-border">
+                    <button type="button" className="inline-flex items-center gap-1 hover:text-primary" onClick={() => toggleSort(col.key)} title="Ordina per questa colonna">
+                      {col.label}
+                      {sort.key === col.key ? (sort.dir === "asc" ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUpDown size={12} className="opacity-30" />}
+                    </button>
+                  </th>
                 ))}
                 <th className="sticky top-0 right-0 z-30 bg-muted text-left px-3 py-2 font-medium whitespace-nowrap w-0 border-b border-l border-border shadow-[-4px_0_6px_-4px_rgba(0,0,0,0.15)]">Azioni</th>
               </tr>
@@ -537,6 +578,51 @@ export function ElencoUSPage() {
         summary={repairSummary || []}
         onResolved={() => { setRepairSummary(null); void handleExport(); }}
       />
+
+      <Dialog open={showReview} onOpenChange={setShowReview}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle size={16} className="text-amber-600 dark:text-amber-400" /> US da rivedere
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-muted-foreground">
+            Queste US sono state create o aggiornate da un import dell'elenco e non sono ancora state verificate.
+            Il segnale si rimuove salvando la scheda come completa, oppure con "Segna rivista".
+          </p>
+          {(() => {
+            const flagged = filteredRows.filter((r) => r.daRivedere);
+            if (flagged.length === 0) return <p className="py-6 text-center text-sm text-muted-foreground">Nessuna US da rivedere.</p>;
+            return (
+              <>
+                <div className="flex justify-end">
+                  <Button size="sm" variant="outline" className="gap-1" disabled={resolveMutation.isPending}
+                    onClick={() => resolveMutation.mutate(null)}>
+                    <Check size={13} /> Segna tutte come riviste ({rows.filter((r) => r.daRivedere).length})
+                  </Button>
+                </div>
+                <div className="divide-y divide-border rounded-md border border-border">
+                  {flagged.map((r) => (
+                    <div key={r.id} className="flex items-center gap-2 px-3 py-2 text-sm">
+                      <span className="font-mono w-16 shrink-0">{r.values.codiceUS}</span>
+                      <span className="flex-1 min-w-0 truncate text-muted-foreground">
+                        {[r.values.tipo, r.values.definizione].filter(Boolean).join(" · ") || "—"}
+                      </span>
+                      <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1" asChild>
+                        <a href={`#/cantiere/${cid}/us?openUsId=${r.id}`}><ExternalLink size={12} /> Scheda</a>
+                      </Button>
+                      <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1" disabled={resolveMutation.isPending}
+                        onClick={() => resolveMutation.mutate([r.id])}>
+                        <Check size={12} /> Segna rivista
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
 
       <ElencoRowDetailDialog
         cid={cid!}

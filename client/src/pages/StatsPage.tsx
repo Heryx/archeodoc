@@ -1,8 +1,7 @@
-import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
-import { buildProjectUrl, getCurrentProjectId, getProjectHeader } from "@/lib/project";
+import { getCurrentProjectId } from "@/lib/project";
 import { useToast } from "@/hooks/use-toast";
 import { StatsAIProgress } from "@/components/stats/StatsAIProgress";
 import { StatsBreakdownRow } from "@/components/stats/StatsBreakdownRow";
@@ -21,7 +20,6 @@ export function StatsPage({ cidOverride, embedded = false }: StatsPageProps = {}
   const activeProjectId = getCurrentProjectId();
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [exportLoading, setExportLoading] = useState(false);
 
   const runAllQc = useMutation({
     mutationFn: async () => (await apiRequest("POST", `/api/cantieri/${cid}/qc-all`, {})).json(),
@@ -42,35 +40,6 @@ export function StatsPage({ cidOverride, embedded = false }: StatsPageProps = {}
     staleTime: 0,
     refetchOnMount: true,
   });
-
-  async function handleExportZip() {
-    setExportLoading(true);
-    try {
-      const response = await fetch(buildProjectUrl(`/api/cantieri/${cid}/export-zip`), {
-        headers: getProjectHeader(),
-      });
-
-      if (!response.ok) {
-        const errorPayload = await response.json().catch(() => ({}));
-        throw new Error(errorPayload.error || "Errore durante l'export");
-      }
-
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      const slug = stats?.cantiere.codice?.replace(/[\s/\\:*?"<>|]/g, "_") || cid;
-      anchor.download = `${slug}_export.zip`;
-      anchor.click();
-      URL.revokeObjectURL(url);
-
-      toast({ title: "Archivio ZIP scaricato" });
-    } catch (error: any) {
-      toast({ title: "Errore export ZIP", description: error.message, variant: "destructive" });
-    } finally {
-      setExportLoading(false);
-    }
-  }
 
   if (isLoading) {
     return (
@@ -100,9 +69,7 @@ export function StatsPage({ cidOverride, embedded = false }: StatsPageProps = {}
       <StatsHeader
         stats={stats}
         runQcPending={runAllQc.isPending}
-        exportLoading={exportLoading}
         onRunQc={() => runAllQc.mutate()}
-        onExportZip={handleExportZip}
       />
 
       <StatsSummaryGrid stats={stats} />

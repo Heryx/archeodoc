@@ -17,6 +17,7 @@ import {
   BookOpen,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { startAiJob, useAiJobs } from "@/lib/aiJobs";
 import { buildProjectUrl, getCurrentProjectId, getProjectHeader } from "@/lib/project";
 import { calcolaSettimaneProgetto } from "@shared/weekUtils";
 
@@ -87,7 +88,6 @@ export function ReportPage({ cidOverride, embedded = false }: ReportPageProps = 
   const qcClient = useQueryClient();
 
   const [expanded, setExpanded] = useState<number | null>(null);
-  const [generating, setGenerating] = useState<number | null>(null);
   const [selectedWeek, setSelectedWeek] = useState<number | null>(null);
   const [selectedWeeks, setSelectedWeeks] = useState<number[]>([]);
   const [multiOpen, setMultiOpen] = useState(false);
@@ -129,23 +129,30 @@ export function ReportPage({ cidOverride, embedded = false }: ReportPageProps = 
     setSelectedWeeks((prev) => prev.filter((weekNumber) => validWeeks.has(weekNumber)));
   }, [settimane]);
 
-  const generateReport = async (gid: number) => {
-    setGenerating(gid);
-    try {
-      const res = await apiRequest("POST", `/api/giornate/${gid}/analizza-ai`, {});
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body?.error || `Errore server (${res.status})`);
-      }
-      await res.json();
-      qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "giornate", activeProjectId] });
-      setExpanded(gid);
-      toast({ title: "Report giornaliero generato" });
-    } catch (err: any) {
-      toast({ title: "Errore generazione report", description: err?.message || String(err), variant: "destructive" });
-    } finally {
-      setGenerating(null);
-    }
+  // Il job gira nel gestore globale: prosegue anche se il pannello Report viene chiuso.
+  const generatingJobs = useAiJobs();
+  const isGenerating = (gid: number) => generatingJobs.some(
+    (j) => j.key === `report-giornata:${gid}` && (j.status === "running" || j.status === "queued"),
+  );
+
+  const generateReport = (gid: number) => {
+    const g = giornate.find((x) => x.id === gid);
+    const projectId = activeProjectId;
+    startAiJob({
+      key: `report-giornata:${gid}`,
+      label: `Report giornata${g?.data ? ` ${g.data}` : ` #${gid}`}`,
+      run: async ({ signal }) => {
+        const res = await apiRequest("POST", `/api/giornate/${gid}/analizza-ai`, {}, signal);
+        return res.json();
+      },
+      onSuccess: () => {
+        qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "giornate", projectId] });
+        setExpanded(gid);
+        toast({ title: "Report giornaliero generato" });
+      },
+      onError: (err: any) =>
+        toast({ title: "Errore generazione report", description: err?.message || String(err), variant: "destructive" }),
+    });
   };
 
   const handleDownload = async (gid: number, data: string) => {
@@ -429,10 +436,10 @@ export function ReportPage({ cidOverride, embedded = false }: ReportPageProps = 
                         className="gap-1"
                         data-testid={`button-genera-report-${g.id}`}
                         onClick={() => generateReport(g.id)}
-                        disabled={generating === g.id || !aiAvailable}
+                        disabled={isGenerating(g.id) || !aiAvailable}
                         title={!aiAvailable ? "Configura ANTHROPIC_API_KEY nel file .env per usare l'AI" : undefined}
                       >
-                        {generating === g.id ? (
+                        {isGenerating(g.id) ? (
                           <><Loader2 size={13} className="animate-spin" /> Generazione...</>
                         ) : (
                           <><Wand2 size={13} /> {g.aiReportText ? "Rigenera" : "Genera report"}</>

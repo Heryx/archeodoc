@@ -1552,6 +1552,23 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
     res.json(updated);
   }));
 
+  // POST — segna come riviste (rimuove il flag "da rivedere") le US indicate, o tutte quelle del cantiere.
+  app.post("/api/cantieri/:cid/us/segna-riviste", withProject((ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    if (!ctx.storage.getCantiere(cid)) return res.status(404).json({ error: "Cantiere non trovato" });
+    const ids: number[] | null = Array.isArray(req.body?.ids)
+      ? req.body.ids.map((n: unknown) => Number(n)).filter((n: number) => Number.isFinite(n))
+      : null;
+    let count = 0;
+    for (const us of ctx.storage.getUSList(cid)) {
+      if (!us.daRivedere) continue;
+      if (ids && !ids.includes(us.id)) continue;
+      ctx.storage.updateUS(us.id, { daRivedere: false });
+      count++;
+    }
+    res.json({ ok: true, count });
+  }));
+
   app.delete("/api/us/:id", withProject((ctx, req, res) => {
     const id = Number(req.params.id);
     const us = ctx.storage.getUS(id);

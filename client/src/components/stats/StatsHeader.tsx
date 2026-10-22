@@ -1,16 +1,14 @@
-﻿import { BarChart3, Download, RefreshCw } from "lucide-react";
+﻿import { BarChart3, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Stats } from "@/components/stats/types";
 
 type StatsHeaderProps = {
   stats: Stats;
   runQcPending: boolean;
-  exportLoading: boolean;
   onRunQc: () => void;
-  onExportZip: () => void;
 };
 
-export function StatsHeader({ stats, runQcPending, exportLoading, onRunQc, onExportZip }: StatsHeaderProps) {
+export function StatsHeader({ stats, runQcPending, onRunQc }: StatsHeaderProps) {
   const { cantiere } = stats;
 
   return (
@@ -28,10 +26,6 @@ export function StatsHeader({ stats, runQcPending, exportLoading, onRunQc, onExp
         <Button variant="outline" onClick={onRunQc} disabled={runQcPending} className="gap-2">
           <RefreshCw size={15} className={runQcPending ? "animate-spin" : ""} />
           {runQcPending ? "QC in corso..." : "Esegui QC"}
-        </Button>
-        <Button onClick={onExportZip} disabled={exportLoading} className="gap-2">
-          <Download size={15} />
-          {exportLoading ? "Preparazione..." : "Esporta ZIP"}
         </Button>
       </div>
     </div>

@@ -1,4 +1,7 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useLocation } from "wouter";
+import { apiRequest } from "@/lib/queryClient";
 import { formatUsCode } from "@shared/us_code";
 import { useProjectCodeSettings } from "@/hooks/useProjectCodeSettings";
 import {
@@ -70,6 +73,13 @@ export function USCard({
 }: USCardProps) {
   const { settings: codeSettings } = useProjectCodeSettings();
   const [expanded, setExpanded] = useState(false);
+  const [, navigateTo] = useLocation();
+  const backlinksQuery = useQuery<{ links: Record<string, { id: number; titolo: string }[]> }>({
+    queryKey: ["/api/cantieri", String(cantiereId), "relazioni-links"],
+    queryFn: async () => (await apiRequest("GET", `/api/cantieri/${cantiereId}/relazioni-links`)).json(),
+    enabled: cantiereId != null,
+  });
+  const backlinks = backlinksQuery.data?.links?.[String(us.id)] || [];
   const [showAllIssues, setShowAllIssues] = useState(false);
 
   const handleExportFormat = async (usId: number, fmt: "pdf" | "odt" | "md") => {
@@ -323,6 +333,22 @@ export function USCard({
                 <Button size="sm" variant="ghost" className="gap-1 text-xs" onClick={() => onOpenMateriali(us)}>
                   <Package size={12} /> Materiali
                 </Button>
+              )}
+              {backlinks.length > 0 && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="sm" variant="ghost" className="gap-1 text-xs">
+                      <FileText size={12} /> Citata in {backlinks.length}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {backlinks.map((b) => (
+                      <DropdownMenuItem key={b.id} onClick={() => navigateTo(`/cantiere/${cantiereId}/documentazioni?openDocId=${b.id}`)}>
+                        {b.titolo}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
               )}
               {onExportDocx && (
                 <DropdownMenu>

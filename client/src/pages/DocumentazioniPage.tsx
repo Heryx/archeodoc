@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "wouter";
+import { useLocation, useParams } from "wouter";
+import { extractSearchFromLocation } from "@/lib/location";
 import {
-  Link2, Plus, FileText, Loader2, ArrowUp, ArrowDown,
+  Plus, FileText, Loader2,
   Trash2, Download, Image, Upload, FolderOpen, X, Stethoscope, CheckCircle2, AlertCircle,
   ExternalLink, FolderCog, RefreshCcw, Copy,
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
-import { getCurrentProjectId } from "@/lib/project";
+import { buildProjectUrl, getCurrentProjectId, getProjectHeader } from "@/lib/project";
 import { Button } from "@/components/ui/button";
 import { GoogleSyncReviewDialog } from "@/components/giornata/GoogleSyncReviewDialog";
 import { GiornataDocxImportDialog } from "@/components/giornata/GiornataDocxImportDialog";
@@ -30,6 +31,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { RelazioneEditorPanel } from "@/components/relazioni/RelazioneEditor";
 
 type DocumentazioneTipo = "giornaliera" | "settimanale" | "fine_scavo";
 
@@ -79,7 +81,67 @@ const USO_OPTIONS = [
   { value: "altro", label: "Altro" },
 ];
 
-type Tab = "documentazioni" | "google" | "immagini" | "template";
+type Tab = "documentazioni" | "google" | "immagini" | "template" | "export";
+
+// ─── TAB: Export archivio ZIP ─────────────────────────────────────────────────
+
+function ExportZipTab({ cantiereId }: { cantiereId: number }) {
+  const { toast } = useToast();
+  const [loading, setLoading] = useState<"all" | "us" | null>(null);
+
+  async function download(scope: "all" | "us") {
+    setLoading(scope);
+    try {
+      const response = await fetch(
+        buildProjectUrl(`/api/cantieri/${cantiereId}/export-zip${scope === "us" ? "?scope=us" : ""}`),
+        { headers: getProjectHeader() },
+      );
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || "Errore durante l'export");
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition") || "";
+      const filename = /filename="([^"]+)"/.exec(disposition)?.[1]
+        || `cantiere_${cantiereId}_${scope === "us" ? "schede_us" : "export"}.zip`;
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      toast({ title: "Archivio ZIP scaricato" });
+    } catch (error: any) {
+      toast({ title: "Errore export ZIP", description: error.message, variant: "destructive" });
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Esporta archivio ZIP</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-sm text-muted-foreground">
+          L'archivio contiene l'elenco US (XLSX, e DOCX se è caricato un template elenco), le schede US
+          e, nell'export completo, i diari di scavo con report generato.
+        </p>
+        <div className="flex gap-2 flex-wrap">
+          <Button onClick={() => download("all")} disabled={loading !== null} className="gap-2">
+            {loading === "all" ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+            {loading === "all" ? "Preparazione..." : "ZIP completo"}
+          </Button>
+          <Button variant="outline" onClick={() => download("us")} disabled={loading !== null} className="gap-2">
+            {loading === "us" ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+            {loading === "us" ? "Preparazione..." : "Solo elenco e schede US"}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 function tipoLabel(tipo: DocumentazioneTipo): string {
   if (tipo === "giornaliera") return "Giornaliera";
@@ -614,7 +676,7 @@ function TemplateTab({ cantiereId }: { cantiereId: number }) {
   );
 }
 
-// ─── TAB: Documentazioni (snapshot WebMap) ────────────────────────────────────
+// ─── TAB: Relazioni (editor documento) ────────────────────────────────────
 
 function DocumentazioniTab({ cantiereId }: { cantiereId: number }) {
   const { toast } = useToast();
@@ -625,18 +687,10 @@ function DocumentazioniTab({ cantiereId }: { cantiereId: number }) {
   const [titolo, setTitolo] = useState("");
   const [dataInizio, setDataInizio] = useState("");
   const [dataFine, setDataFine] = useState("");
-  const [selectedSnapshotId, setSelectedSnapshotId] = useState<number | null>(null);
-  const [posizione, setPosizione] = useState("");
 
   const docsQuery = useQuery<{ documentazioni: DocumentazioneRecord[] }>({
     queryKey: ["/api/cantieri", String(cantiereId), "documentazioni"],
     queryFn: async () => (await apiRequest("GET", `/api/cantieri/${cantiereId}/documentazioni`)).json(),
-    enabled: Number.isFinite(cantiereId),
-  });
-
-  const snapshotsQuery = useQuery<{ snapshots: MapSnapshotRecord[] }>({
-    queryKey: ["/api/cantieri", String(cantiereId), "map-snapshots"],
-    queryFn: async () => (await apiRequest("GET", `/api/cantieri/${cantiereId}/map-snapshots`)).json(),
     enabled: Number.isFinite(cantiereId),
   });
 
@@ -647,23 +701,14 @@ function DocumentazioniTab({ cantiereId }: { cantiereId: number }) {
   });
 
   const documentazioni = docsQuery.data?.documentazioni || [];
-  const allSnapshots = snapshotsQuery.data?.snapshots || [];
-  const linkedSnapshots = detailQuery.data?.snapshots || [];
 
+  const [location] = useLocation();
+  const openDocId = Number(new URLSearchParams(extractSearchFromLocation(location)).get("openDocId"));
   useEffect(() => {
-    if (!selectedId && documentazioni.length > 0) setSelectedId(documentazioni[0].id);
-  }, [documentazioni, selectedId]);
-
-  const orderedLinks = useMemo(() => [...linkedSnapshots].sort((a, b) => a.posizione - b.posizione), [linkedSnapshots]);
-
-  const availableSnapshots = useMemo(() => {
-    const linked = new Set(linkedSnapshots.map((l) => l.snapshotId));
-    return allSnapshots.filter((s) => !linked.has(s.id));
-  }, [allSnapshots, linkedSnapshots]);
-
-  useEffect(() => {
-    setSelectedSnapshotId(availableSnapshots.length > 0 ? availableSnapshots[0].id : null);
-  }, [selectedId, availableSnapshots.length]);
+    if (Number.isFinite(openDocId) && openDocId > 0 && documentazioni.some((d) => d.id === openDocId)) {
+      setSelectedId(openDocId);
+    } else if (!selectedId && documentazioni.length > 0) setSelectedId(documentazioni[0].id);
+  }, [documentazioni, selectedId, openDocId]);
 
   const invalidateAll = async (docId?: number | null) => {
     const id = docId !== undefined ? docId : selectedId;
@@ -688,7 +733,7 @@ function DocumentazioniTab({ cantiereId }: { cantiereId: number }) {
       const createdId = Number(data?.documentazione?.id);
       if (Number.isFinite(createdId)) setSelectedId(createdId);
       setTitolo("");
-      toast({ title: "Documentazione creata" });
+      toast({ title: "Documento creato" });
     },
     onError: (e: any) => toast({ title: "Errore creazione", description: e?.message, variant: "destructive" }),
   });
@@ -698,62 +743,9 @@ function DocumentazioniTab({ cantiereId }: { cantiereId: number }) {
     onSuccess: async (_data, id) => {
       await invalidateAll(id);
       if (selectedId === id) setSelectedId(null);
-      toast({ title: "Documentazione eliminata" });
+      toast({ title: "Documento eliminato" });
     },
     onError: (e: any) => toast({ title: "Errore eliminazione", description: e?.message, variant: "destructive" }),
-  });
-
-  const linkMutation = useMutation({
-    mutationFn: async () => {
-      if (!selectedId) throw new Error("Seleziona una documentazione");
-      if (!selectedSnapshotId) throw new Error("Seleziona uno snapshot");
-      const positionValue = Number(posizione);
-      return (await apiRequest("POST", `/api/documentazioni/${selectedId}/snapshots`, {
-        snapshotId: selectedSnapshotId,
-        posizione: Number.isFinite(positionValue) ? Math.trunc(positionValue) : undefined,
-      })).json();
-    },
-    onSuccess: async () => { await invalidateAll(); setPosizione(""); toast({ title: "Snapshot collegato" }); },
-    onError: (e: any) => toast({ title: "Errore collegamento", description: e?.message, variant: "destructive" }),
-  });
-
-  const unlinkMutation = useMutation({
-    mutationFn: async (snapshotId: number) => {
-      if (!selectedId) throw new Error("Documentazione non selezionata");
-      await apiRequest("DELETE", `/api/documentazioni/${selectedId}/snapshots/${snapshotId}`);
-    },
-    onSuccess: async () => { await invalidateAll(); toast({ title: "Snapshot rimosso" }); },
-    onError: (e: any) => toast({ title: "Errore rimozione", description: e?.message, variant: "destructive" }),
-  });
-
-  const reorderMutation = useMutation({
-    mutationFn: async ({ snapshotId, newIndex }: { snapshotId: number; newIndex: number }) => {
-      if (!selectedId) throw new Error("Documentazione non selezionata");
-      const reordered = [...orderedLinks];
-      const currentIndex = reordered.findIndex((l) => l.snapshotId === snapshotId);
-      if (currentIndex === -1) return;
-      const [item] = reordered.splice(currentIndex, 1);
-      reordered.splice(newIndex, 0, item);
-      await Promise.all(
-        reordered.map((entry, idx) =>
-          apiRequest("PATCH", `/api/documentazioni/${selectedId}/snapshots/${entry.snapshotId}`, { posizione: (idx + 1) * 10 }),
-        ),
-      );
-    },
-    onSuccess: async () => { await invalidateAll(); },
-  });
-
-  const generateMutation = useMutation({
-    mutationFn: async () => {
-      if (!selectedId) throw new Error("Seleziona una documentazione");
-      return (await apiRequest("POST", `/api/documentazioni/${selectedId}/genera-docx`, {})).json();
-    },
-    onSuccess: async (data: any) => {
-      await invalidateAll();
-      const warnings = Number(data?.warnings?.length || 0);
-      toast({ title: "DOCX generato", description: warnings > 0 ? `Generato con ${warnings} avviso/i` : "Documento aggiornato" });
-    },
-    onError: (e: any) => toast({ title: "Errore generazione DOCX", description: e?.message, variant: "destructive" }),
   });
 
   const selectedDetail = detailQuery.data?.documentazione;
@@ -763,7 +755,7 @@ function DocumentazioniTab({ cantiereId }: { cantiereId: number }) {
       {/* Colonna sinistra */}
       <Card className="h-full">
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Nuova documentazione</CardTitle>
+          <CardTitle className="text-base">Nuovo documento</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <div>
@@ -798,7 +790,7 @@ function DocumentazioniTab({ cantiereId }: { cantiereId: number }) {
           </Button>
 
           <div className="pt-3 border-t border-border space-y-1 max-h-[320px] overflow-y-auto">
-            <div className="text-xs font-medium text-muted-foreground mb-2">Documentazioni cantiere</div>
+            <div className="text-xs font-medium text-muted-foreground mb-2">Documenti del cantiere</div>
             {documentazioni.map((doc) => (
               <button
                 key={doc.id}
@@ -816,144 +808,34 @@ function DocumentazioniTab({ cantiereId }: { cantiereId: number }) {
               </button>
             ))}
             {!docsQuery.isLoading && documentazioni.length === 0 && (
-              <div className="text-xs text-muted-foreground">Nessuna documentazione disponibile.</div>
+              <div className="text-xs text-muted-foreground">Nessun documento disponibile.</div>
             )}
           </div>
         </CardContent>
       </Card>
 
-      {/* Colonna destra */}
-      <Card className="h-full">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Dettaglio documentazione</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {!selectedId ? (
-            <div className="text-sm text-muted-foreground">Seleziona o crea una documentazione dalla lista a sinistra.</div>
-          ) : detailQuery.isLoading ? (
-            <div className="text-sm text-muted-foreground">Caricamento...</div>
-          ) : !selectedDetail ? (
-            <div className="text-sm text-muted-foreground">Documentazione non trovata.</div>
-          ) : (
-            <>
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-lg font-semibold">{selectedDetail.titolo}</div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    {selectedDetail.dataInizio || "-"}
-                    {selectedDetail.dataFine ? ` → ${selectedDetail.dataFine}` : ""}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="secondary">{tipoLabel(selectedDetail.tipo)}</Badge>
-                  <Badge variant={selectedDetail.stato === "completata" ? "default" : "outline"}>{selectedDetail.stato}</Badge>
-                  <Button variant="destructive" size="sm" className="gap-1"
-                    onClick={() => deleteMutation.mutate(selectedDetail.id)}
-                    disabled={deleteMutation.isPending}
-                  >
-                    <Trash2 size={12} /> Elimina
-                  </Button>
-                </div>
-              </div>
-
-              <div className="rounded border border-border p-3 space-y-2">
-                <div className="text-sm font-medium">Collega snapshot WebMap</div>
-                <p className="text-xs text-muted-foreground">
-                  Gli snapshot sono le mappe salvate dalla pagina WebMap. Puoi collegarli a questa documentazione e ordinarli.
-                </p>
-                <div className="grid grid-cols-[1fr_120px_auto] gap-2 items-end">
-                  <div>
-                    <Label>Snapshot</Label>
-                    <select
-                      value={selectedSnapshotId ?? ""}
-                      onChange={(e) => setSelectedSnapshotId(Number(e.target.value))}
-                      className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
-                    >
-                      <option value="" disabled>Seleziona...</option>
-                      {availableSnapshots.map((s) => (
-                        <option key={s.id} value={s.id}>{s.titolo}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <Label>Posizione</Label>
-                    <Input value={posizione} onChange={(e) => setPosizione(e.target.value)} placeholder="10" />
-                  </div>
-                  <Button className="gap-1" onClick={() => linkMutation.mutate()} disabled={!selectedSnapshotId || linkMutation.isPending}>
-                    {linkMutation.isPending ? <Loader2 size={13} className="animate-spin" /> : <Link2 size={13} />}
-                    Collega
-                  </Button>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Snapshot inclusi ({orderedLinks.length})</div>
-                {orderedLinks.length === 0 ? (
-                  <div className="text-sm text-muted-foreground">Nessuno snapshot collegato.</div>
-                ) : (
-                  <div className="space-y-2">
-                    {orderedLinks.map((entry, idx) => (
-                      <div key={entry.snapshotId} className="flex items-center justify-between gap-3 rounded border border-border px-3 py-2">
-                        <div className="min-w-0">
-                          <div className="text-sm truncate">{entry.snapshot.titolo}</div>
-                          <div className="text-xs text-muted-foreground">
-                            #{idx + 1} · {new Date(entry.snapshot.createdAt).toLocaleString("it-IT")}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Button size="sm" variant="outline" className="h-7 px-2"
-                            onClick={() => reorderMutation.mutate({ snapshotId: entry.snapshotId, newIndex: idx - 1 })}
-                            disabled={reorderMutation.isPending || idx === 0}
-                          >
-                            <ArrowUp size={12} />
-                          </Button>
-                          <Button size="sm" variant="outline" className="h-7 px-2"
-                            onClick={() => reorderMutation.mutate({ snapshotId: entry.snapshotId, newIndex: idx + 1 })}
-                            disabled={reorderMutation.isPending || idx === orderedLinks.length - 1}
-                          >
-                            <ArrowDown size={12} />
-                          </Button>
-                          <Button size="sm" variant="destructive" className="h-7 px-2"
-                            onClick={() => unlinkMutation.mutate(entry.snapshotId)}
-                            disabled={unlinkMutation.isPending}
-                          >
-                            <Trash2 size={12} />
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="rounded border border-border p-3 flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm font-medium">Genera DOCX</div>
-                  <div className="text-xs text-muted-foreground">
-                    Crea un documento Word con tutti gli snapshot nell'ordine impostato.
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {selectedDetail.allegato?.url && (
-                    <a href={selectedDetail.allegato.url} target="_blank" rel="noreferrer"
-                      className="inline-flex items-center gap-1 text-xs rounded border border-border px-2 py-1 hover:bg-muted"
-                    >
-                      <Download size={12} /> Apri DOCX
-                    </a>
-                  )}
-                  <Button className="gap-2"
-                    onClick={() => generateMutation.mutate()}
-                    disabled={generateMutation.isPending || orderedLinks.length === 0}
-                  >
-                    {generateMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
-                    Genera DOCX
-                  </Button>
-                </div>
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
+      {/* Colonna destra: editor */}
+      <div className="min-w-0">
+        {!selectedId ? (
+          <Card>
+            <CardContent className="py-6 text-sm text-muted-foreground">
+              Seleziona o crea un documento dalla lista a sinistra.
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-2">
+            <div className="flex justify-end">
+              <Button variant="destructive" size="sm" className="gap-1"
+                onClick={() => { if (confirm("Eliminare definitivamente questo documento?")) deleteMutation.mutate(selectedId); }}
+                disabled={deleteMutation.isPending}
+              >
+                <Trash2 size={12} /> Elimina
+              </Button>
+            </div>
+            <RelazioneEditorPanel cantiereId={cantiereId} docId={selectedId} />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1132,10 +1014,11 @@ function GoogleDriveTab({ cantiereId }: { cantiereId: number }) {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
-  { id: "documentazioni", label: "Documentazioni WebMap", icon: FileText },
+  { id: "documentazioni", label: "Relazioni", icon: FileText },
   { id: "google", label: "Google Drive", icon: FolderCog },
   { id: "immagini", label: "Immagini progetto", icon: Image },
   { id: "template", label: "Template report", icon: FolderOpen },
+  { id: "export", label: "Esporta ZIP", icon: Download },
 ];
 
 export function DocumentazioniPage() {
@@ -1146,9 +1029,9 @@ export function DocumentazioniPage() {
   return (
     <div className="p-6 space-y-5">
       <div>
-        <h1 className="text-2xl font-bold">Documentazioni e risorse</h1>
+        <h1 className="text-2xl font-bold">Relazioni e consegne</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Gestisci le documentazioni con snapshot WebMap, le immagini per i report e i template di documento.
+          Scrivi le relazioni da consegnare alla committenza (con figure dalla WebMap), ed esportale in Word o PDF. Qui trovi anche immagini, template e sincronizzazioni.
         </p>
       </div>
 
@@ -1175,6 +1058,7 @@ export function DocumentazioniPage() {
       {activeTab === "google" && <GoogleDriveTab cantiereId={cantiereId} />}
       {activeTab === "immagini" && <ImmaginiTab />}
       {activeTab === "template" && <TemplateTab cantiereId={cantiereId} />}
+      {activeTab === "export" && <ExportZipTab cantiereId={cantiereId} />}
     </div>
   );
 }
