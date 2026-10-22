@@ -33,7 +33,7 @@ type EmNode = {
 type EmType = {
   type: string;
   label: string;
-  fields: { field: LinkField; label: string; accepts: { us: boolean; em: string[] } }[];
+  fields: { field: LinkField; label: string; accepts: { us: boolean; nodi: string[] } }[];
 };
 
 type EmData = { nodes: EmNode[]; tipi: EmType[] };
@@ -41,14 +41,14 @@ type EmData = { nodes: EmNode[]; tipi: EmType[] };
 type EmIssue = { livello: "error" | "warning" | "info"; nodo?: string; messaggio: string };
 
 const GROUPS = [
-  { id: "virtuali", label: "Unità virtuali", types: ["USVs", "USVn", "VSF"], hint: "Ricostruzioni che entrano nella sequenza della matrix." },
-  { id: "documenti", label: "Documenti", types: ["document"], hint: "Fonti: rilievi, fotografie, pubblicazioni, archivi." },
-  { id: "estrattori", label: "Estrattori", types: ["extractor"], hint: "Ciò che si estrae da una fonte per sostenere un'affermazione." },
-  { id: "combinatori", label: "Combinatori", types: ["combiner"], hint: "Mettono insieme più estrattori." },
-  { id: "proprieta", label: "Proprietà", types: ["property"], hint: "Caratteristiche di una US, di un'unità virtuale o di un documento, con la loro provenienza." },
+  { id: "virtuali", label: "Unità virtuali", types: ["uv_strutturale", "uv_non_strutturale", "reperto_virtuale"], hint: "Ricostruzioni che entrano nella sequenza della matrix." },
+  { id: "documenti", label: "Documenti", types: ["documento"], hint: "Fonti: rilievi, fotografie, pubblicazioni, archivi." },
+  { id: "estrattori", label: "Estrattori", types: ["estrattore"], hint: "Ciò che si estrae da una fonte per sostenere un'affermazione." },
+  { id: "combinatori", label: "Combinatori", types: ["combinatore"], hint: "Mettono insieme più estrattori." },
+  { id: "proprieta", label: "Proprietà", types: ["proprieta"], hint: "Caratteristiche di una US, di un'unità virtuale o di un documento, con la loro provenienza." },
 ] as const;
 
-const PROPERTY_TYPES = ["material", "shape", "height", "width", "colour", "technique", "function", "dating"];
+const PROPERTY_TYPES = ["materiale", "forma", "altezza", "larghezza", "colore", "tecnica", "funzione", "datazione"];
 
 const splitList = (value: string) =>
   value
@@ -92,16 +92,16 @@ function EmNodeDialog({
   });
 
   const tipo = tipi.find((t) => t.type === nodeType);
-  const isProperty = nodeType === "property";
-  const isVirtual = ["USVs", "USVn", "VSF"].includes(nodeType);
-  const isDocument = nodeType === "document";
+  const isProperty = nodeType === "proprieta";
+  const isVirtual = ["uv_strutturale", "uv_non_strutturale", "reperto_virtuale"].includes(nodeType);
+  const isDocument = nodeType === "documento";
 
   const save = useMutation({
     mutationFn: async () => {
       const dati: Record<string, unknown> = { ...(node?.dati ?? {}) };
       if (isDocument) dati.url = url.trim() || undefined;
       if (isVirtual) dati.periodo = periodo.trim() || undefined;
-      if (isProperty) dati.property_type = nome.trim() || undefined;
+      if (isProperty) dati.tipo_proprieta = nome.trim() || undefined;
       const body = {
         nodeType,
         uid: uid.trim() || undefined,
@@ -111,22 +111,22 @@ function EmNodeDialog({
         links: Object.fromEntries((tipo?.fields ?? []).map((f) => [f.field, splitList(links[f.field] ?? "")])),
       };
       const res = node
-        ? await apiRequest("PUT", `/api/em/nodi/${node.id}`, body)
-        : await apiRequest("POST", `/api/cantieri/${cid}/em/nodi`, body);
+        ? await apiRequest("PUT", `/api/paradati/nodi/${node.id}`, body)
+        : await apiRequest("POST", `/api/cantieri/${cid}/paradati/nodi`, body);
       return res.json();
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "em", "nodi"] });
-      await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "em", "controlli"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "paradati", "nodi"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "paradati", "controlli"] });
       onClose();
     },
     onError: (error: any) =>
       toast({ title: "Salvataggio non riuscito", description: error?.message, variant: "destructive" }),
   });
 
-  const suggestionsFor = (accepts: { us: boolean; em: string[] }) => [
+  const suggestionsFor = (accepts: { us: boolean; nodi: string[] }) => [
     ...(accepts.us ? usCodes : []),
-    ...allNodes.filter((n) => accepts.em.includes(n.nodeType) && n.id !== node?.id).map((n) => n.uid),
+    ...allNodes.filter((n) => accepts.nodi.includes(n.nodeType) && n.id !== node?.id).map((n) => n.uid),
   ];
 
   return (
@@ -241,8 +241,8 @@ export function ParadatiPage() {
   const [editing, setEditing] = useState<{ node: EmNode | null } | null>(null);
 
   const { data, isLoading } = useQuery<EmData>({
-    queryKey: ["/api/cantieri", cid, "em", "nodi"],
-    queryFn: async () => (await apiRequest("GET", `/api/cantieri/${cid}/em/nodi`)).json(),
+    queryKey: ["/api/cantieri", cid, "paradati", "nodi"],
+    queryFn: async () => (await apiRequest("GET", `/api/cantieri/${cid}/paradati/nodi`)).json(),
     enabled: !!cid,
   });
   const { data: usList = [] } = useQuery<any[]>({
@@ -257,8 +257,8 @@ export function ParadatiPage() {
   });
 
   const { data: controlli } = useQuery<{ issues: EmIssue[] }>({
-    queryKey: ["/api/cantieri", cid, "em", "controlli"],
-    queryFn: async () => (await apiRequest("GET", `/api/cantieri/${cid}/em/controlli`)).json(),
+    queryKey: ["/api/cantieri", cid, "paradati", "controlli"],
+    queryFn: async () => (await apiRequest("GET", `/api/cantieri/${cid}/paradati/controlli`)).json(),
     enabled: !!cid,
   });
   const issues = controlli?.issues ?? [];
@@ -272,10 +272,10 @@ export function ParadatiPage() {
   const count = (types: readonly string[]) => (data?.nodes ?? []).filter((n) => types.includes(n.nodeType)).length;
 
   const remove = useMutation({
-    mutationFn: async (node: EmNode) => apiRequest("DELETE", `/api/em/nodi/${node.id}`),
+    mutationFn: async (node: EmNode) => apiRequest("DELETE", `/api/paradati/nodi/${node.id}`),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "em", "nodi"] });
-      await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "em", "controlli"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "paradati", "nodi"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "paradati", "controlli"] });
     },
     onError: (error: any) => toast({ title: "Eliminazione non riuscita", description: error?.message, variant: "destructive" }),
   });

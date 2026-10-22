@@ -13,8 +13,8 @@ import {
   documentazioneSnapshots,
   qcLogs,
   periodi,
-  emNodi,
-  emArchi,
+  nodiParadati,
+  archiParadati,
   persone,
   type Cantiere,
   type InsertCantiere,
@@ -38,10 +38,10 @@ import {
   type InsertQcLog,
   type Periodo,
   type InsertPeriodo,
-  type EmNodo,
-  type InsertEmNodo,
-  type EmArco,
-  type InsertEmArco,
+  type NodoParadati,
+  type InsertNodoParadati,
+  type ArcoParadati,
+  type InsertArcoParadati,
   type Persona,
   type InsertPersona,
 } from "@shared/schema";
@@ -114,7 +114,65 @@ function allowMensileDocumentazioni(sqlite: Database.Database) {
   }
 }
 
+/**
+ * Le prime versioni salvavano unita' virtuali e paradati in tabelle con nomi
+ * diversi e con tipi di nodo/arco in inglese: si rinominano e si traducono i valori.
+ */
+function migrateLegacyParadati(sqlite: Database.Database): void {
+  const exists = (name: string) =>
+    !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
+  const nodeTypes: Record<string, string> = {
+    USVs: "uv_strutturale",
+    USVn: "uv_non_strutturale",
+    VSF: "reperto_virtuale",
+    document: "documento",
+    extractor: "estrattore",
+    combiner: "combinatore",
+    property: "proprieta",
+  };
+  const edgeTypes: Record<string, string> = {
+    is_after: "sequenza",
+    extracted_from: "estratto_da",
+    combines: "combina",
+    has_property: "ha_proprieta",
+    has_data_provenance: "ha_provenienza",
+  };
+
+  // Nomi delle tabelle nelle prime versioni: servono solo a questa migrazione.
+  const legacyNodes = "em_nodi";
+  const legacyEdges = "em_archi";
+  if (exists(legacyNodes) && !exists("nodi_paradati")) {
+    sqlite.exec(`DROP INDEX IF EXISTS idx_${legacyNodes}_cantiere_uid; ALTER TABLE ${legacyNodes} RENAME TO nodi_paradati;`);
+    for (const [from, to] of Object.entries(nodeTypes)) {
+      sqlite.prepare("UPDATE nodi_paradati SET node_type = ? WHERE node_type = ?").run(to, from);
+    }
+    const rows = sqlite.prepare("SELECT id, dati FROM nodi_paradati WHERE dati LIKE '%property_type%'").all() as Array<{ id: number; dati: string }>;
+    for (const row of rows) {
+      try {
+        const dati = JSON.parse(row.dati);
+        if (dati && typeof dati === "object" && "property_type" in dati) {
+          dati.tipo_proprieta = dati.property_type;
+          delete dati.property_type;
+          sqlite.prepare("UPDATE nodi_paradati SET dati = ? WHERE id = ?").run(JSON.stringify(dati), row.id);
+        }
+      } catch {
+        // dati non leggibili: restano come sono
+      }
+    }
+  }
+  if (exists(legacyEdges) && !exists("archi_paradati")) {
+    sqlite.exec(`DROP INDEX IF EXISTS idx_${legacyEdges}_unico; ALTER TABLE ${legacyEdges} RENAME TO archi_paradati;`);
+    for (const [from, to] of Object.entries(edgeTypes)) {
+      sqlite.prepare("UPDATE archi_paradati SET edge_type = ? WHERE edge_type = ?").run(to, from);
+    }
+    sqlite.exec(
+      "UPDATE archi_paradati SET source_kind = 'nodo' WHERE source_kind = 'em'; UPDATE archi_paradati SET target_kind = 'nodo' WHERE target_kind = 'em';",
+    );
+  }
+}
+
 function migrate(sqlite: Database.Database) {
+  migrateLegacyParadati(sqlite);
   sqlite.exec(`
     PRAGMA foreign_keys = ON;
 
@@ -407,7 +465,7 @@ function migrate(sqlite: Database.Database) {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_periodi_cantiere_nome
       ON periodi (cantiere_id, nome);
 
-    CREATE TABLE IF NOT EXISTS em_nodi (
+    CREATE TABLE IF NOT EXISTS nodi_paradati (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       cantiere_id INTEGER NOT NULL,
       uid TEXT NOT NULL,
@@ -418,10 +476,10 @@ function migrate(sqlite: Database.Database) {
       created_at TEXT NOT NULL
     );
 
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_em_nodi_cantiere_uid
-      ON em_nodi (cantiere_id, uid);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_nodi_paradati_cantiere_uid
+      ON nodi_paradati (cantiere_id, uid);
 
-    CREATE TABLE IF NOT EXISTS em_archi (
+    CREATE TABLE IF NOT EXISTS archi_paradati (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       cantiere_id INTEGER NOT NULL,
       edge_type TEXT NOT NULL,
@@ -432,8 +490,8 @@ function migrate(sqlite: Database.Database) {
       created_at TEXT NOT NULL
     );
 
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_em_archi_unico
-      ON em_archi (cantiere_id, edge_type, source_kind, source_ref, target_kind, target_ref);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_archi_paradati_unico
+      ON archi_paradati (cantiere_id, edge_type, source_kind, source_ref, target_kind, target_ref);
 
     CREATE TABLE IF NOT EXISTS cantieri_geo (
       id INTEGER PRIMARY KEY,
@@ -634,14 +692,14 @@ export interface IStorage {
   deletePeriodo(id: number): boolean;
 
   // Unita' virtuali e paradati: nodi e collegamenti
-  getEmNodi(cantiereId: number): EmNodo[];
-  getEmNodo(id: number): EmNodo | undefined;
-  createEmNodo(data: InsertEmNodo): EmNodo;
-  updateEmNodo(id: number, data: Partial<InsertEmNodo>): EmNodo | undefined;
-  deleteEmNodo(id: number): boolean;
-  getEmArchi(cantiereId: number): EmArco[];
-  createEmArco(data: InsertEmArco): EmArco;
-  deleteEmArco(id: number): boolean;
+  getNodiParadati(cantiereId: number): NodoParadati[];
+  getNodoParadati(id: number): NodoParadati | undefined;
+  createNodoParadati(data: InsertNodoParadati): NodoParadati;
+  updateNodoParadati(id: number, data: Partial<InsertNodoParadati>): NodoParadati | undefined;
+  deleteNodoParadati(id: number): boolean;
+  getArchiParadati(cantiereId: number): ArcoParadati[];
+  createArcoParadati(data: InsertArcoParadati): ArcoParadati;
+  deleteArcoParadati(id: number): boolean;
 
   // SAS
   getSasRecords(cantiereId: number): SasRecord[];
@@ -742,8 +800,8 @@ class SQLiteStorage implements IStorage {
 
     this.db.transaction((tx) => {
       tx.delete(periodi).where(eq(periodi.cantiereId, id)).run();
-      tx.delete(emArchi).where(eq(emArchi.cantiereId, id)).run();
-      tx.delete(emNodi).where(eq(emNodi.cantiereId, id)).run();
+      tx.delete(archiParadati).where(eq(archiParadati.cantiereId, id)).run();
+      tx.delete(nodiParadati).where(eq(nodiParadati.cantiereId, id)).run();
       tx.delete(qcLogs).where(eq(qcLogs.cantiereId, id)).run();
       tx.delete(mapSnapshots).where(eq(mapSnapshots.cantiereId, id)).run();
       // Le documentazione_snapshots vengono eliminate via ON DELETE CASCADE su documentazione_id
@@ -815,52 +873,52 @@ class SQLiteStorage implements IStorage {
   }
 
   // Unita' virtuali e paradati
-  getEmNodi(cantiereId: number) {
+  getNodiParadati(cantiereId: number) {
     return this.db
       .select()
-      .from(emNodi)
-      .where(eq(emNodi.cantiereId, cantiereId))
-      .orderBy(asc(emNodi.nodeType), asc(emNodi.id))
+      .from(nodiParadati)
+      .where(eq(nodiParadati.cantiereId, cantiereId))
+      .orderBy(asc(nodiParadati.nodeType), asc(nodiParadati.id))
       .all();
   }
 
-  getEmNodo(id: number) {
-    return this.db.select().from(emNodi).where(eq(emNodi.id, id)).get();
+  getNodoParadati(id: number) {
+    return this.db.select().from(nodiParadati).where(eq(nodiParadati.id, id)).get();
   }
 
-  createEmNodo(data: InsertEmNodo) {
-    return this.db.insert(emNodi).values({ ...data, createdAt: now() }).returning().get();
+  createNodoParadati(data: InsertNodoParadati) {
+    return this.db.insert(nodiParadati).values({ ...data, createdAt: now() }).returning().get();
   }
 
-  updateEmNodo(id: number, data: Partial<InsertEmNodo>) {
-    return this.db.update(emNodi).set(data).where(eq(emNodi.id, id)).returning().get();
+  updateNodoParadati(id: number, data: Partial<InsertNodoParadati>) {
+    return this.db.update(nodiParadati).set(data).where(eq(nodiParadati.id, id)).returning().get();
   }
 
-  deleteEmNodo(id: number) {
-    const existing = this.getEmNodo(id);
+  deleteNodoParadati(id: number) {
+    const existing = this.getNodoParadati(id);
     if (!existing) return false;
     this.db.transaction((tx) => {
-      tx.delete(emArchi)
-        .where(and(eq(emArchi.cantiereId, existing.cantiereId), eq(emArchi.sourceKind, "em"), eq(emArchi.sourceRef, existing.uid)))
+      tx.delete(archiParadati)
+        .where(and(eq(archiParadati.cantiereId, existing.cantiereId), eq(archiParadati.sourceKind, "nodo"), eq(archiParadati.sourceRef, existing.uid)))
         .run();
-      tx.delete(emArchi)
-        .where(and(eq(emArchi.cantiereId, existing.cantiereId), eq(emArchi.targetKind, "em"), eq(emArchi.targetRef, existing.uid)))
+      tx.delete(archiParadati)
+        .where(and(eq(archiParadati.cantiereId, existing.cantiereId), eq(archiParadati.targetKind, "nodo"), eq(archiParadati.targetRef, existing.uid)))
         .run();
-      tx.delete(emNodi).where(eq(emNodi.id, id)).run();
+      tx.delete(nodiParadati).where(eq(nodiParadati.id, id)).run();
     });
     return true;
   }
 
-  getEmArchi(cantiereId: number) {
-    return this.db.select().from(emArchi).where(eq(emArchi.cantiereId, cantiereId)).orderBy(asc(emArchi.id)).all();
+  getArchiParadati(cantiereId: number) {
+    return this.db.select().from(archiParadati).where(eq(archiParadati.cantiereId, cantiereId)).orderBy(asc(archiParadati.id)).all();
   }
 
-  createEmArco(data: InsertEmArco) {
-    return this.db.insert(emArchi).values({ ...data, createdAt: now() }).returning().get();
+  createArcoParadati(data: InsertArcoParadati) {
+    return this.db.insert(archiParadati).values({ ...data, createdAt: now() }).returning().get();
   }
 
-  deleteEmArco(id: number) {
-    return this.db.delete(emArchi).where(eq(emArchi.id, id)).run().changes > 0;
+  deleteArcoParadati(id: number) {
+    return this.db.delete(archiParadati).where(eq(archiParadati.id, id)).run().changes > 0;
   }
 
   // US

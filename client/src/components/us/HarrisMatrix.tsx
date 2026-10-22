@@ -42,14 +42,14 @@ type EdgeType =
   | "equivalenza"
   | "posteriore";
 
-/** Nodo paradati/unita' virtuali (come restituito da /em/nodi); qui contano solo le unita' virtuali. */
-export type MatrixEmNode = {
+/** Nodo paradati/unita' virtuali (come restituito da /paradati/nodi); qui contano solo le unita' virtuali. */
+export type MatrixVirtualNode = {
   uid: string;
   nodeType: string;
   links: { sopraA?: string[]; sottoA?: string[] };
 };
 
-const VIRTUAL_NODE_TYPES = new Set(["USVs", "USVn", "VSF"]);
+const VIRTUAL_NODE_TYPES = new Set(["uv_strutturale", "uv_non_strutturale", "reperto_virtuale"]);
 
 type GraphNode = {
   key: string;
@@ -143,11 +143,11 @@ function buildGraph(
   usList: USRelationRecord[],
   mode: HarrisMatrixMode,
   tombaStyle: TombaCodeStyle,
-  emNodes: MatrixEmNode[] = [],
+  nodesParadati: MatrixVirtualNode[] = [],
 ): { nodes: GraphNode[]; edges: GraphEdge[] } {
   const nodes = new Map<string, GraphNode>();
   const edges = new Map<string, GraphEdge>();
-  const virtualNodes = emNodes.filter((n) => VIRTUAL_NODE_TYPES.has(n.nodeType));
+  const virtualNodes = nodesParadati.filter((n) => VIRTUAL_NODE_TYPES.has(n.nodeType));
   const virtualKeys = new Set(virtualNodes.map((n) => normalizeCodeKey(n.uid)));
 
   const includeFisica = mode === "all" || mode === "fisica";
@@ -271,7 +271,7 @@ function buildGraph(
     }
   }
 
-  // Unita' virtuali: sequenza (is_after) con US e con altre unita' virtuali.
+  // Unita' virtuali: sequenza (sequenza) con US e con altre unita' virtuali.
   if (includeStratigrafica) {
     for (const v of virtualNodes) {
       ensureNode(v.uid, { label: v.uid, missing: false, virtual: true });
@@ -340,17 +340,17 @@ export function HarrisMatrix({
   usList,
   mode = "all",
   cantiereId,
-  emNodes,
+  virtualNodes: nodesParadati,
 }: {
   usList: USRelationRecord[];
   mode?: HarrisMatrixMode;
   cantiereId?: string;
-  emNodes?: MatrixEmNode[];
+  virtualNodes?: MatrixVirtualNode[];
 }) {
   const { settings: codeSettings } = useProjectCodeSettings();
   const graph = useMemo(
-    () => buildGraph(usList, mode, codeSettings.tombaStyle, emNodes),
-    [mode, usList, codeSettings.tombaStyle, emNodes],
+    () => buildGraph(usList, mode, codeSettings.tombaStyle, nodesParadati),
+    [mode, usList, codeSettings.tombaStyle, nodesParadati],
   );
 
   const { layout, isolated } = useMemo(() => {

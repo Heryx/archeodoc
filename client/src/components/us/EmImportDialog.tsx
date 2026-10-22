@@ -41,6 +41,16 @@ export type EmImportPlan = {
   ignored: { nodeTypes: Record<string, number>; edgeTypes: Record<string, number> };
 };
 
+const NODE_LABEL: Record<string, string> = {
+  uv_strutturale: "Unità virtuale strutturale",
+  uv_non_strutturale: "Unità virtuale non strutturale",
+  reperto_virtuale: "Reperto virtuale",
+  documento: "Documento",
+  estrattore: "Estrattore",
+  combinatore: "Combinatore",
+  proprieta: "Proprietà",
+};
+
 type Props = {
   open: boolean;
   fileName: string;
@@ -102,7 +112,7 @@ export function EmImportDialog({ open, fileName, plan, isApplying, onConfirm, on
       <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <GitBranch size={16} /> Importa grafo
+            <GitBranch size={16} /> Importa da EM Studio
           </DialogTitle>
           <DialogDescription>
             {fileName}
@@ -144,7 +154,7 @@ export function EmImportDialog({ open, fileName, plan, isApplying, onConfirm, on
                 {plan.emNodes.map((n) => (
                   <Row key={n.key} id={n.key}>
                     <span className="font-mono font-semibold">{n.uid}</span>
-                    <Badge variant="secondary" className="ml-2 text-xs font-normal">{n.nodeType}</Badge>
+                    <Badge variant="secondary" className="ml-2 text-xs font-normal">{NODE_LABEL[n.nodeType] ?? n.nodeType}</Badge>
                     {(n.nome || n.descrizione) && (
                       <span className="text-muted-foreground ml-2">
                         {[n.nome, n.descrizione].filter(Boolean).join(": ")}

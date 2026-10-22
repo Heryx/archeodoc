@@ -1,5 +1,5 @@
 /**
- * Importazione del file del grafo (`.json`) in un cantiere ArcheoDoc.
+ * Importazione di un file `.em.json` salvato da EM Studio in un cantiere ArcheoDoc.
  *
  * Due passi, entrambi senza stato sul server:
  *  - planEmImport: confronta il file con le US del cantiere e propone
@@ -17,7 +17,8 @@ import { BASE_US_MODEL_KEY } from "@shared/us_models";
 import type { IStorage } from "./storage";
 import { buildMatrixEdges } from "./matrix_export";
 import { applyPendingInverses, INVERSE_MAP, type RelField } from "./relations_sync";
-import { EM_NODE_TYPES, loadEmGraph, type EmGraphParts } from "./em_native";
+import { loadGraph, type GraphParts } from "./paradati";
+import { INTERNAL_EDGE_OF, INTERNAL_TYPE_OF } from "./em_json_names";
 
 /** Tipi di nodo che corrispondono a US reali di scavo. */
 const STRATIGRAPHIC_TYPES = new Set(["US", "USM", "USD", "SF", "USN", "USNt", "USNs", "USR"]);
@@ -88,7 +89,7 @@ export type EmImportLink = {
   target: string;
   needsNewNode: boolean;
   /** Estremi come salvati in ArcheoDoc: US per codice normalizzato, nodi per nome. */
-  ends: { sourceKind: "us" | "em"; sourceRef: string; targetKind: "us" | "em"; targetRef: string };
+  ends: { sourceKind: "us" | "nodo"; sourceRef: string; targetKind: "us" | "nodo"; targetRef: string };
 };
 
 export type EmImportConflict = { source: string; target: string; emEdgeType: string; reason: string };
@@ -136,7 +137,7 @@ function parseDoc(text: string): EmDoc {
     throw new EmImportError("Il file non e' un JSON valido.");
   }
   if (doc?.header?.format !== "em.json") {
-    throw new EmImportError("Non e' un file di grafo valido (intestazione mancante).");
+    throw new EmImportError("Non e' un file .em.json valido (intestazione mancante).");
   }
   const version = String(doc.header.version ?? "");
   if (!/^1\./.test(version)) {
@@ -185,7 +186,7 @@ export function planEmImport(
   text: string,
   usList: UnitaStratigrafica[],
   periodi: Periodo[] = [],
-  emGraph: EmGraphParts = { nodes: [], edges: [] },
+  paradatiGraph: GraphParts = { nodes: [], edges: [] },
 ): EmImportPlan {
   const doc = parseDoc(text);
   const graph = doc.graph!;
@@ -212,7 +213,7 @@ export function planEmImport(
         nodeType: node.node_type,
         description: node.description?.trim() || null,
       });
-    } else if ((EM_NODE_TYPES as readonly string[]).includes(node.node_type)) {
+    } else if (INTERNAL_TYPE_OF[node.node_type] !== undefined) {
       // unita' virtuali e paradati: trattati dopo, con i loro archi
     } else if (node.node_type === "EpochNode" || node.node_type === "epoch") {
       epochs.set(node.id, name);
@@ -265,11 +266,12 @@ export function planEmImport(
   const emTypeIds = new Set<string>();
   const emNodeById = new Map<string, { uid: string; isNew: boolean }>();
   const emNodes: EmImportNode[] = [];
-  const dbEmByUid = new Map(emGraph.nodes.map((n) => [n.uid, n]));
+  const dbEmByUid = new Map(paradatiGraph.nodes.map((n) => [n.uid, n]));
   const usedUids = new Set<string>();
   const conflictsEm: EmImportConflict[] = [];
   for (const node of graph.nodes!) {
-    if (!(EM_NODE_TYPES as readonly string[]).includes(node.node_type)) continue;
+    const internalType = INTERNAL_TYPE_OF[node.node_type];
+    if (internalType === undefined) continue;
     emTypeIds.add(node.id);
     const label = (node.name ?? "").trim();
     let uid = node.node_type === "property" || !label ? node.id : label;
@@ -277,7 +279,7 @@ export function planEmImport(
     usedUids.add(uid);
     const known = dbEmByUid.get(uid);
     if (known) {
-      if (known.nodeType === node.node_type) emNodeById.set(node.id, { uid, isNew: false });
+      if (known.nodeType === internalType) emNodeById.set(node.id, { uid, isNew: false });
       else {
         conflictsEm.push({
           source: uid,
@@ -289,11 +291,12 @@ export function planEmImport(
       continue;
     }
     emNodeById.set(node.id, { uid, isNew: true });
-    const { start_time: _s, end_time: _e, ...dati } = (node.data ?? {}) as Record<string, unknown>;
+    const { start_time: _s, end_time: _e, property_type: propertyType, ...dati } = (node.data ?? {}) as Record<string, unknown>;
+    if (typeof propertyType === "string" && propertyType) dati.tipo_proprieta = propertyType;
     emNodes.push({
       key: `emn|${uid}`,
       uid,
-      nodeType: node.node_type,
+      nodeType: internalType,
       nome: label && label !== uid ? label : null,
       descrizione: node.description?.trim() || null,
       dati,
@@ -302,11 +305,11 @@ export function planEmImport(
   const emLinks: EmImportLink[] = [];
   const seenEmLink = new Set<string>();
   const dbEmLinks = new Set(
-    emGraph.edges.map((e) => `${e.edgeType}|${e.source.kind}:${e.source.ref}|${e.target.kind}:${e.target.ref}`),
+    paradatiGraph.edges.map((e) => `${e.edgeType}|${e.source.kind}:${e.source.ref}|${e.target.kind}:${e.target.ref}`),
   );
   const endpointOf = (id: string) => {
     const em = emNodeById.get(id);
-    if (em) return { kind: "em" as const, ref: em.uid, label: em.uid, isNew: em.isNew };
+    if (em) return { kind: "nodo" as const, ref: em.uid, label: em.uid, isNew: em.isNew };
     const unit = emUnits.get(id);
     if (unit && unit.key) return { kind: "us" as const, ref: unit.key, label: unit.code, isNew: newKeys.has(unit.key) };
     return undefined;
@@ -317,14 +320,15 @@ export function planEmImport(
       const a = endpointOf(edge.source);
       const b = endpointOf(edge.target);
       if (!a || !b) continue;
-      const linkKey = `${edge.edge_type}|${a.kind}:${a.ref}|${b.kind}:${b.ref}`;
+      const internalEdge = INTERNAL_EDGE_OF[edge.edge_type];
+      const linkKey = `${internalEdge}|${a.kind}:${a.ref}|${b.kind}:${b.ref}`;
       if (dbEmLinks.has(linkKey)) {
         unchanged += 1;
       } else if (!seenEmLink.has(linkKey)) {
         seenEmLink.add(linkKey);
         emLinks.push({
           key: `eml|${linkKey}`,
-          edgeType: edge.edge_type,
+          edgeType: internalEdge,
           label: EM_EDGE_LABEL[edge.edge_type],
           source: a.label,
           target: b.label,
@@ -428,7 +432,7 @@ export function applyEmImport(
   selected: string[],
 ): EmImportResult {
   const usList = storage.getUSList(cantiere.id);
-  const plan = planEmImport(text, usList, storage.getPeriodi(cantiere.id), loadEmGraph(storage, cantiere.id));
+  const plan = planEmImport(text, usList, storage.getPeriodi(cantiere.id), loadGraph(storage, cantiere.id));
   const wanted = new Set(selected);
   const result: EmImportResult = { createdEmNodes: 0, addedEmLinks: 0, createdPeriods: 0, createdUnits: 0, addedRelations: 0, updatedPeriods: 0, skipped: [] };
 
@@ -493,7 +497,7 @@ export function applyEmImport(
   // Unita' virtuali e paradati (dopo le US, che possono esserne un estremo)
   for (const node of plan.emNodes) {
     if (!wanted.has(node.key)) continue;
-    storage.createEmNodo({
+    storage.createNodoParadati({
       cantiereId: cantiere.id,
       uid: node.uid,
       nodeType: node.nodeType,
@@ -503,8 +507,8 @@ export function applyEmImport(
     });
     result.createdEmNodes += 1;
   }
-  const emUids = new Set(storage.getEmNodi(cantiere.id).map((n) => n.uid));
-  const haveEnd = (kind: "us" | "em", ref: string) => (kind === "em" ? emUids.has(ref) : byKey.has(ref));
+  const emUids = new Set(storage.getNodiParadati(cantiere.id).map((n) => n.uid));
+  const haveEnd = (kind: "us" | "nodo", ref: string) => (kind === "nodo" ? emUids.has(ref) : byKey.has(ref));
   for (const link of plan.emLinks) {
     if (!wanted.has(link.key)) continue;
     const { sourceKind, sourceRef, targetKind, targetRef } = link.ends;
@@ -513,10 +517,10 @@ export function applyEmImport(
       continue;
     }
     const already = storage
-      .getEmArchi(cantiere.id)
+      .getArchiParadati(cantiere.id)
       .some((e) => e.edgeType === link.edgeType && e.sourceKind === sourceKind && e.sourceRef === sourceRef && e.targetKind === targetKind && e.targetRef === targetRef);
     if (already) continue;
-    storage.createEmArco({ cantiereId: cantiere.id, edgeType: link.edgeType, sourceKind, sourceRef, targetKind, targetRef });
+    storage.createArcoParadati({ cantiereId: cantiere.id, edgeType: link.edgeType, sourceKind, sourceRef, targetKind, targetRef });
     result.addedEmLinks += 1;
   }
 

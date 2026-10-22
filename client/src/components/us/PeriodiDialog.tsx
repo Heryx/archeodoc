@@ -191,7 +191,7 @@ export function PeriodiDialog({ open, onClose, cid }: Props) {
             <Layers3 size={16} /> Periodi del cantiere
           </DialogTitle>
           <DialogDescription>
-            Dal più recente (in alto) al più antico. Le date sono facoltative: con le date le
+            Dal più recente (in alto) al più antico. Le date sono facoltative: se presenti vengono scritte anche nell'export per EM Studio e le
             epoche da solo. Rinominare un periodo lo aggiorna anche nelle US.
           </DialogDescription>
         </DialogHeader>

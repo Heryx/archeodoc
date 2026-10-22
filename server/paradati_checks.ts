@@ -9,9 +9,9 @@ import { normalizeUSCode } from "@shared/normalize_us_code";
 import type { IStorage } from "./storage";
 import { coveringCycles, type CycleEdge } from "./graph_cycles";
 import { buildMatrixEdges } from "./matrix_export";
-import { EM_VIRTUAL_TYPES, listEmNodes, loadEmGraph, type EmNodeView } from "./em_native";
+import { VIRTUAL_NODE_TYPES, listNodes, loadGraph, type NodeView } from "./paradati";
 
-export type EmCheckIssue = {
+export type ParadatiIssue = {
   livello: "error" | "warning" | "info";
   /** Nome del nodo interessato, se c'e' un nodo preciso. */
   nodo?: string;
@@ -28,11 +28,11 @@ const EDGE_LABEL: Record<string, string> = {
 
 const natural = (a: string, b: string) => a.localeCompare(b, "it", { numeric: true });
 
-export function checkParadati(storage: IStorage, cantiereId: number): EmCheckIssue[] {
+export function checkParadati(storage: IStorage, cantiereId: number): ParadatiIssue[] {
   const usList = storage.getUSList(cantiereId);
-  const nodes = listEmNodes(storage, cantiereId);
-  const graph = loadEmGraph(storage, cantiereId);
-  const issues: EmCheckIssue[] = [];
+  const nodes = listNodes(storage, cantiereId);
+  const graph = loadGraph(storage, cantiereId);
+  const issues: ParadatiIssue[] = [];
   const byUid = new Map(nodes.map((n) => [n.uid, n]));
 
   // ── Cicli che coinvolgono unita' virtuali ───────────────────────────────
@@ -41,8 +41,8 @@ export function checkParadati(storage: IStorage, cantiereId: number): EmCheckIss
     const code = us.codiceUS?.trim();
     if (code) usLabel.set(`us:${normalizeUSCode(code)}`, code);
   }
-  const label = (key: string) => (key.startsWith("em:") ? key.slice(3) : (usLabel.get(key) ?? key.slice(3)));
-  const keyOfEnd = (end: { kind: "us" | "em"; ref: string }) => `${end.kind}:${end.ref}`;
+  const label = (key: string) => (key.startsWith("nodo:") ? key.slice(5) : (usLabel.get(key) ?? key.slice(5)));
+  const keyOfEnd = (end: { kind: "us" | "nodo"; ref: string }) => `${end.kind}:${end.ref}`;
 
   const edges: CycleEdge[] = [];
   for (const e of buildMatrixEdges(usList, "all")) {
@@ -50,13 +50,13 @@ export function checkParadati(storage: IStorage, cantiereId: number): EmCheckIss
     edges.push({ from: `us:${normalizeUSCode(e.from)}`, to: `us:${normalizeUSCode(e.to)}`, label: EDGE_LABEL[e.type] ?? e.type });
   }
   for (const e of graph.edges) {
-    if (e.edgeType !== "is_after") continue;
+    if (e.edgeType !== "sequenza") continue;
     const from = keyOfEnd(e.source);
     const to = keyOfEnd(e.target);
-    // is_after: la sorgente sta sopra alla destinazione
+    // sequenza: la sorgente sta sopra alla destinazione
     edges.push({ from, to, label: "sta sopra a" });
   }
-  const isVirtualKey = (key: string) => key.startsWith("em:") && EM_VIRTUAL_TYPES.has(byUid.get(key.slice(3))?.nodeType ?? "");
+  const isVirtualKey = (key: string) => key.startsWith("nodo:") && VIRTUAL_NODE_TYPES.has(byUid.get(key.slice(5))?.nodeType ?? "");
   for (const cycle of coveringCycles(edges, (a, b) => natural(label(a), label(b)))) {
     const members = Array.from(new Set(cycle.map((e) => e.from)));
     if (!members.some(isVirtualKey)) continue; // solo US: lo segnala il QC delle US
@@ -71,9 +71,9 @@ export function checkParadati(storage: IStorage, cantiereId: number): EmCheckIss
   }
 
   // ── Unita' virtuali ─────────────────────────────────────────────────────
-  const hasSequence = (n: EmNodeView) => (n.links.sopraA?.length ?? 0) + (n.links.sottoA?.length ?? 0) > 0;
+  const hasSequence = (n: NodeView) => (n.links.sopraA?.length ?? 0) + (n.links.sottoA?.length ?? 0) > 0;
   for (const n of nodes) {
-    if (EM_VIRTUAL_TYPES.has(n.nodeType) && !hasSequence(n)) {
+    if (VIRTUAL_NODE_TYPES.has(n.nodeType) && !hasSequence(n)) {
       issues.push({
         livello: "warning",
         nodo: n.uid,
@@ -92,7 +92,7 @@ export function checkParadati(storage: IStorage, cantiereId: number): EmCheckIss
     for (const p of n.links.provenienza ?? []) usedProvenance.add(p);
   }
   for (const n of nodes) {
-    if (n.nodeType === "property") {
+    if (n.nodeType === "proprieta") {
       if (!(n.links.appartieneA?.length ?? 0)) {
         issues.push({ livello: "warning", nodo: n.uid, messaggio: `La proprietà ${n.uid} non appartiene a nessuna US, unità virtuale o documento.` });
       }
@@ -103,21 +103,21 @@ export function checkParadati(storage: IStorage, cantiereId: number): EmCheckIss
           messaggio: `La proprietà ${n.uid}${n.descrizione ? ` («${n.descrizione}»)` : ""} non ha provenienza: indica l'estrattore o il combinatore che la sostiene.`,
         });
       }
-    } else if (n.nodeType === "extractor") {
+    } else if (n.nodeType === "estrattore") {
       if (!(n.links.fonti?.length ?? 0)) {
         issues.push({ livello: "warning", nodo: n.uid, messaggio: `L'estrattore ${n.uid} non indica da quale fonte estrae.` });
       }
       if (!usedProvenance.has(n.uid) && !usedExtractor.has(n.uid)) {
         issues.push({ livello: "info", nodo: n.uid, messaggio: `L'estrattore ${n.uid} non è usato da nessuna proprietà né da un combinatore.` });
       }
-    } else if (n.nodeType === "combiner") {
+    } else if (n.nodeType === "combinatore") {
       if (!(n.links.estrattori?.length ?? 0)) {
         issues.push({ livello: "warning", nodo: n.uid, messaggio: `Il combinatore ${n.uid} non combina nessun estrattore.` });
       }
       if (!usedProvenance.has(n.uid)) {
         issues.push({ livello: "info", nodo: n.uid, messaggio: `Il combinatore ${n.uid} non è usato come provenienza da nessuna proprietà.` });
       }
-    } else if (n.nodeType === "document" && !usedAsSource.has(n.uid)) {
+    } else if (n.nodeType === "documento" && !usedAsSource.has(n.uid)) {
       issues.push({ livello: "info", nodo: n.uid, messaggio: `Il documento ${n.uid} non è la fonte di nessun estrattore.` });
     }
   }

@@ -40,7 +40,7 @@ import {
   type HarrisMatrixMode,
 } from "../matrix_export";
 import { exportEmJson } from "../em_json";
-import { loadEmGraph } from "../em_native";
+import { loadGraph } from "../paradati";
 import { applyEmImport, EmImportError, planEmImport } from "../em_json_import";
 import { calcolaSettimaneProgetto } from "@shared/weekUtils";
 
@@ -843,7 +843,7 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     const usList = ctx.storage.getUSList(id);
 
     try {
-      const buf = await exportHarrisMatrixDocx(cantiere, usList, mode, loadEmGraph(ctx.storage, id));
+      const buf = await exportHarrisMatrixDocx(cantiere, usList, mode, loadGraph(ctx.storage, id));
       const filename = `${matrixExportFileBase(cantiere, String(id))}_${mode}.docx`;
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
@@ -864,7 +864,7 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     try {
       const buf = await exportHarrisMatrixPdf(cantiere, usList, mode, {
         page: parseMatrixPdfPage(req.query.page),
-        emGraph: loadEmGraph(ctx.storage, id),
+        paradatiGraph: loadGraph(ctx.storage, id),
       });
       const pageSuffix = req.query.page === "a4-portrait" ? "_A4v" : req.query.page === "a4-landscape" ? "_A4o" : "";
       const filename = `${matrixExportFileBase(cantiere, String(id))}_${mode}${pageSuffix}.pdf`;
@@ -882,9 +882,9 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     const text = typeof req.body?.text === "string" ? req.body.text : "";
     if (!text) return res.status(400).json({ error: "Campo 'text' mancante" });
     try {
-      res.json(planEmImport(text, ctx.storage.getUSList(id), ctx.storage.getPeriodi(id), loadEmGraph(ctx.storage, id)));
+      res.json(planEmImport(text, ctx.storage.getUSList(id), ctx.storage.getPeriodi(id), loadGraph(ctx.storage, id)));
     } catch (error: any) {
-      res.status(error instanceof EmImportError ? 400 : 500).json({ error: error.message || "Errore lettura del file" });
+      res.status(error instanceof EmImportError ? 400 : 500).json({ error: error.message || "Errore lettura del file EM Studio" });
     }
   }));
 
@@ -898,7 +898,7 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     try {
       res.json(applyEmImport(ctx.storage, cantiere, text, selected));
     } catch (error: any) {
-      res.status(error instanceof EmImportError ? 400 : 500).json({ error: error.message || "Errore import del file" });
+      res.status(error instanceof EmImportError ? 400 : 500).json({ error: error.message || "Errore import da EM Studio" });
     }
   }));
 
@@ -915,14 +915,14 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
         mode,
         edgeMode: req.query.edges === "physical" ? "physical" : "sequence",
         periodi: ctx.storage.getPeriodi(id),
-        emGraph: loadEmGraph(ctx.storage, id),
+        paradatiGraph: loadGraph(ctx.storage, id),
       });
-      const filename = `${matrixExportFileBase(cantiere, String(id))}_${mode}_grafo.json`;
+      const filename = `${matrixExportFileBase(cantiere, String(id))}_${mode}.em.json`;
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
       res.send(json);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Errore export del grafo" });
+      res.status(500).json({ error: error.message || "Errore export per EM Studio" });
     }
   }));
 
@@ -935,7 +935,7 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     const usList = ctx.storage.getUSList(id);
 
     try {
-      const svg = exportHarrisMatrixSvg(cantiere, usList, mode, loadEmGraph(ctx.storage, id));
+      const svg = exportHarrisMatrixSvg(cantiere, usList, mode, loadGraph(ctx.storage, id));
       const filename = `${matrixExportFileBase(cantiere, String(id))}_${mode}.svg`;
       res.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);

@@ -6,7 +6,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { buildProjectUrl, getCurrentProjectId, getProjectHeader } from "@/lib/project";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import type { HarrisMatrixMode, MatrixEmNode } from "@/components/us/HarrisMatrix";
+import type { HarrisMatrixMode, MatrixVirtualNode } from "@/components/us/HarrisMatrix";
 import { EmImportDialog, type EmImportPlan } from "@/components/us/EmImportDialog";
 import { PeriodiDialog } from "@/components/us/PeriodiDialog";
 
@@ -35,9 +35,9 @@ export function MatrixPage() {
     enabled: !!cid,
   });
 
-  const { data: emData } = useQuery<{ nodes: MatrixEmNode[] }>({
-    queryKey: ["/api/cantieri", cid, "em", "nodi"],
-    queryFn: async () => (await apiRequest("GET", `/api/cantieri/${cid}/em/nodi`)).json(),
+  const { data: paradatiData } = useQuery<{ nodes: MatrixVirtualNode[] }>({
+    queryKey: ["/api/cantieri", cid, "paradati", "nodi"],
+    queryFn: async () => (await apiRequest("GET", `/api/cantieri/${cid}/paradati/nodi`)).json(),
     enabled: !!cid,
   });
 
@@ -49,7 +49,7 @@ export function MatrixPage() {
       setEmImport({ fileName: file.name, text, plan: await res.json() });
     } catch (error: any) {
       toast({
-        title: "File del grafo non leggibile",
+        title: "File EM Studio non leggibile",
         description: error?.message || "Operazione non riuscita",
         variant: "destructive",
       });
@@ -69,9 +69,9 @@ export function MatrixPage() {
       const r = await res.json();
       await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
       await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "periodi"] });
-      await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "em", "nodi"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "paradati", "nodi"] });
       toast({
-        title: "Import del grafo completato",
+        title: "Import da EM Studio completato",
         description: `${r.createdUnits} US create, ${r.createdEmNodes} nodi, ${r.addedEmLinks} collegamenti, ${r.addedRelations} rapporti aggiunti, ${r.createdPeriods} periodi nel registro, ${r.updatedPeriods} US con periodo aggiornato${
           r.skipped?.length ? `, ${r.skipped.length} saltati` : ""
         }`,
@@ -110,7 +110,7 @@ export function MatrixPage() {
       anchor.click();
       URL.revokeObjectURL(url);
 
-      toast({ title: `Matrix esportata (${format === "em.json" ? "grafo" : format.toUpperCase()})` });
+      toast({ title: `Matrix esportata (${format === "em.json" ? "EM Studio" : format.toUpperCase()})` });
     } catch (error: any) {
       toast({
         title: `Errore export ${format.toUpperCase()}`,
@@ -168,10 +168,10 @@ export function MatrixPage() {
             className="gap-2"
             onClick={() => exportMatrix("em.json")}
             disabled={downloadKind !== null || isLoading || usList.length === 0}
-            title="Esporta il grafo (unità, rapporti, periodi, paradati) in un file .json"
+            title="Esporta la matrix in un file .em.json da aprire in EM Studio"
           >
             <GitBranch size={15} />
-            {downloadKind === "em.json" ? "Esporto..." : "Esporta grafo"}
+            {downloadKind === "em.json" ? "Esporto..." : "Esporta per EM Studio"}
           </Button>
           <Button
             variant="outline"
@@ -193,9 +193,9 @@ export function MatrixPage() {
             className="gap-2"
             onClick={() => emFileInput.current?.click()}
             disabled={isLoading}
-            title="Importa un file del grafo (.json) esportato da ArcheoDoc o da altri programmi"
+            title="Importa un file .em.json salvato da EM Studio"
           >
-            <Upload size={15} /> Importa grafo
+            <Upload size={15} /> Importa da EM Studio
           </Button>
           <Button variant="outline" className="gap-2" onClick={() => navigate(`/cantiere/${cid}/us`)}>
             <Layers size={15} /> Torna alle schede US
@@ -227,7 +227,7 @@ export function MatrixPage() {
         </div>
       ) : (
         <Suspense fallback={<div className="h-40 rounded-lg bg-muted animate-pulse" />}>
-          <HarrisMatrix usList={usList} mode={mode} cantiereId={cid} emNodes={emData?.nodes} />
+          <HarrisMatrix usList={usList} mode={mode} cantiereId={cid} virtualNodes={paradatiData?.nodes} />
         </Suspense>
       )}
       {cid && <PeriodiDialog open={periodiOpen} onClose={() => setPeriodiOpen(false)} cid={cid} />}

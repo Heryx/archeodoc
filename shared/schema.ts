@@ -273,10 +273,10 @@ export const insertPeriodoSchema = createInsertSchema(periodi).omit({ id: true, 
 export type InsertPeriodo = z.infer<typeof insertPeriodoSchema>;
 export type Periodo = typeof periodi.$inferSelect;
 
-// Nodi oltre alle US: unita' virtuali (USVs/USVn/VSF) e paradati
+// Nodi oltre alle US: unita' virtuali e paradati
 // (documenti, estrattori, combinatori, proprieta'). `uid` e' il nome mostrato
 // e usato nei collegamenti; `dati` e' un JSON con i campi specifici del tipo.
-export const emNodi = sqliteTable("em_nodi", {
+export const nodiParadati = sqliteTable("nodi_paradati", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   cantiereId: integer("cantiere_id").notNull(),
   uid: text("uid").notNull(),
@@ -287,14 +287,14 @@ export const emNodi = sqliteTable("em_nodi", {
   createdAt: text("created_at").notNull(),
 });
 
-export const insertEmNodoSchema = createInsertSchema(emNodi).omit({ id: true, createdAt: true });
+export const insertNodoParadatiSchema = createInsertSchema(nodiParadati).omit({ id: true, createdAt: true });
 // @ts-ignore -- drizzle-zod/drizzle-orm type mismatch, runtime is correct
-export type InsertEmNodo = z.infer<typeof insertEmNodoSchema>;
-export type EmNodo = typeof emNodi.$inferSelect;
+export type InsertNodoParadati = z.infer<typeof insertNodoParadatiSchema>;
+export type NodoParadati = typeof nodiParadati.$inferSelect;
 
 // Collegamenti fra nodi e/o US. Gli estremi sono US (per codice
 // normalizzato) oppure altri nodi (per uid).
-export const emArchi = sqliteTable("em_archi", {
+export const archiParadati = sqliteTable("archi_paradati", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   cantiereId: integer("cantiere_id").notNull(),
   edgeType: text("edge_type").notNull(),
@@ -305,10 +305,10 @@ export const emArchi = sqliteTable("em_archi", {
   createdAt: text("created_at").notNull(),
 });
 
-export const insertEmArcoSchema = createInsertSchema(emArchi).omit({ id: true, createdAt: true });
+export const insertArcoParadatiSchema = createInsertSchema(archiParadati).omit({ id: true, createdAt: true });
 // @ts-ignore -- drizzle-zod/drizzle-orm type mismatch, runtime is correct
-export type InsertEmArco = z.infer<typeof insertEmArcoSchema>;
-export type EmArco = typeof emArchi.$inferSelect;
+export type InsertArcoParadati = z.infer<typeof insertArcoParadatiSchema>;
+export type ArcoParadati = typeof archiParadati.$inferSelect;
 
 // Snapshot WebMap / planimetrie salvate
 export const mapSnapshots = sqliteTable("map_snapshots", {

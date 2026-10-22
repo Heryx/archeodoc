@@ -11,7 +11,7 @@ import {
 import { PDFDocument, StandardFonts, rgb, type PDFPage } from "pdf-lib";
 import type { Cantiere, UnitaStratigrafica } from "@shared/schema";
 import { layoutHarrisMatrix } from "@shared/matrix_layout";
-import { EM_VIRTUAL_TYPES, type EmGraphParts } from "./em_native";
+import { VIRTUAL_NODE_TYPES, type GraphParts } from "./paradati";
 import { normalizeUSCode } from "@shared/normalize_us_code";
 
 export type HarrisMatrixMode = "all" | "fisica" | "stratigrafica";
@@ -334,7 +334,7 @@ export function buildMatrixGraph(
   usList: UnitaStratigrafica[],
   mode: HarrisMatrixMode,
   layoutOptions: MatrixLayoutOptions = {},
-  emGraph?: EmGraphParts,
+  paradatiGraph?: GraphParts,
 ): MatrixGraph {
   const edges = buildMatrixEdges(usList, mode);
 
@@ -355,22 +355,22 @@ export function buildMatrixGraph(
     });
   }
 
-  // Unita' virtuali: partecipano alla sequenza (is_after) come nodi propri.
-  // Le US si riconoscono per codice normalizzato, i nodi EM per nome.
-  if (emGraph && mode !== "fisica") {
+  // Unita' virtuali: partecipano alla sequenza (sequenza) come nodi propri.
+  // Le US si riconoscono per codice normalizzato, gli altri nodi per nome.
+  if (paradatiGraph && mode !== "fisica") {
     const keyByUsCode = new Map<string, string>();
     for (const node of Array.from(nodes.values())) keyByUsCode.set(normalizeUSCode(node.label), node.key);
     const virtualKey = new Map<string, string>();
-    for (const em of emGraph.nodes) {
-      if (!EM_VIRTUAL_TYPES.has(em.nodeType)) continue;
+    for (const em of paradatiGraph.nodes) {
+      if (!VIRTUAL_NODE_TYPES.has(em.nodeType)) continue;
       const key = normalizeCodeKey(em.uid);
       virtualKey.set(em.uid, key);
       nodes.set(key, { key, label: em.uid, forma: "virtuale", missing: false, level: 0, x: 0, y: 0 });
     }
-    const keyOf = (end: { kind: "us" | "em"; ref: string }) =>
-      end.kind === "em" ? virtualKey.get(end.ref) : keyByUsCode.get(end.ref);
-    for (const e of emGraph.edges) {
-      if (e.edgeType !== "is_after") continue;
+    const keyOf = (end: { kind: "us" | "nodo"; ref: string }) =>
+      end.kind === "nodo" ? virtualKey.get(end.ref) : keyByUsCode.get(end.ref);
+    for (const e of paradatiGraph.edges) {
+      if (e.edgeType !== "sequenza") continue;
       const from = keyOf(e.source);
       const to = keyOf(e.target);
       if (!from || !to || from === to) continue;
@@ -510,9 +510,9 @@ export async function exportHarrisMatrixDocx(
   cantiere: Cantiere | undefined,
   usList: UnitaStratigrafica[],
   mode: HarrisMatrixMode,
-  emGraph?: EmGraphParts,
+  paradatiGraph?: GraphParts,
 ): Promise<Buffer> {
-  const { nodes, edges } = buildMatrixGraph(usList, mode, {}, emGraph);
+  const { nodes, edges } = buildMatrixGraph(usList, mode, {}, paradatiGraph);
   const forme = contaForme(nodes);
   const referenziateMancanti = nodes.filter((node) => node.missing).length;
 
@@ -627,7 +627,7 @@ export type MatrixPdfOptions = {
   /** libero = una pagina grande quanto il disegno; a4-* = pagine A4 con il disegno spezzato. */
   page?: MatrixPdfPage;
   /** Unita' virtuali e loro sequenze, se presenti. */
-  emGraph?: EmGraphParts;
+  paradatiGraph?: GraphParts;
 };
 
 export function parseMatrixPdfPage(value: unknown): MatrixPdfPage {
@@ -657,7 +657,7 @@ export async function exportHarrisMatrixPdf(
         ),
       )
     : undefined;
-  const { nodes, edges } = buildMatrixGraph(usList, mode, { maxCols }, options.emGraph);
+  const { nodes, edges } = buildMatrixGraph(usList, mode, { maxCols }, options.paradatiGraph);
   const forme = contaForme(nodes);
   const referenziateMancanti = nodes.filter((node) => node.missing).length;
 
@@ -1088,9 +1088,9 @@ export function exportHarrisMatrixSvg(
   cantiere: Cantiere | undefined,
   usList: UnitaStratigrafica[],
   mode: HarrisMatrixMode,
-  emGraph?: EmGraphParts,
+  paradatiGraph?: GraphParts,
 ): string {
-  const { nodes, edges } = buildMatrixGraph(usList, mode, {}, emGraph);
+  const { nodes, edges } = buildMatrixGraph(usList, mode, {}, paradatiGraph);
   const nodeByKey = new Map<string, MatrixNode>();
   for (const node of nodes) nodeByKey.set(node.key, node);
 

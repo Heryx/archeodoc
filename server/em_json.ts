@@ -1,5 +1,5 @@
 /**
- * Esportazione della Harris Matrix in un file .json di grafo (nodi e archi).
+ * Esportazione della Harris Matrix in un file `.em.json` per EM Studio.
  *
  * Formato: header + grafo piatto nodes[]/edges[] (+ layout opzionale, qui omesso:
  * viene ricalcolato da chi apre il file, con le corsie delle epoche).
@@ -9,7 +9,8 @@
  */
 import type { Cantiere, Periodo, UnitaStratigrafica } from "@shared/schema";
 import { normalizeUSCode } from "@shared/normalize_us_code";
-import type { EmGraphParts } from "./em_native";
+import { VIRTUAL_NODE_TYPES, type GraphParts } from "./paradati";
+import { EM_EDGE_OF, EM_TYPE_OF } from "./em_json_names";
 import {
   buildMatrixGraph,
   type HarrisMatrixMode,
@@ -34,7 +35,7 @@ export type EmJsonOptions = {
   /** Registro periodi del cantiere (nome, ordine, date). */
   periodi?: Periodo[];
   /** Unita' virtuali e paradati del cantiere. */
-  emGraph?: EmGraphParts;
+  paradatiGraph?: GraphParts;
 };
 
 export type EmJsonNode = {
@@ -141,11 +142,11 @@ export function buildEmJson(
   }
 
   // Unita' virtuali e paradati nativi: nodi e archi; le US si richiamano per codice.
-  if (options.emGraph) {
+  if (options.paradatiGraph) {
     const idByUsKey = new Map<string, string>();
     for (const node of matrixNodes) idByUsKey.set(normalizeUSCode(node.label), node.key);
-    const emIds = new Set(options.emGraph.nodes.map((n) => n.uid));
-    for (const em of options.emGraph.nodes) {
+    const emIds = new Set(options.paradatiGraph.nodes.map((n) => n.uid));
+    for (const em of options.paradatiGraph.nodes) {
       let dati: Record<string, unknown> = {};
       try {
         const parsed = em.dati ? JSON.parse(em.dati) : {};
@@ -153,22 +154,24 @@ export function buildEmJson(
       } catch {
         // dati non leggibili: nodo esportato senza
       }
-      if (em.nodeType === "property" && dati.property_type === undefined) dati.property_type = em.nome ?? em.uid;
+      if (em.nodeType === "proprieta" && dati.property_type === undefined) {
+        dati.property_type = dati.tipo_proprieta ?? em.nome ?? em.uid;
+      }
       const node: EmJsonNode = {
         id: em.uid,
-        node_type: em.nodeType,
+        node_type: EM_TYPE_OF[em.nodeType] ?? em.nodeType,
         name: em.nome?.trim() || em.uid,
         data: dati,
       };
       if (em.descrizione?.trim()) node.description = em.descrizione.trim();
       nodes.push(node);
     }
-    const endpoint = (e: { kind: "us" | "em"; ref: string }) =>
-      e.kind === "em" ? (emIds.has(e.ref) ? e.ref : undefined) : idByUsKey.get(e.ref);
-    for (const edge of options.emGraph.edges) {
+    const endpoint = (e: { kind: "us" | "nodo"; ref: string }) =>
+      e.kind === "nodo" ? (emIds.has(e.ref) ? e.ref : undefined) : idByUsKey.get(e.ref);
+    for (const edge of options.paradatiGraph.edges) {
       const source = endpoint(edge.source);
       const target = endpoint(edge.target);
-      if (source && target) pushEdge(edge.edgeType, source, target);
+      if (source && target) pushEdge(EM_EDGE_OF[edge.edgeType] ?? edge.edgeType, source, target);
     }
   }
 
@@ -190,7 +193,7 @@ export function buildEmJson(
     }
 
     // Le unita' virtuali con un periodo entrano nella stessa corsia delle US.
-    for (const em of options.emGraph?.nodes ?? []) {
+    for (const em of options.paradatiGraph?.nodes ?? []) {
       let periodo = "";
       try {
         const dati = em.dati ? JSON.parse(em.dati) : {};
@@ -198,7 +201,7 @@ export function buildEmJson(
       } catch {
         // dati non leggibili
       }
-      if (!periodo || !["USVs", "USVn", "VSF"].includes(em.nodeType)) continue;
+      if (!periodo || !VIRTUAL_NODE_TYPES.has(em.nodeType)) continue;
       const k = normName(periodo);
       displayName.set(k, displayName.get(k) ?? periodo);
       levelsByPeriod.set(k, levelsByPeriod.get(k) ?? []);
