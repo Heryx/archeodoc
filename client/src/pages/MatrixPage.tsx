@@ -18,7 +18,7 @@ export function MatrixPage() {
   const activeProjectId = getCurrentProjectId();
   const [, navigate] = useLocation();
   const [mode, setMode] = useState<HarrisMatrixMode>("all");
-  const [downloadKind, setDownloadKind] = useState<"docx" | "pdf" | null>(null);
+  const [downloadKind, setDownloadKind] = useState<"docx" | "pdf" | "em.json" | null>(null);
   const [pdfPage, setPdfPage] = useState<"libero" | "a4-portrait" | "a4-landscape">("libero");
   const { toast } = useToast();
 
@@ -28,11 +28,11 @@ export function MatrixPage() {
     enabled: !!cid,
   });
 
-  async function exportMatrix(format: "docx" | "pdf") {
+  async function exportMatrix(format: "docx" | "pdf" | "em.json") {
     if (!cid) return;
     setDownloadKind(format);
     try {
-      const endpoint = buildProjectUrl(`/api/cantieri/${cid}/matrix/export-${format}?mode=${mode}${
+      const endpoint = buildProjectUrl(`/api/cantieri/${cid}/matrix/export-${format === "em.json" ? "emjson" : format}?mode=${mode}${
           format === "pdf" ? `&page=${pdfPage}` : ""
         }`);
       const response = await fetch(endpoint, { headers: getProjectHeader() });
@@ -50,7 +50,7 @@ export function MatrixPage() {
       anchor.click();
       URL.revokeObjectURL(url);
 
-      toast({ title: `Matrix esportata (${format.toUpperCase()})` });
+      toast({ title: `Matrix esportata (${format === "em.json" ? "EM Studio" : format.toUpperCase()})` });
     } catch (error: any) {
       toast({
         title: `Errore export ${format.toUpperCase()}`,
@@ -102,6 +102,16 @@ export function MatrixPage() {
           >
             <Download size={15} />
             {downloadKind === "pdf" ? "Esporto..." : "Esporta PDF"}
+          </Button>
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={() => exportMatrix("em.json")}
+            disabled={downloadKind !== null || isLoading || usList.length === 0}
+            title="File .em.json per EM Studio (Extended Matrix)"
+          >
+            <GitBranch size={15} />
+            {downloadKind === "em.json" ? "Esporto..." : "EM Studio"}
           </Button>
           <Button variant="outline" className="gap-2" onClick={() => navigate(`/cantiere/${cid}/us`)}>
             <Layers size={15} /> Torna alle schede US

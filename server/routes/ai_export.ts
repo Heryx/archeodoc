@@ -39,6 +39,7 @@ import {
   parseMatrixPdfPage,
   type HarrisMatrixMode,
 } from "../matrix_export";
+import { exportEmJson } from "../em_json";
 import { calcolaSettimaneProgetto } from "@shared/weekUtils";
 
 const AVAILABLE_PLACEHOLDER_KEYS = [
@@ -869,6 +870,28 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
       res.send(buf);
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Errore export matrix PDF" });
+    }
+  }));
+
+  app.get("/api/cantieri/:id/matrix/export-emjson", withProject(async (ctx, req, res) => {
+    const id = Number(req.params.id);
+    const cantiere = ctx.storage.getCantiere(id);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const mode = parseMatrixMode(req.query.mode);
+    const usList = ctx.storage.getUSList(id);
+
+    try {
+      const json = exportEmJson(cantiere, usList, {
+        mode,
+        edgeMode: req.query.edges === "physical" ? "physical" : "sequence",
+      });
+      const filename = `${matrixExportFileBase(cantiere, String(id))}_${mode}.em.json`;
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(json);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Errore export em.json" });
     }
   }));
 
