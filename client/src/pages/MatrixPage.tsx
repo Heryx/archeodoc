@@ -64,7 +64,7 @@ export function MatrixPage() {
       await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
       await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "periodi"] });
       toast({
-        title: "Import da EM Studio completato",
+        title: "Import Extended Matrix completato",
         description: `${r.createdUnits} US create, ${r.addedRelations} rapporti aggiunti, ${r.createdPeriods} periodi nel registro, ${r.updatedPeriods} US con periodo aggiornato${
           r.skipped?.length ? `, ${r.skipped.length} saltati` : ""
         }`,
@@ -103,7 +103,7 @@ export function MatrixPage() {
       anchor.click();
       URL.revokeObjectURL(url);
 
-      toast({ title: `Matrix esportata (${format === "em.json" ? "EM Studio" : format.toUpperCase()})` });
+      toast({ title: `Matrix esportata (${format === "em.json" ? "Extended Matrix" : format.toUpperCase()})` });
     } catch (error: any) {
       toast({
         title: `Errore export ${format.toUpperCase()}`,
@@ -161,10 +161,10 @@ export function MatrixPage() {
             className="gap-2"
             onClick={() => exportMatrix("em.json")}
             disabled={downloadKind !== null || isLoading || usList.length === 0}
-            title="File .em.json per EM Studio (Extended Matrix)"
+            title="Esporta in formato Extended Matrix (.em.json)"
           >
             <GitBranch size={15} />
-            {downloadKind === "em.json" ? "Esporto..." : "EM Studio"}
+            {downloadKind === "em.json" ? "Esporto..." : "Extended Matrix"}
           </Button>
           <Button
             variant="outline"
@@ -186,7 +186,7 @@ export function MatrixPage() {
             className="gap-2"
             onClick={() => emFileInput.current?.click()}
             disabled={isLoading}
-            title="Importa un file .em.json salvato da EM Studio"
+            title="Importa un file Extended Matrix (.em.json)"
           >
             <Upload size={15} /> Importa EM
           </Button>

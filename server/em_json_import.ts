@@ -1,5 +1,5 @@
 /**
- * Importazione di un `.em.json` (EMStudio) in un cantiere ArcheoDoc.
+ * Importazione di un file Extended Matrix (`.em.json`) in un cantiere ArcheoDoc.
  *
  * Due passi, entrambi senza stato sul server:
  *  - planEmImport: confronta il file con le US del cantiere e propone

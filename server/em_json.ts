@@ -1,10 +1,9 @@
 /**
- * Esportazione della Harris Matrix in `.em.json` v1 (EMStudio / s3Dgraphy).
+ * Esportazione della Harris Matrix in `.em.json` v1 (formato Extended Matrix).
  *
  * Formato: header + grafo piatto nodes[]/edges[] (+ layout opzionale, qui omesso:
- * EMStudio lo rigenera in modo deterministico con le corsie delle epoche).
- * Specifica: https://github.com/ExtendedMatrix/EMStudio (docs/emjson-v1-draft.md,
- * schemas/em.v1.schema.json). Convenzione di direzione: `A is_after B` = A piu'
+ * viene ricalcolato da chi apre il file, con le corsie delle epoche).
+ * Convenzione di direzione: `A is_after B` = A piu'
  * recente di B, cioe' A sta sopra B (stessa direzione degli archi "from -> to"
  * della matrix di ArcheoDoc).
  */
@@ -139,7 +138,7 @@ export function buildEmJson(
 
   // Epoche: prima quelle del registro periodi (dalla piu' recente, con le date
   // se presenti), poi i nomi scritti solo nelle US, dal piu' recente per livello
-  // medio. Senza start_time EMStudio ne rispetta l'ordine di dichiarazione.
+  // medio. Senza start_time vale l'ordine di dichiarazione.
   if (options.includeEpochs !== false) {
     const normName = (value: string) => value.trim().replace(/\s+/g, " ").toLowerCase();
     const levelsByPeriod = new Map<string, number[]>();

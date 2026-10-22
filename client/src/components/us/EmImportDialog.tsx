@@ -96,7 +96,7 @@ export function EmImportDialog({ open, fileName, plan, isApplying, onConfirm, on
       <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <GitBranch size={16} /> Importa da EM Studio
+            <GitBranch size={16} /> Importa Extended Matrix
           </DialogTitle>
           <DialogDescription>
             {fileName}

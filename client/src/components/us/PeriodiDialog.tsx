@@ -191,7 +191,7 @@ export function PeriodiDialog({ open, onClose, cid }: Props) {
             <Layers3 size={16} /> Periodi del cantiere
           </DialogTitle>
           <DialogDescription>
-            Dal più recente (in alto) al più antico. Le date sono facoltative: con le date EM Studio ordina le
+            Dal più recente (in alto) al più antico. Le date sono facoltative: con le date l'Extended Matrix ordina le
             epoche da solo. Rinominare un periodo lo aggiorna anche nelle US.
           </DialogDescription>
         </DialogHeader>
