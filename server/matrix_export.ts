@@ -11,13 +11,15 @@ import {
 import { PDFDocument, StandardFonts, rgb, type PDFPage } from "pdf-lib";
 import type { Cantiere, UnitaStratigrafica } from "@shared/schema";
 import { layoutHarrisMatrix } from "@shared/matrix_layout";
+import { EM_VIRTUAL_TYPES, type EmGraphParts } from "./em_native";
+import { normalizeUSCode } from "@shared/normalize_us_code";
 
 export type HarrisMatrixMode = "all" | "fisica" | "stratigrafica";
 
 /** Forma archeologica dell'US, dedotta da tipo / definizione / relazioni. */
-export type USForma = "struttura" | "deposito" | "taglio" | "riempimento";
+export type USForma = "struttura" | "deposito" | "taglio" | "riempimento" | "virtuale";
 
-const FORMA_ORDER: USForma[] = ["struttura", "deposito", "taglio", "riempimento"];
+const FORMA_ORDER: USForma[] = ["struttura", "deposito", "taglio", "riempimento", "virtuale"];
 
 type EdgeType =
   | "copre"
@@ -150,6 +152,7 @@ function formaFill(forma: USForma): string {
   if (forma === "struttura") return "#bfdbfe";
   if (forma === "taglio") return "#fecaca";
   if (forma === "riempimento") return "#bbf7d0";
+  if (forma === "virtuale") return "#e9d5ff";
   return "#fde68a"; // deposito
 }
 
@@ -157,6 +160,7 @@ function formaLabel(forma: USForma): string {
   if (forma === "struttura") return "Struttura";
   if (forma === "taglio") return "Taglio";
   if (forma === "riempimento") return "Riempimento";
+  if (forma === "virtuale") return "Unità virtuale";
   return "Deposito";
 }
 
@@ -330,6 +334,7 @@ export function buildMatrixGraph(
   usList: UnitaStratigrafica[],
   mode: HarrisMatrixMode,
   layoutOptions: MatrixLayoutOptions = {},
+  emGraph?: EmGraphParts,
 ): MatrixGraph {
   const edges = buildMatrixEdges(usList, mode);
 
@@ -348,6 +353,33 @@ export function buildMatrixGraph(
       x: 0,
       y: 0,
     });
+  }
+
+  // Unita' virtuali: partecipano alla sequenza (is_after) come nodi propri.
+  // Le US si riconoscono per codice normalizzato, i nodi EM per nome.
+  if (emGraph && mode !== "fisica") {
+    const keyByUsCode = new Map<string, string>();
+    for (const node of Array.from(nodes.values())) keyByUsCode.set(normalizeUSCode(node.label), node.key);
+    const virtualKey = new Map<string, string>();
+    for (const em of emGraph.nodes) {
+      if (!EM_VIRTUAL_TYPES.has(em.nodeType)) continue;
+      const key = normalizeCodeKey(em.uid);
+      virtualKey.set(em.uid, key);
+      nodes.set(key, { key, label: em.uid, forma: "virtuale", missing: false, level: 0, x: 0, y: 0 });
+    }
+    const keyOf = (end: { kind: "us" | "em"; ref: string }) =>
+      end.kind === "em" ? virtualKey.get(end.ref) : keyByUsCode.get(end.ref);
+    for (const e of emGraph.edges) {
+      if (e.edgeType !== "is_after") continue;
+      const from = keyOf(e.source);
+      const to = keyOf(e.target);
+      if (!from || !to || from === to) continue;
+      if (e.source.kind === "us" && e.target.kind === "us") continue;
+      const edgeKey = `posteriore:${from}->${to}`;
+      if (!edges.some((x) => x.key === edgeKey)) {
+        edges.push({ key: edgeKey, from, to, type: "posteriore", directed: true });
+      }
+    }
   }
 
   for (const edge of edges) {
@@ -399,6 +431,7 @@ function contaForme(nodes: MatrixNode[]): Record<USForma, number> {
     deposito: 0,
     taglio: 0,
     riempimento: 0,
+    virtuale: 0,
   };
   for (const node of nodes) {
     if (node.missing) continue;
@@ -477,8 +510,9 @@ export async function exportHarrisMatrixDocx(
   cantiere: Cantiere | undefined,
   usList: UnitaStratigrafica[],
   mode: HarrisMatrixMode,
+  emGraph?: EmGraphParts,
 ): Promise<Buffer> {
-  const { nodes, edges } = buildMatrixGraph(usList, mode);
+  const { nodes, edges } = buildMatrixGraph(usList, mode, {}, emGraph);
   const forme = contaForme(nodes);
   const referenziateMancanti = nodes.filter((node) => node.missing).length;
 
@@ -592,6 +626,8 @@ export type MatrixPdfPage = "libero" | "a4-portrait" | "a4-landscape";
 export type MatrixPdfOptions = {
   /** libero = una pagina grande quanto il disegno; a4-* = pagine A4 con il disegno spezzato. */
   page?: MatrixPdfPage;
+  /** Unita' virtuali e loro sequenze, se presenti. */
+  emGraph?: EmGraphParts;
 };
 
 export function parseMatrixPdfPage(value: unknown): MatrixPdfPage {
@@ -621,7 +657,7 @@ export async function exportHarrisMatrixPdf(
         ),
       )
     : undefined;
-  const { nodes, edges } = buildMatrixGraph(usList, mode, { maxCols });
+  const { nodes, edges } = buildMatrixGraph(usList, mode, { maxCols }, options.emGraph);
   const forme = contaForme(nodes);
   const referenziateMancanti = nodes.filter((node) => node.missing).length;
 
@@ -1052,8 +1088,9 @@ export function exportHarrisMatrixSvg(
   cantiere: Cantiere | undefined,
   usList: UnitaStratigrafica[],
   mode: HarrisMatrixMode,
+  emGraph?: EmGraphParts,
 ): string {
-  const { nodes, edges } = buildMatrixGraph(usList, mode);
+  const { nodes, edges } = buildMatrixGraph(usList, mode, {}, emGraph);
   const nodeByKey = new Map<string, MatrixNode>();
   for (const node of nodes) nodeByKey.set(node.key, node);
 

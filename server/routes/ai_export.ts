@@ -843,7 +843,7 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     const usList = ctx.storage.getUSList(id);
 
     try {
-      const buf = await exportHarrisMatrixDocx(cantiere, usList, mode);
+      const buf = await exportHarrisMatrixDocx(cantiere, usList, mode, loadEmGraph(ctx.storage, id));
       const filename = `${matrixExportFileBase(cantiere, String(id))}_${mode}.docx`;
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
@@ -864,6 +864,7 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     try {
       const buf = await exportHarrisMatrixPdf(cantiere, usList, mode, {
         page: parseMatrixPdfPage(req.query.page),
+        emGraph: loadEmGraph(ctx.storage, id),
       });
       const pageSuffix = req.query.page === "a4-portrait" ? "_A4v" : req.query.page === "a4-landscape" ? "_A4o" : "";
       const filename = `${matrixExportFileBase(cantiere, String(id))}_${mode}${pageSuffix}.pdf`;
@@ -934,7 +935,7 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     const usList = ctx.storage.getUSList(id);
 
     try {
-      const svg = exportHarrisMatrixSvg(cantiere, usList, mode);
+      const svg = exportHarrisMatrixSvg(cantiere, usList, mode, loadEmGraph(ctx.storage, id));
       const filename = `${matrixExportFileBase(cantiere, String(id))}_${mode}.svg`;
       res.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);

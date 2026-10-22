@@ -42,9 +42,20 @@ type EdgeType =
   | "equivalenza"
   | "posteriore";
 
+/** Nodo Extended Matrix (come restituito da /em/nodi); qui contano solo le unita' virtuali. */
+export type MatrixEmNode = {
+  uid: string;
+  nodeType: string;
+  links: { sopraA?: string[]; sottoA?: string[] };
+};
+
+const VIRTUAL_NODE_TYPES = new Set(["USVs", "USVn", "VSF"]);
+
 type GraphNode = {
   key: string;
   label: string;
+  /** Unita' virtuale (nodo Extended Matrix), non una US dell'elenco. */
+  virtual?: boolean;
   qcStatus?: string | null;
   missing: boolean;
   usId?: number | string | null;
@@ -132,9 +143,12 @@ function buildGraph(
   usList: USRelationRecord[],
   mode: HarrisMatrixMode,
   tombaStyle: TombaCodeStyle,
+  emNodes: MatrixEmNode[] = [],
 ): { nodes: GraphNode[]; edges: GraphEdge[] } {
   const nodes = new Map<string, GraphNode>();
   const edges = new Map<string, GraphEdge>();
+  const virtualNodes = emNodes.filter((n) => VIRTUAL_NODE_TYPES.has(n.nodeType));
+  const virtualKeys = new Set(virtualNodes.map((n) => normalizeCodeKey(n.uid)));
 
   const includeFisica = mode === "all" || mode === "fisica";
   const includeStratigrafica = mode === "all" || mode === "stratigrafica";
@@ -170,8 +184,9 @@ function buildGraph(
     const to = normalizeCodeKey(toCode);
     if (!from || !to || from === to) return;
 
-    ensureNode(fromCode, { label: formatUsCode(fromCode, null, tombaStyle), missing: true });
-    ensureNode(toCode, { label: formatUsCode(toCode, null, tombaStyle), missing: true });
+    // Le unita' virtuali hanno gia' il loro nodo: non si ricalcola l'etichetta come per una US.
+    if (!virtualKeys.has(from)) ensureNode(fromCode, { label: formatUsCode(fromCode, null, tombaStyle), missing: true });
+    if (!virtualKeys.has(to)) ensureNode(toCode, { label: formatUsCode(toCode, null, tombaStyle), missing: true });
 
     let edgeKey: string;
     let edgeFrom = from;
@@ -256,6 +271,17 @@ function buildGraph(
     }
   }
 
+  // Unita' virtuali: sequenza (is_after) con US e con altre unita' virtuali.
+  if (includeStratigrafica) {
+    for (const v of virtualNodes) {
+      ensureNode(v.uid, { label: v.uid, missing: false, virtual: true });
+    }
+    for (const v of virtualNodes) {
+      for (const lower of v.links.sopraA ?? []) addEdge(v.uid, lower, "posteriore", true);
+      for (const upper of v.links.sottoA ?? []) addEdge(upper, v.uid, "posteriore", true);
+    }
+  }
+
   return {
     nodes: Array.from(nodes.values()).sort((a, b) => compareLabels(a.label, b.label)),
     edges: Array.from(edges.values()),
@@ -314,15 +340,17 @@ export function HarrisMatrix({
   usList,
   mode = "all",
   cantiereId,
+  emNodes,
 }: {
   usList: USRelationRecord[];
   mode?: HarrisMatrixMode;
   cantiereId?: string;
+  emNodes?: MatrixEmNode[];
 }) {
   const { settings: codeSettings } = useProjectCodeSettings();
   const graph = useMemo(
-    () => buildGraph(usList, mode, codeSettings.tombaStyle),
-    [mode, usList, codeSettings.tombaStyle],
+    () => buildGraph(usList, mode, codeSettings.tombaStyle, emNodes),
+    [mode, usList, codeSettings.tombaStyle, emNodes],
   );
 
   const { layout, isolated } = useMemo(() => {
@@ -602,8 +630,8 @@ export function HarrisMatrix({
 
   const renderNode = (node: PositionedNode) => {
     const href = schedaHref(node);
-    const fill = node.missing ? "#f1f5f9" : statusFill(node.qcStatus);
-    const stroke = node.missing ? "#94a3b8" : "#334155";
+    const fill = node.virtual ? "#ede9fe" : node.missing ? "#f1f5f9" : statusFill(node.qcStatus);
+    const stroke = node.virtual ? "#7c3aed" : node.missing ? "#94a3b8" : "#334155";
     const dimmed = isDimmed(node.key);
     const focused = node.key === activeKey;
     const pinned = node.key === pinnedKey;
@@ -617,6 +645,7 @@ export function HarrisMatrix({
       >
         <title>
           {node.label}
+          {node.virtual ? " — unità virtuale" : ""}
           {node.missing ? " — non presente nell'elenco" : ""}
           {href ? " — apri scheda" : ""}
         </title>
@@ -641,7 +670,7 @@ export function HarrisMatrix({
           fill={fill}
           stroke={stroke}
           strokeWidth={node.missing ? 1.2 : 1.4}
-          strokeDasharray={node.missing ? "4 3" : undefined}
+          strokeDasharray={node.virtual ? "2 2" : node.missing ? "4 3" : undefined}
         />
         <text
           x={node.x + NODE_WIDTH / 2}

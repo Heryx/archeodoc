@@ -6,7 +6,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { buildProjectUrl, getCurrentProjectId, getProjectHeader } from "@/lib/project";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import type { HarrisMatrixMode } from "@/components/us/HarrisMatrix";
+import type { HarrisMatrixMode, MatrixEmNode } from "@/components/us/HarrisMatrix";
 import { EmImportDialog, type EmImportPlan } from "@/components/us/EmImportDialog";
 import { PeriodiDialog } from "@/components/us/PeriodiDialog";
 
@@ -32,6 +32,12 @@ export function MatrixPage() {
   const { data: usList = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/cantieri", cid, "us", "matrix-page", activeProjectId],
     queryFn: async () => (await apiRequest("GET", `/api/cantieri/${cid}/us`)).json(),
+    enabled: !!cid,
+  });
+
+  const { data: emData } = useQuery<{ nodes: MatrixEmNode[] }>({
+    queryKey: ["/api/cantieri", cid, "em", "nodi"],
+    queryFn: async () => (await apiRequest("GET", `/api/cantieri/${cid}/em/nodi`)).json(),
     enabled: !!cid,
   });
 
@@ -63,6 +69,7 @@ export function MatrixPage() {
       const r = await res.json();
       await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
       await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "periodi"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "em", "nodi"] });
       toast({
         title: "Import Extended Matrix completato",
         description: `${r.createdUnits} US create, ${r.createdEmNodes} nodi EM, ${r.addedEmLinks} collegamenti EM, ${r.addedRelations} rapporti aggiunti, ${r.createdPeriods} periodi nel registro, ${r.updatedPeriods} US con periodo aggiornato${
@@ -220,7 +227,7 @@ export function MatrixPage() {
         </div>
       ) : (
         <Suspense fallback={<div className="h-40 rounded-lg bg-muted animate-pulse" />}>
-          <HarrisMatrix usList={usList} mode={mode} cantiereId={cid} />
+          <HarrisMatrix usList={usList} mode={mode} cantiereId={cid} emNodes={emData?.nodes} />
         </Suspense>
       )}
       {cid && <PeriodiDialog open={periodiOpen} onClose={() => setPeriodiOpen(false)} cid={cid} />}

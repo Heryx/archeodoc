@@ -128,3 +128,23 @@ test("esporta e reimporta unita' virtuali e paradati (formato .em.json)", async 
 function expect_prop(plan: { emNodes: { uid: string; nodeType: string }[] }) {
   return plan.emNodes.find((n) => n.nodeType === "property")!.uid;
 }
+
+test("matrix: le unita' virtuali sono nodi della sequenza (non in modalita' fisica)", async () => {
+  const { buildMatrixGraph, exportHarrisMatrixPdf } = await import("../server/matrix_export");
+  const { loadEmGraph } = await import("../server/em_native");
+  await withStorage(async (storage, cid) => {
+    storage.updateUS(storage.getUSList(cid)[0].id, { copre: "2" });
+    saveEmNode(storage, cid, { nodeType: "USVs", links: { sopraA: ["US 2"], sottoA: ["US 1"] } });
+    const emGraph = loadEmGraph(storage, cid);
+    const g = buildMatrixGraph(storage.getUSList(cid), "all", {}, emGraph);
+    const v = g.nodes.find((n) => n.label === "USVs1")!;
+    assert.equal(v.forma, "virtuale");
+    const n1 = g.nodes.find((n) => n.label === "1")!;
+    const n2 = g.nodes.find((n) => n.label === "2")!;
+    assert.ok(n1.y < v.y && v.y < n2.y, "1 sopra la virtuale, la virtuale sopra 2");
+    assert.ok(g.edges.some((e) => e.from === n1.key && e.to === v.key && e.type === "posteriore"));
+    assert.equal(buildMatrixGraph(storage.getUSList(cid), "fisica", {}, emGraph).nodes.some((n) => n.forma === "virtuale"), false);
+    const pdf = await exportHarrisMatrixPdf(storage.getCantiere(cid), storage.getUSList(cid), "all", { emGraph });
+    assert.equal(pdf.subarray(0, 4).toString(), "%PDF");
+  });
+});
