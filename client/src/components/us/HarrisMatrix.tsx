@@ -42,7 +42,7 @@ type EdgeType =
   | "equivalenza"
   | "posteriore";
 
-/** Nodo Extended Matrix (come restituito da /em/nodi); qui contano solo le unita' virtuali. */
+/** Nodo paradati/unita' virtuali (come restituito da /em/nodi); qui contano solo le unita' virtuali. */
 export type MatrixEmNode = {
   uid: string;
   nodeType: string;
@@ -54,7 +54,7 @@ const VIRTUAL_NODE_TYPES = new Set(["USVs", "USVn", "VSF"]);
 type GraphNode = {
   key: string;
   label: string;
-  /** Unita' virtuale (nodo Extended Matrix), non una US dell'elenco. */
+  /** Unita' virtuale (nodo virtuale), non una US dell'elenco. */
   virtual?: boolean;
   qcStatus?: string | null;
   missing: boolean;

@@ -262,7 +262,7 @@ export const periodi = sqliteTable("periodi", {
   nome: text("nome").notNull(),
   descrizione: text("descrizione"),
   ordine: integer("ordine").notNull().default(0),
-  /** Anni (negativi = a.C.), come start_time / end_time delle EpochNode di EM. */
+  /** Anni (negativi = a.C.), come start_time / end_time nel file del grafo. */
   startTime: integer("start_time"),
   endTime: integer("end_time"),
   createdAt: text("created_at").notNull(),
@@ -273,7 +273,7 @@ export const insertPeriodoSchema = createInsertSchema(periodi).omit({ id: true, 
 export type InsertPeriodo = z.infer<typeof insertPeriodoSchema>;
 export type Periodo = typeof periodi.$inferSelect;
 
-// Nodi Extended Matrix oltre alle US: unita' virtuali (USVs/USVn/VSF) e paradati
+// Nodi oltre alle US: unita' virtuali (USVs/USVn/VSF) e paradati
 // (documenti, estrattori, combinatori, proprieta'). `uid` e' il nome mostrato
 // e usato nei collegamenti; `dati` e' un JSON con i campi specifici del tipo.
 export const emNodi = sqliteTable("em_nodi", {
@@ -292,8 +292,8 @@ export const insertEmNodoSchema = createInsertSchema(emNodi).omit({ id: true, cr
 export type InsertEmNodo = z.infer<typeof insertEmNodoSchema>;
 export type EmNodo = typeof emNodi.$inferSelect;
 
-// Collegamenti fra nodi Extended Matrix e/o US. Gli estremi sono US (per codice
-// normalizzato) oppure nodi EM (per uid).
+// Collegamenti fra nodi e/o US. Gli estremi sono US (per codice
+// normalizzato) oppure altri nodi (per uid).
 export const emArchi = sqliteTable("em_archi", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   cantiereId: integer("cantiere_id").notNull(),

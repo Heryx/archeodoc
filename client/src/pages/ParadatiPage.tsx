@@ -233,7 +233,7 @@ function EmNodeDialog({
   );
 }
 
-export function ExtendedMatrixPage() {
+export function ParadatiPage() {
   const { cid } = useParams<{ cid: string }>();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -290,7 +290,7 @@ export function ExtendedMatrixPage() {
     <div className="p-8 max-w-5xl mx-auto space-y-5">
       <div>
         <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Network size={22} className="text-primary" /> Extended Matrix
+          <Network size={22} className="text-primary" /> Paradati e unità virtuali
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
           Unità virtuali e paradati: documenti, estrattori, combinatori e proprietà. Le unità virtuali compaiono nella

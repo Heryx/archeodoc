@@ -65,7 +65,7 @@ test("renamePeriod propaga il nuovo nome alle US", () => {
   assert.equal(storage.reg[0].nome, "Eta moderna");
 });
 
-test("export em.json: epoche dal registro, dalla piu' recente, con le date", () => {
+test("export grafo: epoche dal registro, dalla piu' recente, con le date", () => {
   const registry = [
     { id: 1, cantiereId: 1, nome: "Romano", descrizione: "impero", ordine: 1, startTime: -27, endTime: 476, createdAt: "" },
     { id: 2, cantiereId: 1, nome: "Medievale", descrizione: null, ordine: 2, startTime: 476, endTime: 1492, createdAt: "" },

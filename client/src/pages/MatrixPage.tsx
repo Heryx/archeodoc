@@ -49,7 +49,7 @@ export function MatrixPage() {
       setEmImport({ fileName: file.name, text, plan: await res.json() });
     } catch (error: any) {
       toast({
-        title: "File .em.json non leggibile",
+        title: "File del grafo non leggibile",
         description: error?.message || "Operazione non riuscita",
         variant: "destructive",
       });
@@ -71,8 +71,8 @@ export function MatrixPage() {
       await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "periodi"] });
       await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "em", "nodi"] });
       toast({
-        title: "Import Extended Matrix completato",
-        description: `${r.createdUnits} US create, ${r.createdEmNodes} nodi EM, ${r.addedEmLinks} collegamenti EM, ${r.addedRelations} rapporti aggiunti, ${r.createdPeriods} periodi nel registro, ${r.updatedPeriods} US con periodo aggiornato${
+        title: "Import del grafo completato",
+        description: `${r.createdUnits} US create, ${r.createdEmNodes} nodi, ${r.addedEmLinks} collegamenti, ${r.addedRelations} rapporti aggiunti, ${r.createdPeriods} periodi nel registro, ${r.updatedPeriods} US con periodo aggiornato${
           r.skipped?.length ? `, ${r.skipped.length} saltati` : ""
         }`,
       });
@@ -110,7 +110,7 @@ export function MatrixPage() {
       anchor.click();
       URL.revokeObjectURL(url);
 
-      toast({ title: `Matrix esportata (${format === "em.json" ? "Extended Matrix" : format.toUpperCase()})` });
+      toast({ title: `Matrix esportata (${format === "em.json" ? "grafo" : format.toUpperCase()})` });
     } catch (error: any) {
       toast({
         title: `Errore export ${format.toUpperCase()}`,
@@ -168,10 +168,10 @@ export function MatrixPage() {
             className="gap-2"
             onClick={() => exportMatrix("em.json")}
             disabled={downloadKind !== null || isLoading || usList.length === 0}
-            title="Esporta in formato Extended Matrix (.em.json)"
+            title="Esporta il grafo (unità, rapporti, periodi, paradati) in un file .json"
           >
             <GitBranch size={15} />
-            {downloadKind === "em.json" ? "Esporto..." : "Extended Matrix"}
+            {downloadKind === "em.json" ? "Esporto..." : "Esporta grafo"}
           </Button>
           <Button
             variant="outline"
@@ -193,9 +193,9 @@ export function MatrixPage() {
             className="gap-2"
             onClick={() => emFileInput.current?.click()}
             disabled={isLoading}
-            title="Importa un file Extended Matrix (.em.json)"
+            title="Importa un file del grafo (.json) esportato da ArcheoDoc o da altri programmi"
           >
-            <Upload size={15} /> Importa EM
+            <Upload size={15} /> Importa grafo
           </Button>
           <Button variant="outline" className="gap-2" onClick={() => navigate(`/cantiere/${cid}/us`)}>
             <Layers size={15} /> Torna alle schede US

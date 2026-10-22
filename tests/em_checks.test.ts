@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { saveEmNode } from "../server/em_native";
-import { checkExtendedMatrix } from "../server/em_checks";
+import { checkParadati } from "../server/em_checks";
 
 async function withStorage<T>(fn: (storage: any, cid: number) => T | Promise<T>) {
   const os = await import("node:os");
@@ -30,7 +30,7 @@ test("nessuna segnalazione per una catena di paradati completa", async () => {
       nodeType: "property", nome: "material", descrizione: "tufo",
       links: { appartieneA: ["USVs1"], provenienza: ["X.1"] },
     });
-    assert.deepEqual(checkExtendedMatrix(storage, cid), []);
+    assert.deepEqual(checkParadati(storage, cid), []);
   });
 });
 
@@ -41,7 +41,7 @@ test("paradati incompleti e unita' virtuale isolata", async () => {
     saveEmNode(storage, cid, { nodeType: "extractor" });
     saveEmNode(storage, cid, { nodeType: "combiner" });
     saveEmNode(storage, cid, { nodeType: "property", descrizione: "rosso" });
-    const text = checkExtendedMatrix(storage, cid).map((i) => `${i.livello}|${i.messaggio}`).join("\n");
+    const text = checkParadati(storage, cid).map((i) => `${i.livello}|${i.messaggio}`).join("\n");
     assert.match(text, /warning\|USVn1 non è collegata alla sequenza/);
     assert.match(text, /warning\|L'estrattore X\.1 non indica da quale fonte/);
     assert.match(text, /warning\|Il combinatore C\.1 non combina nessun estrattore/);
@@ -56,7 +56,7 @@ test("ciclo che passa per un'unita' virtuale", async () => {
   await withStorage((storage, cid) => {
     // 1 copre 2, ma la virtuale sta sotto la 2 e sopra la 1: 1 > 2 > V > 1
     saveEmNode(storage, cid, { nodeType: "USVs", links: { sopraA: ["1"], sottoA: ["2"] } });
-    const issues = checkExtendedMatrix(storage, cid).filter((i) => i.livello === "error");
+    const issues = checkParadati(storage, cid).filter((i) => i.livello === "error");
     assert.equal(issues.length, 1);
     assert.match(issues[0].messaggio, /Ciclo nella sequenza tra 1, 2, USVs1/);
     assert.equal(issues[0].nodo, "USVs1");

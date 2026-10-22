@@ -15,7 +15,7 @@ const list = [
   us("US 9"),
 ];
 
-test("em.json: header, nodi e direzione is_after (piu' recente -> piu' antica)", () => {
+test("grafo: header, nodi e direzione is_after (piu' recente -> piu' antica)", () => {
   const doc = buildEmJson(cantiere, list);
   assert.equal(doc.header.format, "em.json");
   assert.match(doc.header.version, /^1\./);
@@ -28,7 +28,7 @@ test("em.json: header, nodi e direzione is_after (piu' recente -> piu' antica)",
   assert.equal(new Set(doc.graph.edges.map((e) => e.id)).size, doc.graph.edges.length);
 });
 
-test("em.json: tipi di nodo, equivalenze ed epoche", () => {
+test("grafo: tipi di nodo, equivalenze ed epoche", () => {
   assert.equal(emNodeType("USM"), "USM");
   assert.equal(emNodeType("USR"), "US");
   const doc = buildEmJson(cantiere, list);
@@ -41,7 +41,7 @@ test("em.json: tipi di nodo, equivalenze ed epoche", () => {
   assert.equal(buildEmJson(cantiere, list, { includeEpochs: false }).graph.nodes.some((n) => n.node_type === "EpochNode"), false);
 });
 
-test("em.json: modalita' fisica usa cuts/overlies", () => {
+test("grafo: modalita' fisica usa cuts/overlies", () => {
   const doc = buildEmJson(cantiere, list, { edgeMode: "physical" });
   const types = new Set(doc.graph.edges.map((e) => e.edge_type));
   assert.ok(types.has("overlies") && types.has("cuts"));

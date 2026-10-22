@@ -82,7 +82,7 @@ test("validazioni: tipi ammessi, duplicati, rinomina e cancellazione", async () 
   });
 });
 
-test("esporta e reimporta unita' virtuali e paradati (formato .em.json)", async () => {
+test("esporta e reimporta unita' virtuali e paradati", async () => {
   const { buildEmJson } = await import("../server/em_json");
   const { loadEmGraph } = await import("../server/em_native");
   const { planEmImport, applyEmImport } = await import("../server/em_json_import");

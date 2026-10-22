@@ -1,5 +1,5 @@
 /**
- * Esportazione della Harris Matrix in `.em.json` v1 (formato Extended Matrix).
+ * Esportazione della Harris Matrix in un file .json di grafo (nodi e archi).
  *
  * Formato: header + grafo piatto nodes[]/edges[] (+ layout opzionale, qui omesso:
  * viene ricalcolato da chi apre il file, con le corsie delle epoche).
@@ -21,7 +21,7 @@ export const EM_JSON_FORMAT_VERSION = "1.0";
 const EM_DATAMODEL_VERSION = "1.6.0";
 
 /**
- * sequenza: ogni rapporto diretto diventa `is_after` (la matrix EM classica).
+ * sequenza: ogni rapporto diretto diventa `is_after` (la sequenza classica).
  * fisici: copre/taglia/riempie/si appoggia diventano overlies/cuts/fills/abuts.
  */
 export type EmJsonEdgeMode = "sequence" | "physical";

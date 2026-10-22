@@ -320,10 +320,10 @@ export function Sidebar() {
           isPanel: false,
         },
         {
-          href: `/cantiere/${cid}/extended-matrix`,
+          href: `/cantiere/${cid}/paradati`,
           icon: Network,
-          label: "Extended Matrix",
-          isActive: (path: string) => path === `/cantiere/${cid}/extended-matrix`,
+          label: "Paradati e unità virtuali",
+          isActive: (path: string) => path === `/cantiere/${cid}/paradati`,
           isPanel: false,
         },
         {

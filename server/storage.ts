@@ -633,7 +633,7 @@ export interface IStorage {
   updatePeriodo(id: number, data: Partial<InsertPeriodo>): Periodo | undefined;
   deletePeriodo(id: number): boolean;
 
-  // Extended Matrix: nodi e collegamenti
+  // Unita' virtuali e paradati: nodi e collegamenti
   getEmNodi(cantiereId: number): EmNodo[];
   getEmNodo(id: number): EmNodo | undefined;
   createEmNodo(data: InsertEmNodo): EmNodo;
@@ -814,7 +814,7 @@ class SQLiteStorage implements IStorage {
     return this.db.delete(periodi).where(eq(periodi.id, id)).run().changes > 0;
   }
 
-  // Extended Matrix
+  // Unita' virtuali e paradati
   getEmNodi(cantiereId: number) {
     return this.db
       .select()

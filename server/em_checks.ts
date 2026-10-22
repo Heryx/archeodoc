@@ -1,5 +1,5 @@
 /**
- * Controlli di coerenza sui nodi Extended Matrix del cantiere: cicli che
+ * Controlli di coerenza su unita' virtuali e paradati del cantiere: cicli che
  * passano per le unita' virtuali e completezza dei paradati (fonti,
  * estrattori, combinatori, proprieta' con la loro provenienza).
  *
@@ -28,7 +28,7 @@ const EDGE_LABEL: Record<string, string> = {
 
 const natural = (a: string, b: string) => a.localeCompare(b, "it", { numeric: true });
 
-export function checkExtendedMatrix(storage: IStorage, cantiereId: number): EmCheckIssue[] {
+export function checkParadati(storage: IStorage, cantiereId: number): EmCheckIssue[] {
   const usList = storage.getUSList(cantiereId);
   const nodes = listEmNodes(storage, cantiereId);
   const graph = loadEmGraph(storage, cantiereId);

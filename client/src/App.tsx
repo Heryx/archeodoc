@@ -37,9 +37,9 @@ const MatrixPage = lazy(async () => {
   const mod = await import("@/pages/MatrixPage");
   return { default: mod.MatrixPage };
 });
-const ExtendedMatrixPage = lazy(async () => {
-  const mod = await import("@/pages/ExtendedMatrixPage");
-  return { default: mod.ExtendedMatrixPage };
+const ParadatiPage = lazy(async () => {
+  const mod = await import("@/pages/ParadatiPage");
+  return { default: mod.ParadatiPage };
 });
 const UploadPage = lazy(async () => {
   const mod = await import("@/pages/UploadPage");
@@ -164,7 +164,7 @@ function AppShell() {
             <Route path="/cantiere/:cid/materiali" component={MaterialiPage} />
             <Route path="/cantiere/:cid/sas" component={SasPage} />
             <Route path="/cantiere/:cid/matrix" component={MatrixPage} />
-            <Route path="/cantiere/:cid/extended-matrix" component={ExtendedMatrixPage} />
+            <Route path="/cantiere/:cid/paradati" component={ParadatiPage} />
             <Route path="/cantiere/:cid/webmap" component={WebMapPage} />
             <Route path="/cantiere/:cid/documentazioni" component={DocumentazioniPage} />
             <Route path="/cantiere/:cid/upload" component={UploadPage} />

@@ -884,7 +884,7 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     try {
       res.json(planEmImport(text, ctx.storage.getUSList(id), ctx.storage.getPeriodi(id), loadEmGraph(ctx.storage, id)));
     } catch (error: any) {
-      res.status(error instanceof EmImportError ? 400 : 500).json({ error: error.message || "Errore lettura em.json" });
+      res.status(error instanceof EmImportError ? 400 : 500).json({ error: error.message || "Errore lettura del file" });
     }
   }));
 
@@ -898,7 +898,7 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     try {
       res.json(applyEmImport(ctx.storage, cantiere, text, selected));
     } catch (error: any) {
-      res.status(error instanceof EmImportError ? 400 : 500).json({ error: error.message || "Errore import em.json" });
+      res.status(error instanceof EmImportError ? 400 : 500).json({ error: error.message || "Errore import del file" });
     }
   }));
 
@@ -917,12 +917,12 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
         periodi: ctx.storage.getPeriodi(id),
         emGraph: loadEmGraph(ctx.storage, id),
       });
-      const filename = `${matrixExportFileBase(cantiere, String(id))}_${mode}.em.json`;
+      const filename = `${matrixExportFileBase(cantiere, String(id))}_${mode}_grafo.json`;
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
       res.send(json);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Errore export em.json" });
+      res.status(500).json({ error: error.message || "Errore export del grafo" });
     }
   }));
 

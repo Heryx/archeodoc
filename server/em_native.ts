@@ -1,8 +1,8 @@
 /**
- * Nodi Extended Matrix gestiti in ArcheoDoc: unita' virtuali (USVs, USVn, VSF)
+ * Unita' virtuali e paradati gestiti in ArcheoDoc: unita' virtuali (USVs, USVn, VSF)
  * e paradati (documenti, estrattori, combinatori, proprieta').
  *
- * I collegamenti si scrivono come elenchi di codici (US) o nomi (nodi EM) in
+ * I collegamenti si scrivono come elenchi di codici (US) o nomi (altri nodi) in
  * campi nominati per tipo di nodo; il salvataggio li traduce negli archi
  * `em_archi` e sostituisce solo quelli gestiti da quel campo.
  */
@@ -285,7 +285,7 @@ export function saveEmNode(storage: IStorage, cantiereId: number, input: EmNodeI
 }
 
 /**
- * Parti del grafo EM per matrix ed export: unita' virtuali con le loro
+ * Parti del grafo per matrix ed export: unita' virtuali con le loro
  * sequenze (is_after) e archi di paradata, con le US indicate per codice.
  */
 export type EmGraphParts = {

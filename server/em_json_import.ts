@@ -1,5 +1,5 @@
 /**
- * Importazione di un file Extended Matrix (`.em.json`) in un cantiere ArcheoDoc.
+ * Importazione del file del grafo (`.json`) in un cantiere ArcheoDoc.
  *
  * Due passi, entrambi senza stato sul server:
  *  - planEmImport: confronta il file con le US del cantiere e propone
@@ -19,14 +19,14 @@ import { buildMatrixEdges } from "./matrix_export";
 import { applyPendingInverses, INVERSE_MAP, type RelField } from "./relations_sync";
 import { EM_NODE_TYPES, loadEmGraph, type EmGraphParts } from "./em_native";
 
-/** Tipi di nodo EM che corrispondono a US reali di scavo. */
+/** Tipi di nodo che corrispondono a US reali di scavo. */
 const STRATIGRAPHIC_TYPES = new Set(["US", "USM", "USD", "SF", "USN", "USNt", "USNs", "USR"]);
 
 type MatrixType = "copre" | "taglia" | "riempie" | "appoggia" | "posteriore" | "equivalenza";
 
 type EdgeSpec = { type: MatrixType; field: RelField; label: string; reverse?: boolean };
 
-/** Tipi di arco EM riconosciuti; `reverse` = la direzione EM e' opposta a quella canonica. */
+/** Tipi di arco riconosciuti; `reverse` = la direzione nel file e' opposta a quella canonica. */
 const EDGE_SPECS: Record<string, EdgeSpec> = {
   is_after: { type: "posteriore", field: "posterioreA", label: "posteriore a" },
   is_before: { type: "posteriore", field: "posterioreA", label: "posteriore a", reverse: true },
@@ -87,7 +87,7 @@ export type EmImportLink = {
   source: string;
   target: string;
   needsNewNode: boolean;
-  /** Estremi come salvati in ArcheoDoc: US per codice normalizzato, nodi EM per nome. */
+  /** Estremi come salvati in ArcheoDoc: US per codice normalizzato, nodi per nome. */
   ends: { sourceKind: "us" | "em"; sourceRef: string; targetKind: "us" | "em"; targetRef: string };
 };
 
@@ -136,7 +136,7 @@ function parseDoc(text: string): EmDoc {
     throw new EmImportError("Il file non e' un JSON valido.");
   }
   if (doc?.header?.format !== "em.json") {
-    throw new EmImportError("Non e' un file .em.json (header.format mancante).");
+    throw new EmImportError("Non e' un file di grafo valido (intestazione mancante).");
   }
   const version = String(doc.header.version ?? "");
   if (!/^1\./.test(version)) {
@@ -172,7 +172,7 @@ function indexExistingRelations(usList: UnitaStratigrafica[]) {
   return { typed, directed };
 }
 
-/** Archi che coinvolgono nodi EM nativi (unita' virtuali e paradati). */
+/** Archi che coinvolgono unita' virtuali e paradati (unita' virtuali e paradati). */
 const EM_EDGE_LABEL: Record<string, string> = {
   is_after: "sta sopra a",
   extracted_from: "estratto da",
@@ -197,8 +197,8 @@ export function planEmImport(
 
   const ignoredNodes: Record<string, number> = {};
   const ignoredEdges: Record<string, number> = {};
-  const emUnits = new Map<string, EmImportUnit>(); // id EM -> unita'
-  const epochs = new Map<string, string>(); // id EM -> nome
+  const emUnits = new Map<string, EmImportUnit>(); // id nel file -> unita'
+  const epochs = new Map<string, string>(); // id nel file -> nome
   const epochNodes: EmImportEpoch[] = [];
   const periodKey = (value: string) => value.trim().replace(/\s+/g, " ").toLowerCase();
   const registry = new Map(periodi.map((p) => [periodKey(p.nome), p]));
