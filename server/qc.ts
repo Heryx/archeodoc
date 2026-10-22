@@ -419,6 +419,155 @@ export function checkCoerenzaStratigrafica(
   return issues;
 }
 
+/** Rapporti diretti: l'US "sopra" (piu' recente) viene prima. `inverse` = il campo e' scritto dal lato opposto. */
+const SEQUENCE_FIELDS: Array<{ campo: string; label: string; inverse: boolean }> = [
+  { campo: "copre", label: "copre", inverse: false },
+  { campo: "coperto_da", label: "copre", inverse: true },
+  { campo: "taglia", label: "taglia", inverse: false },
+  { campo: "tagliatoDa", label: "taglia", inverse: true },
+  { campo: "riempie", label: "riempie", inverse: false },
+  { campo: "riempitoDa", label: "riempie", inverse: true },
+  { campo: "siAppoggiaA", label: "si appoggia a", inverse: false },
+  { campo: "gliSiAppoggia", label: "si appoggia a", inverse: true },
+  { campo: "posterioreA", label: "è posteriore a", inverse: false },
+  { campo: "anterioreA", label: "è posteriore a", inverse: true },
+];
+
+/**
+ * Cicli nei rapporti stratigrafici: una US non puo' essere insieme sopra e sotto
+ * un'altra. Si cercano le componenti fortemente connesse del grafo orientato
+ * (Tarjan); ogni US coinvolta riceve una segnalazione con i rapporti del ciclo.
+ */
+export function checkCicliStratigrafici(
+  usList: UnitaStratigrafica[],
+  configInput?: QcUsConfigInput | QcUsConfig | null,
+): QcIssue[] {
+  const config = resolveQcUsConfig(configInput ?? null);
+  const issues: QcIssue[] = [];
+  if (!config.levels["rel_ciclo"] || config.levels["rel_ciclo"] === "off") return issues;
+
+  const byCode = new Map<string, UnitaStratigrafica>();
+  for (const us of usList) byCode.set(normalizeCode(us.codiceUS), us);
+
+  type Edge = { from: string; to: string; label: string };
+  const edges: Edge[] = [];
+  const edgeSeen = new Set<string>();
+  const adjacency = new Map<string, string[]>();
+  for (const us of usList) {
+    const self = normalizeCode(us.codiceUS);
+    for (const ref of extractRelationFields(us)) {
+      const spec = SEQUENCE_FIELDS.find((f) => f.campo === ref.campo);
+      if (!spec) continue;
+      for (const raw of parseRelationCodes(ref.val)) {
+        const other = normalizeCode(raw);
+        if (!other || other === self || !byCode.has(other)) continue;
+        const [from, to] = spec.inverse ? [other, self] : [self, other];
+        const key = `${from}|${to}|${spec.label}`;
+        if (edgeSeen.has(key)) continue;
+        edgeSeen.add(key);
+        edges.push({ from, to, label: spec.label });
+        adjacency.set(from, [...(adjacency.get(from) ?? []), to]);
+      }
+    }
+  }
+
+  // Tarjan
+  const index = new Map<string, number>();
+  const low = new Map<string, number>();
+  const onStack = new Set<string>();
+  const stack: string[] = [];
+  const components: string[][] = [];
+  let counter = 0;
+  const visit = (node: string) => {
+    index.set(node, counter);
+    low.set(node, counter);
+    counter += 1;
+    stack.push(node);
+    onStack.add(node);
+    for (const next of adjacency.get(node) ?? []) {
+      if (!index.has(next)) {
+        visit(next);
+        low.set(node, Math.min(low.get(node)!, low.get(next)!));
+      } else if (onStack.has(next)) {
+        low.set(node, Math.min(low.get(node)!, index.get(next)!));
+      }
+    }
+    if (low.get(node) === index.get(node)) {
+      const component: string[] = [];
+      let member: string;
+      do {
+        member = stack.pop()!;
+        onStack.delete(member);
+        component.push(member);
+      } while (member !== node);
+      if (component.length > 1) components.push(component);
+    }
+  };
+  for (const node of Array.from(adjacency.keys())) if (!index.has(node)) visit(node);
+
+  // Per ogni US si cerca il ciclo piu' corto che la contiene (BFS): e' quello
+  // che si puo' correggere; in una componente grande le contraddizioni vere
+  // sono poche, e l'elenco di tutte le sue US non aiuterebbe.
+  const codeLabel = (key: string) => byCode.get(key)?.codiceUS ?? key;
+  const outEdges = new Map<string, Edge[]>();
+  for (const e of edges) outEdges.set(e.from, [...(outEdges.get(e.from) ?? []), e]);
+
+  const shortestCycle = (start: string, members: Set<string>): Edge[] | null => {
+    const cameBy = new Map<string, Edge>();
+    const queue: string[] = [];
+    for (const e of outEdges.get(start) ?? []) {
+      if (!members.has(e.to) || cameBy.has(e.to)) continue;
+      cameBy.set(e.to, e);
+      queue.push(e.to);
+    }
+    for (let i = 0; i < queue.length; i += 1) {
+      const node = queue[i];
+      if (node === start) break;
+      for (const e of outEdges.get(node) ?? []) {
+        if (!members.has(e.to) || cameBy.has(e.to)) continue;
+        cameBy.set(e.to, e);
+        queue.push(e.to);
+      }
+    }
+    if (!cameBy.has(start)) return null;
+    const path: Edge[] = [];
+    let node = start;
+    do {
+      const e = cameBy.get(node)!;
+      path.unshift(e);
+      node = e.from;
+    } while (node !== start);
+    return path;
+  };
+
+  const flagged = new Set<string>();
+  for (const component of components) {
+    const members = new Set(component);
+    const ordered = [...component].sort((a, b) => codeLabel(a).localeCompare(codeLabel(b), "it", { numeric: true }));
+    for (const key of ordered) {
+      if (flagged.has(key)) continue;
+      const cycle = shortestCycle(key, members);
+      if (!cycle) continue;
+      const shown = cycle.slice(0, 8).map((e) => `${codeLabel(e.from)} ${e.label} ${codeLabel(e.to)}`).join("; ");
+      const involved = Array.from(new Set(cycle.map((e) => e.from)));
+      const names = involved.map(codeLabel).sort((x, y) => x.localeCompare(y, "it", { numeric: true }));
+      for (const member of involved) {
+        flagged.add(member);
+        const us = byCode.get(member)!;
+        emit(issues, config, "rel_ciclo", {
+          categoria: "coerenza",
+          messaggio:
+            `US ${us.codiceUS}: ciclo stratigrafico tra ${names.join(", ")} (${shown}${cycle.length > 8 ? "; ..." : ""}). ` +
+            "Una US non può essere insieme sopra e sotto un'altra: correggi uno dei rapporti.",
+          campoInteressato: "relazioni",
+          usId: us.id,
+        });
+      }
+    }
+  }
+  return issues;
+}
+
 export interface GiornataQcResult {
   issues: QcIssue[];
   status: "ok" | "warning" | "error";
@@ -497,6 +646,7 @@ export function checkAllUS(
     issues.push(...checkUS(us, allegatiPerUS(us.id), config));
   }
   issues.push(...checkCoerenzaStratigrafica(usList, config));
+  issues.push(...checkCicliStratigrafici(usList, config));
   const hasError = issues.some((i) => i.livello === "error");
   const hasWarning = issues.some((i) => i.livello === "warning");
   return { issues, status: hasError ? "error" : hasWarning ? "warning" : "ok" };

@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import type { WithProject } from "./types";
-import { checkAllUS, checkCoerenzaStratigrafica, checkGiornata, checkUS } from "../qc";
+import { checkAllUS, checkCicliStratigrafici, checkCoerenzaStratigrafica, checkGiornata, checkUS } from "../qc";
 import { getQcUsConfigForProject } from "../qc_settings";
 import { AI_AVAILABLE, analizzaRelazioniQC } from "../ai";
 
@@ -103,7 +103,10 @@ export function registerQCRoutes(app: Express, withProject: WithProject) {
 
     const qcConfig = getQcUsConfigForProject(ctx.project);
     const usIssues = checkUS(us, allegatiUS, qcConfig);
-    const coerenzaIssues = checkCoerenzaStratigrafica(tutteLeUS, qcConfig).filter((issue) => issue.usId === id);
+    const coerenzaIssues = [
+      ...checkCoerenzaStratigrafica(tutteLeUS, qcConfig),
+      ...checkCicliStratigrafici(tutteLeUS, qcConfig),
+    ].filter((issue) => issue.usId === id);
     const issues = [...usIssues, ...coerenzaIssues];
 
     const hasError = issues.some((issue) => issue.livello === "error");

@@ -172,6 +172,14 @@ export const QC_US_RULES: QcRuleDef[] = [
     defaultLevel: "warning",
   },
   {
+    id: "rel_ciclo",
+    label: "Ciclo nei rapporti stratigrafici",
+    description:
+      "Due o più US si contraddicono: seguendo i rapporti (copre, taglia, riempie, si appoggia, posteriore a) si torna alla stessa US.",
+    categoria: "coerenza",
+    defaultLevel: "error",
+  },
+  {
     id: "rel_inversa_mancante",
     label: "Relazione inversa mancante",
     description: "Una relazione stratigrafica non ha la corrispondente relazione inversa sull'US collegata.",
