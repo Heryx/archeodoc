@@ -3,7 +3,7 @@ import { useProjectCodeSettings } from "@/hooks/useProjectCodeSettings";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "wouter";
-import { Bot, Eye, EyeOff, RefreshCw, ShieldCheck, ShieldOff } from "lucide-react";
+import { Bot, Eye, EyeOff, RefreshCw, ShieldCheck, ShieldOff, Wrench } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -13,6 +13,7 @@ import { getCurrentProjectId } from "@/lib/project";
 import { QcGiornataCard } from "@/components/qc/QcGiornataCard";
 import { QcUSCard } from "@/components/qc/QcUSCard";
 import { QcSummaryCards } from "@/components/qc/QcSummaryCards";
+import { SequenceRepairDialog } from "@/components/qc/SequenceRepairDialog";
 import { computeQcStatusStats } from "@/components/qc/types";
 import type { QcLog } from "@shared/schema";
 
@@ -170,6 +171,8 @@ export function QCPage({ cidOverride, embedded = false }: QCPageProps = {}) {
     },
     onError: () => toast({ title: "Errore QC globale", variant: "destructive" }),
   });
+
+  const [repairOpen, setRepairOpen] = useState(false);
 
   const runAllUsQcMutation = useMutation({
     mutationFn: async () => (await apiRequest("POST", `/api/cantieri/${cid}/us-qc-all`, {})).json(),
@@ -398,7 +401,19 @@ export function QCPage({ cidOverride, embedded = false }: QCPageProps = {}) {
           <RefreshCw size={15} className={runPending ? "animate-spin" : ""} />
           {runPending ? "In corso..." : "Esegui QC"}
         </Button>
+        <Button variant="outline" className="gap-2" onClick={() => setRepairOpen(true)} title="Toglie le voci di «posteriore a» / «anteriore a» che contraddicono i rapporti fisici">
+          <Wrench size={15} /> Ripara sequenza
+        </Button>
       </div>
+
+      {cid && (
+        <SequenceRepairDialog
+          open={repairOpen}
+          onClose={() => setRepairOpen(false)}
+          cid={cid}
+          onDone={() => queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", "qc-page", activeProjectId] })}
+        />
+      )}
 
       <QcSummaryCards stats={stats} />
 

@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import type { WithProject } from "./types";
+import { applySequenceRepair, planSequenceRepair } from "../sequence_repair";
 import { checkAllUS, checkCicliStratigrafici, checkCoerenzaStratigrafica, checkGiornata, checkUS } from "../qc";
 import { getQcUsConfigForProject } from "../qc_settings";
 import { AI_AVAILABLE, analizzaRelazioniQC } from "../ai";
@@ -151,6 +152,20 @@ export function registerQCRoutes(app: Express, withProject: WithProject) {
     const us = ctx.storage.getUS(id);
     if (!us) return res.status(404).json({ error: "US non trovata" });
     res.json(ctx.storage.getQcLogsByUS(us.cantiereId, id));
+  }));
+
+  // Riparazione dei campi "posteriore a" / "anteriore a" che contraddicono i rapporti fisici
+  app.post("/api/cantieri/:cid/qc/sequenza/preview", withProject((ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    if (!ctx.storage.getCantiere(cid)) return res.status(404).json({ error: "Cantiere non trovato" });
+    res.json(planSequenceRepair(ctx.storage.getUSList(cid)));
+  }));
+
+  app.post("/api/cantieri/:cid/qc/sequenza/apply", withProject((ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    if (!ctx.storage.getCantiere(cid)) return res.status(404).json({ error: "Cantiere non trovato" });
+    const selected = Array.isArray(req.body?.selected) ? req.body.selected.map(String) : [];
+    res.json(applySequenceRepair(ctx.storage, cid, selected));
   }));
 
   app.post("/api/cantieri/:cid/us-qc-all", withProject((ctx, req, res) => {
