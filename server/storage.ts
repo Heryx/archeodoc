@@ -13,6 +13,8 @@ import {
   documentazioneSnapshots,
   qcLogs,
   periodi,
+  emNodi,
+  emArchi,
   persone,
   type Cantiere,
   type InsertCantiere,
@@ -36,19 +38,29 @@ import {
   type InsertQcLog,
   type Periodo,
   type InsertPeriodo,
+  type EmNodo,
+  type InsertEmNodo,
+  type EmArco,
+  type InsertEmArco,
   type Persona,
   type InsertPersona,
 } from "@shared/schema";
 import { ensureWebMapTables } from "./webmap_layers";
 
-const tableColumnsCache = new Map<string, Set<string>>();
+// Una cache per connessione: ogni progetto ha il proprio database e le proprie colonne.
+const tableColumnsCache = new WeakMap<Database.Database, Map<string, Set<string>>>();
 
 function getTableColumns(sqlite: Database.Database, tableName: string): Set<string> {
-  let cols = tableColumnsCache.get(tableName);
+  let perDb = tableColumnsCache.get(sqlite);
+  if (!perDb) {
+    perDb = new Map();
+    tableColumnsCache.set(sqlite, perDb);
+  }
+  let cols = perDb.get(tableName);
   if (!cols) {
     const columns = sqlite.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
     cols = new Set(columns.map((c) => c.name));
-    tableColumnsCache.set(tableName, cols);
+    perDb.set(tableName, cols);
   }
   return cols;
 }
@@ -395,6 +407,34 @@ function migrate(sqlite: Database.Database) {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_periodi_cantiere_nome
       ON periodi (cantiere_id, nome);
 
+    CREATE TABLE IF NOT EXISTS em_nodi (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cantiere_id INTEGER NOT NULL,
+      uid TEXT NOT NULL,
+      node_type TEXT NOT NULL,
+      nome TEXT,
+      descrizione TEXT,
+      dati TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_em_nodi_cantiere_uid
+      ON em_nodi (cantiere_id, uid);
+
+    CREATE TABLE IF NOT EXISTS em_archi (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cantiere_id INTEGER NOT NULL,
+      edge_type TEXT NOT NULL,
+      source_kind TEXT NOT NULL,
+      source_ref TEXT NOT NULL,
+      target_kind TEXT NOT NULL,
+      target_ref TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_em_archi_unico
+      ON em_archi (cantiere_id, edge_type, source_kind, source_ref, target_kind, target_ref);
+
     CREATE TABLE IF NOT EXISTS cantieri_geo (
       id INTEGER PRIMARY KEY,
       cantiere_id INTEGER NOT NULL UNIQUE,
@@ -593,6 +633,16 @@ export interface IStorage {
   updatePeriodo(id: number, data: Partial<InsertPeriodo>): Periodo | undefined;
   deletePeriodo(id: number): boolean;
 
+  // Extended Matrix: nodi e collegamenti
+  getEmNodi(cantiereId: number): EmNodo[];
+  getEmNodo(id: number): EmNodo | undefined;
+  createEmNodo(data: InsertEmNodo): EmNodo;
+  updateEmNodo(id: number, data: Partial<InsertEmNodo>): EmNodo | undefined;
+  deleteEmNodo(id: number): boolean;
+  getEmArchi(cantiereId: number): EmArco[];
+  createEmArco(data: InsertEmArco): EmArco;
+  deleteEmArco(id: number): boolean;
+
   // SAS
   getSasRecords(cantiereId: number): SasRecord[];
   getSasRecord(id: number): SasRecord | undefined;
@@ -692,6 +742,8 @@ class SQLiteStorage implements IStorage {
 
     this.db.transaction((tx) => {
       tx.delete(periodi).where(eq(periodi.cantiereId, id)).run();
+      tx.delete(emArchi).where(eq(emArchi.cantiereId, id)).run();
+      tx.delete(emNodi).where(eq(emNodi.cantiereId, id)).run();
       tx.delete(qcLogs).where(eq(qcLogs.cantiereId, id)).run();
       tx.delete(mapSnapshots).where(eq(mapSnapshots.cantiereId, id)).run();
       // Le documentazione_snapshots vengono eliminate via ON DELETE CASCADE su documentazione_id
@@ -760,6 +812,55 @@ class SQLiteStorage implements IStorage {
 
   deletePeriodo(id: number) {
     return this.db.delete(periodi).where(eq(periodi.id, id)).run().changes > 0;
+  }
+
+  // Extended Matrix
+  getEmNodi(cantiereId: number) {
+    return this.db
+      .select()
+      .from(emNodi)
+      .where(eq(emNodi.cantiereId, cantiereId))
+      .orderBy(asc(emNodi.nodeType), asc(emNodi.id))
+      .all();
+  }
+
+  getEmNodo(id: number) {
+    return this.db.select().from(emNodi).where(eq(emNodi.id, id)).get();
+  }
+
+  createEmNodo(data: InsertEmNodo) {
+    return this.db.insert(emNodi).values({ ...data, createdAt: now() }).returning().get();
+  }
+
+  updateEmNodo(id: number, data: Partial<InsertEmNodo>) {
+    return this.db.update(emNodi).set(data).where(eq(emNodi.id, id)).returning().get();
+  }
+
+  deleteEmNodo(id: number) {
+    const existing = this.getEmNodo(id);
+    if (!existing) return false;
+    this.db.transaction((tx) => {
+      tx.delete(emArchi)
+        .where(and(eq(emArchi.cantiereId, existing.cantiereId), eq(emArchi.sourceKind, "em"), eq(emArchi.sourceRef, existing.uid)))
+        .run();
+      tx.delete(emArchi)
+        .where(and(eq(emArchi.cantiereId, existing.cantiereId), eq(emArchi.targetKind, "em"), eq(emArchi.targetRef, existing.uid)))
+        .run();
+      tx.delete(emNodi).where(eq(emNodi.id, id)).run();
+    });
+    return true;
+  }
+
+  getEmArchi(cantiereId: number) {
+    return this.db.select().from(emArchi).where(eq(emArchi.cantiereId, cantiereId)).orderBy(asc(emArchi.id)).all();
+  }
+
+  createEmArco(data: InsertEmArco) {
+    return this.db.insert(emArchi).values({ ...data, createdAt: now() }).returning().get();
+  }
+
+  deleteEmArco(id: number) {
+    return this.db.delete(emArchi).where(eq(emArchi.id, id)).run().changes > 0;
   }
 
   // US

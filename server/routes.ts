@@ -16,6 +16,7 @@ import { registerSettingsRoutes } from "./routes/settings";
 import { registerAIExportRoutes } from "./routes/ai_export";
 import { registerQCRoutes } from "./routes/qc";
 import { registerPeriodiRoutes } from "./routes/periodi";
+import { registerEmNodiRoutes } from "./routes/em_nodi";
 import { registerAIAssistantRoutes } from "./routes/ai_assistant";
 import { registerFieldworkRoutes } from "./routes/fieldwork";
 import { registerUSImportRoutes } from "./routes/us_import";
@@ -701,6 +702,7 @@ export async function registerRoutes(_httpServer: Server, app: Express): Promise
   registerUSImportRoutes(app, upload, withProject);
   registerQCRoutes(app, withProject);
   registerPeriodiRoutes(app, withProject);
+  registerEmNodiRoutes(app, withProject);
   registerDocumentazioniRoutes(app, {
     withProject,
     resolvePathInside,

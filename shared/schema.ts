@@ -273,6 +273,43 @@ export const insertPeriodoSchema = createInsertSchema(periodi).omit({ id: true, 
 export type InsertPeriodo = z.infer<typeof insertPeriodoSchema>;
 export type Periodo = typeof periodi.$inferSelect;
 
+// Nodi Extended Matrix oltre alle US: unita' virtuali (USVs/USVn/VSF) e paradati
+// (documenti, estrattori, combinatori, proprieta'). `uid` e' il nome mostrato
+// e usato nei collegamenti; `dati` e' un JSON con i campi specifici del tipo.
+export const emNodi = sqliteTable("em_nodi", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  cantiereId: integer("cantiere_id").notNull(),
+  uid: text("uid").notNull(),
+  nodeType: text("node_type").notNull(),
+  nome: text("nome"),
+  descrizione: text("descrizione"),
+  dati: text("dati"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const insertEmNodoSchema = createInsertSchema(emNodi).omit({ id: true, createdAt: true });
+// @ts-ignore -- drizzle-zod/drizzle-orm type mismatch, runtime is correct
+export type InsertEmNodo = z.infer<typeof insertEmNodoSchema>;
+export type EmNodo = typeof emNodi.$inferSelect;
+
+// Collegamenti fra nodi Extended Matrix e/o US. Gli estremi sono US (per codice
+// normalizzato) oppure nodi EM (per uid).
+export const emArchi = sqliteTable("em_archi", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  cantiereId: integer("cantiere_id").notNull(),
+  edgeType: text("edge_type").notNull(),
+  sourceKind: text("source_kind").notNull(), // "us" | "em"
+  sourceRef: text("source_ref").notNull(),
+  targetKind: text("target_kind").notNull(),
+  targetRef: text("target_ref").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
+export const insertEmArcoSchema = createInsertSchema(emArchi).omit({ id: true, createdAt: true });
+// @ts-ignore -- drizzle-zod/drizzle-orm type mismatch, runtime is correct
+export type InsertEmArco = z.infer<typeof insertEmArcoSchema>;
+export type EmArco = typeof emArchi.$inferSelect;
+
 // Snapshot WebMap / planimetrie salvate
 export const mapSnapshots = sqliteTable("map_snapshots", {
   id: integer("id").primaryKey({ autoIncrement: true }),
