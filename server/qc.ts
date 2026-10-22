@@ -5,6 +5,7 @@ import {
   type QcUsConfigInput,
 } from "@shared/qc_us_rules";
 import { parseUsCode, usPrefixMismatch } from "@shared/us_code";
+import { coveringCycles } from "./graph_cycles";
 
 export interface QcIssue {
   livello: "error" | "warning" | "info";
@@ -452,7 +453,6 @@ export function checkCicliStratigrafici(
   type Edge = { from: string; to: string; label: string };
   const edges: Edge[] = [];
   const edgeSeen = new Set<string>();
-  const adjacency = new Map<string, string[]>();
   for (const us of usList) {
     const self = normalizeCode(us.codiceUS);
     for (const ref of extractRelationFields(us)) {
@@ -466,103 +466,26 @@ export function checkCicliStratigrafici(
         if (edgeSeen.has(key)) continue;
         edgeSeen.add(key);
         edges.push({ from, to, label: spec.label });
-        adjacency.set(from, [...(adjacency.get(from) ?? []), to]);
       }
     }
   }
 
-  // Tarjan
-  const index = new Map<string, number>();
-  const low = new Map<string, number>();
-  const onStack = new Set<string>();
-  const stack: string[] = [];
-  const components: string[][] = [];
-  let counter = 0;
-  const visit = (node: string) => {
-    index.set(node, counter);
-    low.set(node, counter);
-    counter += 1;
-    stack.push(node);
-    onStack.add(node);
-    for (const next of adjacency.get(node) ?? []) {
-      if (!index.has(next)) {
-        visit(next);
-        low.set(node, Math.min(low.get(node)!, low.get(next)!));
-      } else if (onStack.has(next)) {
-        low.set(node, Math.min(low.get(node)!, index.get(next)!));
-      }
-    }
-    if (low.get(node) === index.get(node)) {
-      const component: string[] = [];
-      let member: string;
-      do {
-        member = stack.pop()!;
-        onStack.delete(member);
-        component.push(member);
-      } while (member !== node);
-      if (component.length > 1) components.push(component);
-    }
-  };
-  for (const node of Array.from(adjacency.keys())) if (!index.has(node)) visit(node);
-
-  // Per ogni US si cerca il ciclo piu' corto che la contiene (BFS): e' quello
-  // che si puo' correggere; in una componente grande le contraddizioni vere
-  // sono poche, e l'elenco di tutte le sue US non aiuterebbe.
   const codeLabel = (key: string) => byCode.get(key)?.codiceUS ?? key;
-  const outEdges = new Map<string, Edge[]>();
-  for (const e of edges) outEdges.set(e.from, [...(outEdges.get(e.from) ?? []), e]);
-
-  const shortestCycle = (start: string, members: Set<string>): Edge[] | null => {
-    const cameBy = new Map<string, Edge>();
-    const queue: string[] = [];
-    for (const e of outEdges.get(start) ?? []) {
-      if (!members.has(e.to) || cameBy.has(e.to)) continue;
-      cameBy.set(e.to, e);
-      queue.push(e.to);
-    }
-    for (let i = 0; i < queue.length; i += 1) {
-      const node = queue[i];
-      if (node === start) break;
-      for (const e of outEdges.get(node) ?? []) {
-        if (!members.has(e.to) || cameBy.has(e.to)) continue;
-        cameBy.set(e.to, e);
-        queue.push(e.to);
-      }
-    }
-    if (!cameBy.has(start)) return null;
-    const path: Edge[] = [];
-    let node = start;
-    do {
-      const e = cameBy.get(node)!;
-      path.unshift(e);
-      node = e.from;
-    } while (node !== start);
-    return path;
-  };
-
-  const flagged = new Set<string>();
-  for (const component of components) {
-    const members = new Set(component);
-    const ordered = [...component].sort((a, b) => codeLabel(a).localeCompare(codeLabel(b), "it", { numeric: true }));
-    for (const key of ordered) {
-      if (flagged.has(key)) continue;
-      const cycle = shortestCycle(key, members);
-      if (!cycle) continue;
-      const shown = cycle.slice(0, 8).map((e) => `${codeLabel(e.from)} ${e.label} ${codeLabel(e.to)}`).join("; ");
-      const involved = Array.from(new Set(cycle.map((e) => e.from)));
-      const names = involved.map(codeLabel).sort((x, y) => x.localeCompare(y, "it", { numeric: true }));
-      for (const member of involved) {
-        flagged.add(member);
-        const us = byCode.get(member)!;
-        emit(issues, config, "rel_ciclo", {
-          categoria: "coerenza",
-          messaggio:
-            `US ${us.codiceUS}: ciclo stratigrafico tra ${names.join(", ")} (${shown}${cycle.length > 8 ? "; ..." : ""}). ` +
-            "Una US non può essere insieme sopra e sotto un'altra: correggi uno dei rapporti.",
-          campoInteressato: "relazioni",
-          usId: us.id,
-        });
-      }
+  const natural = (x: string, y: string) => codeLabel(x).localeCompare(codeLabel(y), "it", { numeric: true });
+  for (const cycle of coveringCycles(edges, natural)) {
+    const shown = cycle.slice(0, 8).map((e) => `${codeLabel(e.from)} ${e.label} ${codeLabel(e.to)}`).join("; ");
+    const involved = Array.from(new Set(cycle.map((e) => e.from)));
+    const names = involved.map(codeLabel).sort((x, y) => x.localeCompare(y, "it", { numeric: true }));
+    for (const member of involved) {
+      const us = byCode.get(member)!;
+      emit(issues, config, "rel_ciclo", {
+        categoria: "coerenza",
+        messaggio:
+          `US ${us.codiceUS}: ciclo stratigrafico tra ${names.join(", ")} (${shown}${cycle.length > 8 ? "; ..." : ""}). ` +
+          "Una US non può essere insieme sopra e sotto un'altra: correggi uno dei rapporti.",
+        campoInteressato: "relazioni",
+        usId: us.id,
+      });
     }
   }
   return issues;

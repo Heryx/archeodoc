@@ -1,6 +1,7 @@
 /**
  * Nodi Extended Matrix del cantiere: unita' virtuali e paradati.
  * GET    /api/cantieri/:id/em/nodi        → nodi con i collegamenti + descrizione dei tipi
+ * GET    /api/cantieri/:id/em/controlli   → cicli con le unita' virtuali e completezza dei paradati
  * GET    /api/cantieri/:id/em/uid?type=   → nome proposto per un nuovo nodo
  * POST   /api/cantieri/:id/em/nodi        → nuovo nodo
  * PUT    /api/em/nodi/:id                 → modifica (nome, descrizione, dati, collegamenti)
@@ -8,6 +9,7 @@
  */
 import type { Express } from "express";
 import type { WithProject } from "./types";
+import { checkExtendedMatrix } from "../em_checks";
 import {
   EM_FIELDS_BY_TYPE,
   EM_LINK_SPECS,
@@ -40,6 +42,12 @@ export function registerEmNodiRoutes(app: Express, withProject: WithProject) {
         })),
       })),
     });
+  }));
+
+  app.get("/api/cantieri/:id/em/controlli", withProject((ctx, req, res) => {
+    const id = Number(req.params.id);
+    if (!ctx.storage.getCantiere(id)) return res.status(404).json({ error: "Cantiere non trovato" });
+    res.json({ issues: checkExtendedMatrix(ctx.storage, id) });
   }));
 
   app.get("/api/cantieri/:id/em/uid", withProject((ctx, req, res) => {

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "wouter";
-import { Network, Pencil, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, Info, Network, Pencil, Plus, Trash2 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,6 +37,8 @@ type EmType = {
 };
 
 type EmData = { nodes: EmNode[]; tipi: EmType[] };
+
+type EmIssue = { livello: "error" | "warning" | "info"; nodo?: string; messaggio: string };
 
 const GROUPS = [
   { id: "virtuali", label: "Unità virtuali", types: ["USVs", "USVn", "VSF"], hint: "Ricostruzioni che entrano nella sequenza della matrix." },
@@ -115,6 +117,7 @@ function EmNodeDialog({
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "em", "nodi"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "em", "controlli"] });
       onClose();
     },
     onError: (error: any) =>
@@ -253,6 +256,16 @@ export function ExtendedMatrixPage() {
     enabled: !!cid,
   });
 
+  const { data: controlli } = useQuery<{ issues: EmIssue[] }>({
+    queryKey: ["/api/cantieri", cid, "em", "controlli"],
+    queryFn: async () => (await apiRequest("GET", `/api/cantieri/${cid}/em/controlli`)).json(),
+    enabled: !!cid,
+  });
+  const issues = controlli?.issues ?? [];
+  const [showInfo, setShowInfo] = useState(false);
+  const visibleIssues = issues.filter((i) => showInfo || i.livello !== "info");
+  const infoCount = issues.filter((i) => i.livello === "info").length;
+
   const usCodes = useMemo(() => usList.map((u) => String(u.codiceUS)).filter(Boolean), [usList]);
   const current = GROUPS.find((g) => g.id === group)!;
   const nodes = (data?.nodes ?? []).filter((n) => (current.types as readonly string[]).includes(n.nodeType));
@@ -260,7 +273,10 @@ export function ExtendedMatrixPage() {
 
   const remove = useMutation({
     mutationFn: async (node: EmNode) => apiRequest("DELETE", `/api/em/nodi/${node.id}`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "em", "nodi"] }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "em", "nodi"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "em", "controlli"] });
+    },
     onError: (error: any) => toast({ title: "Eliminazione non riuscita", description: error?.message, variant: "destructive" }),
   });
 
@@ -281,6 +297,38 @@ export function ExtendedMatrixPage() {
           Harris Matrix.
         </p>
       </div>
+
+      {issues.length > 0 && (
+        <section className="rounded-lg border border-border bg-muted/20 p-3 space-y-1.5">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold">
+              Controlli ({issues.filter((i) => i.livello !== "info").length})
+            </h2>
+            {infoCount > 0 && (
+              <button
+                type="button"
+                className="text-xs text-muted-foreground underline"
+                onClick={() => setShowInfo((v) => !v)}
+              >
+                {showInfo ? "Nascondi le informazioni" : `Mostra anche ${infoCount} informazioni`}
+              </button>
+            )}
+          </div>
+          {visibleIssues.map((issue, i) => (
+            <p key={i} className="flex items-start gap-2 text-sm">
+              {issue.livello === "info" ? (
+                <Info size={14} className="mt-0.5 shrink-0 text-muted-foreground" />
+              ) : (
+                <AlertTriangle
+                  size={14}
+                  className={`mt-0.5 shrink-0 ${issue.livello === "error" ? "text-destructive" : "text-amber-600"}`}
+                />
+              )}
+              <span>{issue.messaggio}</span>
+            </p>
+          ))}
+        </section>
+      )}
 
       <div className="flex flex-wrap gap-2">
         {GROUPS.map((g) => (
