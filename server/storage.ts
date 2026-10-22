@@ -57,6 +57,48 @@ function ensureColumn(sqlite: Database.Database, tableName: string, columnName: 
   cols.add(columnName);
 }
 
+// Il vincolo CHECK su "tipo" non ammetteva "mensile": ricostruisce la tabella (procedura SQLite a 12 passi)
+function allowMensileDocumentazioni(sqlite: Database.Database) {
+  const row = sqlite
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'documentazioni'")
+    .get() as { sql?: string } | undefined;
+  if (!row?.sql || row.sql.includes("'mensile'")) return;
+
+  sqlite.pragma("foreign_keys = OFF");
+  try {
+    sqlite.transaction(() => {
+      sqlite.exec(`
+        CREATE TABLE documentazioni_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          cantiere_id INTEGER NOT NULL,
+          tipo TEXT NOT NULL CHECK(tipo IN ('giornaliera','settimanale','mensile','fine_scavo')),
+          titolo TEXT NOT NULL,
+          data_inizio TEXT,
+          data_fine TEXT,
+          stato TEXT NOT NULL DEFAULT 'bozza' CHECK(stato IN ('bozza','completata')),
+          allegato_id INTEGER,
+          contenuto TEXT,
+          intestazione TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (cantiere_id) REFERENCES cantieri(id) ON DELETE CASCADE,
+          FOREIGN KEY (allegato_id) REFERENCES allegati(id) ON DELETE SET NULL
+        );
+        INSERT INTO documentazioni_new
+          (id, cantiere_id, tipo, titolo, data_inizio, data_fine, stato, allegato_id, contenuto, intestazione, created_at, updated_at)
+          SELECT id, cantiere_id, tipo, titolo, data_inizio, data_fine, stato, allegato_id, contenuto, intestazione,
+                 created_at, COALESCE(updated_at, created_at)
+          FROM documentazioni;
+        DROP TABLE documentazioni;
+        ALTER TABLE documentazioni_new RENAME TO documentazioni;
+        CREATE INDEX IF NOT EXISTS idx_documentazioni_cantiere ON documentazioni (cantiere_id, tipo, data_inizio);
+      `);
+    })();
+  } finally {
+    sqlite.pragma("foreign_keys = ON");
+  }
+}
+
 function migrate(sqlite: Database.Database) {
   sqlite.exec(`
     PRAGMA foreign_keys = ON;
@@ -309,7 +351,7 @@ function migrate(sqlite: Database.Database) {
     CREATE TABLE IF NOT EXISTS documentazioni (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       cantiere_id INTEGER NOT NULL,
-      tipo TEXT NOT NULL CHECK(tipo IN ('giornaliera','settimanale','fine_scavo')),
+      tipo TEXT NOT NULL CHECK(tipo IN ('giornaliera','settimanale','mensile','fine_scavo')),
       titolo TEXT NOT NULL,
       data_inizio TEXT,
       data_fine TEXT,
@@ -447,6 +489,7 @@ function migrate(sqlite: Database.Database) {
   ensureColumn(sqlite, "documentazioni", "updated_at", "updated_at TEXT");
   ensureColumn(sqlite, "documentazioni", "contenuto", "contenuto TEXT");
   ensureColumn(sqlite, "documentazioni", "intestazione", "intestazione TEXT");
+  allowMensileDocumentazioni(sqlite);
   ensureColumn(sqlite, "sas_records", "data", "data TEXT");
   ensureColumn(sqlite, "ra_records", "data", "data TEXT");
   ensureColumn(sqlite, "allegati", "sas_id", "sas_id INTEGER");

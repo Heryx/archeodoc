@@ -286,7 +286,7 @@ export type MapSnapshot = typeof mapSnapshots.$inferSelect;
 export const documentazioni = sqliteTable("documentazioni", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   cantiereId: integer("cantiere_id").notNull(),
-  tipo: text("tipo", { enum: ["giornaliera", "settimanale", "fine_scavo"] }).notNull(),
+  tipo: text("tipo", { enum: ["giornaliera", "settimanale", "mensile", "fine_scavo"] }).notNull(),
   titolo: text("titolo").notNull(),
   dataInizio: text("data_inizio"),
   dataFine: text("data_fine"),

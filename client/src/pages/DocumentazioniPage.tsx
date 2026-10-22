@@ -31,10 +31,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { NuovoDocumentoForm } from "@/components/relazioni/NuovoDocumentoForm";
 import { RelazioniGrafo } from "@/components/relazioni/RelazioniGrafo";
 import { RelazioneEditorPanel } from "@/components/relazioni/RelazioneEditor";
 
-type DocumentazioneTipo = "giornaliera" | "settimanale" | "fine_scavo";
+type DocumentazioneTipo = "giornaliera" | "settimanale" | "mensile" | "fine_scavo";
 
 type DocumentazioneRecord = {
   id: number;
@@ -147,6 +148,7 @@ function ExportZipTab({ cantiereId }: { cantiereId: number }) {
 function tipoLabel(tipo: DocumentazioneTipo): string {
   if (tipo === "giornaliera") return "Giornaliera";
   if (tipo === "settimanale") return "Settimanale";
+  if (tipo === "mensile") return "Mensile";
   return "Fine scavo";
 }
 
@@ -684,10 +686,6 @@ function DocumentazioniTab({ cantiereId }: { cantiereId: number }) {
   const queryClient = useQueryClient();
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [tipo, setTipo] = useState<DocumentazioneTipo>("giornaliera");
-  const [titolo, setTitolo] = useState("");
-  const [dataInizio, setDataInizio] = useState("");
-  const [dataFine, setDataFine] = useState("");
 
   const docsQuery = useQuery<{ documentazioni: DocumentazioneRecord[] }>({
     queryKey: ["/api/cantieri", String(cantiereId), "documentazioni"],
@@ -721,24 +719,6 @@ function DocumentazioniTab({ cantiereId }: { cantiereId: number }) {
     ]);
   };
 
-  const createMutation = useMutation({
-    mutationFn: async () =>
-      (await apiRequest("POST", `/api/cantieri/${cantiereId}/documentazioni`, {
-        tipo,
-        titolo: titolo.trim() || null,
-        dataInizio: dataInizio || null,
-        dataFine: dataFine || null,
-      })).json(),
-    onSuccess: async (data: any) => {
-      await invalidateAll();
-      const createdId = Number(data?.documentazione?.id);
-      if (Number.isFinite(createdId)) setSelectedId(createdId);
-      setTitolo("");
-      toast({ title: "Documento creato" });
-    },
-    onError: (e: any) => toast({ title: "Errore creazione", description: e?.message, variant: "destructive" }),
-  });
-
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => { await apiRequest("DELETE", `/api/cantieri/${cantiereId}/documentazioni/${id}`); },
     onSuccess: async (_data, id) => {
@@ -759,36 +739,7 @@ function DocumentazioniTab({ cantiereId }: { cantiereId: number }) {
           <CardTitle className="text-base">Nuovo documento</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div>
-            <Label>Tipo</Label>
-            <select
-              value={tipo}
-              onChange={(e) => setTipo(e.target.value as DocumentazioneTipo)}
-              className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
-            >
-              <option value="giornaliera">Giornaliera</option>
-              <option value="settimanale">Settimanale</option>
-              <option value="fine_scavo">Fine scavo</option>
-            </select>
-          </div>
-          <div>
-            <Label>Titolo</Label>
-            <Input value={titolo} onChange={(e) => setTitolo(e.target.value)} placeholder="Titolo (opzionale)" />
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <Label>Data inizio</Label>
-              <Input type="date" value={dataInizio} onChange={(e) => setDataInizio(e.target.value)} />
-            </div>
-            <div>
-              <Label>Data fine</Label>
-              <Input type="date" value={dataFine} onChange={(e) => setDataFine(e.target.value)} />
-            </div>
-          </div>
-          <Button className="w-full gap-2" onClick={() => createMutation.mutate()} disabled={createMutation.isPending}>
-            {createMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-            Crea bozza
-          </Button>
+          <NuovoDocumentoForm cantiereId={cantiereId} onCreated={(id) => setSelectedId(id)} />
 
           <div className="pt-3 border-t border-border space-y-1 max-h-[320px] overflow-y-auto">
             <div className="text-xs font-medium text-muted-foreground mb-2">Documenti del cantiere</div>

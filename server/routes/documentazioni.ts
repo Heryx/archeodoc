@@ -7,7 +7,7 @@ import { generateRelazioneTesto, usKey, usLabel } from "../relazione_generate";
 import { buildRelazioneDocx, type PmNode, type RelazioneIntestazione } from "../relazione_export";
 import type { WithProject } from "./types";
 
-type DocumentazioneTipo = "giornaliera" | "settimanale" | "fine_scavo";
+type DocumentazioneTipo = "giornaliera" | "settimanale" | "mensile" | "fine_scavo";
 
 type RegisterDocumentazioniHelpers = {
   withProject: WithProject;
@@ -17,7 +17,7 @@ type RegisterDocumentazioniHelpers = {
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 function parseDocumentazioneTipo(value: unknown): DocumentazioneTipo | null {
-  if (value === "giornaliera" || value === "settimanale" || value === "fine_scavo") return value;
+  if (value === "giornaliera" || value === "settimanale" || value === "mensile" || value === "fine_scavo") return value;
   return null;
 }
 
@@ -48,6 +48,7 @@ function encodeUploadPath(relativePath: string): string {
 function documentazioneTipoLabel(tipo: DocumentazioneTipo): string {
   if (tipo === "giornaliera") return "Documentazione giornaliera";
   if (tipo === "settimanale") return "Documentazione settimanale";
+  if (tipo === "mensile") return "Documentazione mensile";
   return "Documentazione fine scavo";
 }
 
@@ -60,6 +61,7 @@ function defaultTitolo(tipo: DocumentazioneTipo, dataInizio: string | null, data
     if (dataInizio) return `Settimana da ${dataInizio}`;
     return "Settimana";
   }
+  if (tipo === "mensile") return dataInizio ? `Mese ${dataInizio.slice(0, 7)}` : "Mese";
   if (dataInizio && dataFine) return `Fine scavo ${dataInizio} - ${dataFine}`;
   if (dataInizio) return `Fine scavo ${dataInizio}`;
   return "Fine scavo";

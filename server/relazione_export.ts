@@ -1,6 +1,7 @@
 import {
   AlignmentType,
   Document,
+  ExternalHyperlink,
   Footer,
   Header,
   HeadingLevel,
@@ -9,9 +10,16 @@ import {
   Packer,
   PageNumber,
   Paragraph,
+  ShadingType,
+  Table,
+  TableCell,
+  TableRow,
   TextRun,
+  WidthType,
   type ParagraphChild,
 } from "docx";
+
+type Block = Paragraph | Table;
 
 // Nodo ProseMirror/TipTap serializzato in JSON
 export type PmNode = {
@@ -52,6 +60,25 @@ const HEADINGS = [
   HeadingLevel.HEADING_4,
 ];
 
+const hex = (v: unknown): string | undefined => {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(v || "").trim());
+  return m ? m[1].toUpperCase() : undefined;
+};
+
+// "12pt" / "16px" -> mezzi punti di Word
+function halfPoints(v: unknown): number | undefined {
+  const m = /^([\d.]+)(pt|px)?$/.exec(String(v || "").trim());
+  if (!m) return undefined;
+  const pt = m[2] === "px" ? Number(m[1]) * 0.75 : Number(m[1]);
+  return pt > 0 ? Math.round(pt * 2) : undefined;
+}
+
+const ALIGN: Record<string, (typeof AlignmentType)[keyof typeof AlignmentType]> = {
+  center: AlignmentType.CENTER,
+  right: AlignmentType.RIGHT,
+  justify: AlignmentType.JUSTIFIED,
+};
+
 function textRuns(node: PmNode): ParagraphChild[] {
   const out: ParagraphChild[] = [];
   for (const child of node.content || []) {
@@ -59,16 +86,25 @@ function textRuns(node: PmNode): ParagraphChild[] {
       out.push(new TextRun({ break: 1 }));
     } else if (child.type === "text" && child.text) {
       // I mark sconosciuti (es. i collegamenti [[US]]) non compaiono nell'export
-      const marks = new Set((child.marks || []).map((m) => m.type));
-      out.push(
-        new TextRun({
-          text: child.text,
-          bold: marks.has("bold"),
-          italics: marks.has("italic"),
-          strike: marks.has("strike"),
-          underline: marks.has("underline") ? {} : undefined,
-        }),
-      );
+      const marks = child.marks || [];
+      const mark = (name: string) => marks.find((m) => m.type === name);
+      const style = mark("textStyle")?.attrs || {};
+      const highlight = hex(mark("highlight")?.attrs?.color);
+      const link = mark("link")?.attrs?.href as string | undefined;
+      const run = new TextRun({
+        text: child.text,
+        bold: !!mark("bold"),
+        italics: !!mark("italic"),
+        strike: !!mark("strike"),
+        underline: mark("underline") || link ? {} : undefined,
+        subScript: !!mark("subscript"),
+        superScript: !!mark("superscript"),
+        color: link ? "0563C1" : hex(style.color),
+        size: halfPoints(style.fontSize),
+        font: style.fontFamily ? String(style.fontFamily).split(",")[0].replace(/["']/g, "").trim() : undefined,
+        shading: highlight ? { type: ShadingType.CLEAR, fill: highlight, color: "auto" } : undefined,
+      });
+      out.push(link ? new ExternalHyperlink({ link, children: [run] }) : run);
     }
   }
   return out;
@@ -112,8 +148,8 @@ function blocks(
   input: RelazioneExportInput,
   warnings: string[],
   ctx: { list?: { ordered: boolean; level: number }; quote?: boolean } = {},
-): Paragraph[] {
-  const out: Paragraph[] = [];
+): Block[] {
+  const out: Block[] = [];
   for (const node of nodes) {
     switch (node.type) {
       case "paragraph": {
@@ -121,10 +157,7 @@ function blocks(
         out.push(
           new Paragraph({
             children,
-            alignment: node.attrs?.textAlign === "center" ? AlignmentType.CENTER
-              : node.attrs?.textAlign === "right" ? AlignmentType.RIGHT
-              : node.attrs?.textAlign === "justify" ? AlignmentType.JUSTIFIED
-              : undefined,
+            alignment: ALIGN[node.attrs?.textAlign],
             indent: ctx.quote ? { left: 567 } : undefined,
             spacing: { after: 120 },
             ...(ctx.list
@@ -141,6 +174,7 @@ function blocks(
         out.push(
           new Paragraph({
             heading: HEADINGS[level - 1],
+            alignment: ALIGN[node.attrs?.textAlign],
             children: textRuns(node),
             spacing: { before: 240, after: 120 },
             keepNext: true,
@@ -165,6 +199,38 @@ function blocks(
       case "horizontalRule":
         out.push(new Paragraph({ border: { bottom: { style: "single", size: 6, color: "999999", space: 1 } }, spacing: { after: 120 } }));
         break;
+      case "table": {
+        const rows = (node.content || []).filter((r) => r.type === "tableRow");
+        const cols = (rows[0]?.content || []).reduce((n, c) => n + (Number(c.attrs?.colspan) || 1), 0) || 1;
+        const colWidth = Math.floor(9000 / cols);
+        out.push(
+          new Table({
+            width: { size: 9000, type: WidthType.DXA },
+            columnWidths: Array(cols).fill(colWidth),
+            rows: rows.map(
+              (row) =>
+                new TableRow({
+                  tableHeader: (row.content || []).every((c) => c.type === "tableHeader"),
+                  children: (row.content || []).map((cell) => {
+                    const span = Number(cell.attrs?.colspan) || 1;
+                    const isHeader = cell.type === "tableHeader";
+                    const inner = blocks(cell.content || [], input, warnings).filter((b): b is Paragraph => b instanceof Paragraph);
+                    return new TableCell({
+                      columnSpan: span > 1 ? span : undefined,
+                      rowSpan: Number(cell.attrs?.rowspan) > 1 ? Number(cell.attrs?.rowspan) : undefined,
+                      width: { size: colWidth * span, type: WidthType.DXA },
+                      shading: isHeader ? { type: ShadingType.CLEAR, fill: "EDEDED", color: "auto" } : undefined,
+                      margins: { top: 60, bottom: 60, left: 100, right: 100 },
+                      children: inner.length ? inner : [new Paragraph({ text: "" })],
+                    });
+                  }),
+                }),
+            ),
+          }),
+        );
+        out.push(new Paragraph({ text: "", spacing: { after: 120 } }));
+        break;
+      }
       case "snapshotFigure":
         out.push(...figure(node, input, warnings));
         break;

@@ -6,9 +6,17 @@ import { useProjectCodeSettings } from "@/hooks/useProjectCodeSettings";
 import { EditorContent, Mark, Node, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
+import { TextStyleKit } from "@tiptap/extension-text-style";
+import Highlight from "@tiptap/extension-highlight";
+import TextAlign from "@tiptap/extension-text-align";
+import Subscript from "@tiptap/extension-subscript";
+import Superscript from "@tiptap/extension-superscript";
+import { TableKit } from "@tiptap/extension-table";
 import {
   Bold, Italic, Underline as UnderlineIcon, Heading1, Heading2, Heading3, List, ListOrdered,
   Quote, Minus, Undo2, Redo2, ImagePlus, FileText, Printer, Loader2, Download, Trash2, Check, Link2, Sparkles, BookOpen,
+  Strikethrough, AlignLeft, AlignCenter, AlignRight, AlignJustify, Subscript as SubIcon, Superscript as SuperIcon,
+  Highlighter, Table as TableIcon, RemoveFormatting, Link as LinkIcon, IndentIncrease, IndentDecrease,
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
@@ -155,32 +163,138 @@ function ToolButton({ active, disabled, onClick, title, children }: {
   );
 }
 
+const FONTS = ["Times New Roman", "Arial", "Calibri", "Georgia", "Verdana", "Courier New"];
+const SIZES = ["8pt", "9pt", "10pt", "11pt", "12pt", "14pt", "16pt", "18pt", "20pt", "24pt", "28pt", "36pt"];
+const smallSelect = "h-8 rounded border border-input bg-background px-1.5 text-xs";
+
+function ColorTool({ title, icon, value, onPick, onClear }: {
+  title: string; icon: React.ReactNode; value: string; onPick: (c: string) => void; onClear: () => void;
+}) {
+  return (
+    <span className="relative inline-flex">
+      <label title={title} className="h-8 w-8 inline-flex flex-col items-center justify-center rounded hover:bg-muted cursor-pointer">
+        {icon}
+        <span className="block h-[3px] w-4 rounded -mt-0.5" style={{ background: value || "transparent", border: value ? "none" : "1px solid hsl(var(--border))" }} />
+        <input type="color" className="absolute inset-0 opacity-0 cursor-pointer" value={value || "#000000"}
+          onChange={(e) => onPick(e.target.value)} />
+      </label>
+      <button type="button" title={`${title}: rimuovi`} onMouseDown={(e) => e.preventDefault()} onClick={onClear}
+        className="text-[10px] leading-none text-muted-foreground hover:text-foreground self-start -ml-1 mt-0.5">×</button>
+    </span>
+  );
+}
+
 function Toolbar({ editor, onInsertFigure, onGenerate }: { editor: Editor; onInsertFigure: () => void; onGenerate: () => void }) {
   const chain = () => editor.chain().focus();
+  const sep = <span className="w-px h-5 bg-border mx-1" />;
+  const attrs = editor.getAttributes("textStyle");
+  const blockValue = editor.isActive("heading", { level: 1 }) ? "1" : editor.isActive("heading", { level: 2 }) ? "2"
+    : editor.isActive("heading", { level: 3 }) ? "3" : editor.isActive("heading", { level: 4 }) ? "4" : "0";
+  const inTable = editor.isActive("table");
+  const inList = editor.isActive("bulletList") || editor.isActive("orderedList");
+
+  const setLink = () => {
+    const prev = editor.getAttributes("link").href || "https://";
+    const url = window.prompt("Indirizzo del collegamento (vuoto per rimuoverlo)", prev);
+    if (url === null) return;
+    if (url.trim() === "" || url.trim() === "https://") chain().extendMarkRange("link").unsetLink().run();
+    else chain().extendMarkRange("link").setLink({ href: url.trim() }).run();
+  };
+
+  const tableAction = (action: string) => {
+    const c = chain();
+    switch (action) {
+      case "insert": c.insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(); break;
+      case "addRow": c.addRowAfter().run(); break;
+      case "addCol": c.addColumnAfter().run(); break;
+      case "delRow": c.deleteRow().run(); break;
+      case "delCol": c.deleteColumn().run(); break;
+      case "merge": c.mergeCells().run(); break;
+      case "split": c.splitCell().run(); break;
+      case "delTable": c.deleteTable().run(); break;
+    }
+  };
+
   return (
-    <div className="flex flex-wrap items-center gap-0.5 border-b border-border px-2 py-1 bg-muted/30">
-      <ToolButton title="Annulla" onClick={() => chain().undo().run()} disabled={!editor.can().undo()}><Undo2 size={15} /></ToolButton>
-      <ToolButton title="Ripeti" onClick={() => chain().redo().run()} disabled={!editor.can().redo()}><Redo2 size={15} /></ToolButton>
-      <span className="w-px h-5 bg-border mx-1" />
-      <ToolButton title="Titolo 1" active={editor.isActive("heading", { level: 1 })} onClick={() => chain().toggleHeading({ level: 1 }).run()}><Heading1 size={16} /></ToolButton>
-      <ToolButton title="Titolo 2" active={editor.isActive("heading", { level: 2 })} onClick={() => chain().toggleHeading({ level: 2 }).run()}><Heading2 size={16} /></ToolButton>
-      <ToolButton title="Titolo 3" active={editor.isActive("heading", { level: 3 })} onClick={() => chain().toggleHeading({ level: 3 }).run()}><Heading3 size={16} /></ToolButton>
-      <span className="w-px h-5 bg-border mx-1" />
-      <ToolButton title="Grassetto" active={editor.isActive("bold")} onClick={() => chain().toggleBold().run()}><Bold size={15} /></ToolButton>
-      <ToolButton title="Corsivo" active={editor.isActive("italic")} onClick={() => chain().toggleItalic().run()}><Italic size={15} /></ToolButton>
-      <ToolButton title="Sottolineato" active={editor.isActive("underline")} onClick={() => chain().toggleUnderline().run()}><UnderlineIcon size={15} /></ToolButton>
-      <span className="w-px h-5 bg-border mx-1" />
-      <ToolButton title="Elenco puntato" active={editor.isActive("bulletList")} onClick={() => chain().toggleBulletList().run()}><List size={15} /></ToolButton>
-      <ToolButton title="Elenco numerato" active={editor.isActive("orderedList")} onClick={() => chain().toggleOrderedList().run()}><ListOrdered size={15} /></ToolButton>
-      <ToolButton title="Citazione" active={editor.isActive("blockquote")} onClick={() => chain().toggleBlockquote().run()}><Quote size={15} /></ToolButton>
-      <ToolButton title="Linea divisoria" onClick={() => chain().setHorizontalRule().run()}><Minus size={15} /></ToolButton>
-      <span className="w-px h-5 bg-border mx-1" />
-      <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={onInsertFigure}>
-        <ImagePlus size={14} /> Figura WebMap
-      </Button>
-      <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 text-xs ml-1" onClick={onGenerate}>
-        <Sparkles size={14} /> Da giornale
-      </Button>
+    <div className="border-b border-border bg-muted/30 px-2 py-1 space-y-0.5">
+      <div className="flex flex-wrap items-center gap-1">
+        <ToolButton title="Annulla" onClick={() => chain().undo().run()} disabled={!editor.can().undo()}><Undo2 size={15} /></ToolButton>
+        <ToolButton title="Ripeti" onClick={() => chain().redo().run()} disabled={!editor.can().redo()}><Redo2 size={15} /></ToolButton>
+        {sep}
+        <select title="Stile del paragrafo" className={`${smallSelect} w-28`} value={blockValue}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (v === 0) chain().setParagraph().run();
+            else chain().setHeading({ level: v as 1 | 2 | 3 | 4 }).run();
+          }}>
+          <option value="0">Paragrafo</option>
+          <option value="1">Titolo 1</option>
+          <option value="2">Titolo 2</option>
+          <option value="3">Titolo 3</option>
+          <option value="4">Titolo 4</option>
+        </select>
+        <select title="Carattere" className={`${smallSelect} w-36`} value={attrs.fontFamily || ""}
+          onChange={(e) => (e.target.value ? chain().setFontFamily(e.target.value).run() : chain().unsetFontFamily().run())}>
+          <option value="">Carattere predefinito</option>
+          {FONTS.map((f) => <option key={f} value={f} style={{ fontFamily: f }}>{f}</option>)}
+        </select>
+        <select title="Dimensione" className={`${smallSelect} w-20`} value={attrs.fontSize || ""}
+          onChange={(e) => (e.target.value ? chain().setFontSize(e.target.value).run() : chain().unsetFontSize().run())}>
+          <option value="">Dim.</option>
+          {SIZES.map((z) => <option key={z} value={z}>{z.replace("pt", "")}</option>)}
+        </select>
+        {sep}
+        <ToolButton title="Grassetto (Ctrl+B)" active={editor.isActive("bold")} onClick={() => chain().toggleBold().run()}><Bold size={15} /></ToolButton>
+        <ToolButton title="Corsivo (Ctrl+I)" active={editor.isActive("italic")} onClick={() => chain().toggleItalic().run()}><Italic size={15} /></ToolButton>
+        <ToolButton title="Sottolineato (Ctrl+U)" active={editor.isActive("underline")} onClick={() => chain().toggleUnderline().run()}><UnderlineIcon size={15} /></ToolButton>
+        <ToolButton title="Barrato" active={editor.isActive("strike")} onClick={() => chain().toggleStrike().run()}><Strikethrough size={15} /></ToolButton>
+        <ToolButton title="Pedice" active={editor.isActive("subscript")} onClick={() => chain().toggleSubscript().run()}><SubIcon size={15} /></ToolButton>
+        <ToolButton title="Apice" active={editor.isActive("superscript")} onClick={() => chain().toggleSuperscript().run()}><SuperIcon size={15} /></ToolButton>
+        <ColorTool title="Colore del testo" icon={<span className="text-sm font-bold leading-none">A</span>}
+          value={attrs.color || ""} onPick={(c) => chain().setColor(c).run()} onClear={() => chain().unsetColor().run()} />
+        <ColorTool title="Evidenziatore" icon={<Highlighter size={14} />}
+          value={editor.getAttributes("highlight").color || ""}
+          onPick={(c) => chain().setHighlight({ color: c }).run()} onClear={() => chain().unsetHighlight().run()} />
+        <ToolButton title="Cancella formattazione" onClick={() => chain().unsetAllMarks().clearNodes().run()}><RemoveFormatting size={15} /></ToolButton>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1">
+        <ToolButton title="Allinea a sinistra" active={editor.isActive({ textAlign: "left" })} onClick={() => chain().setTextAlign("left").run()}><AlignLeft size={15} /></ToolButton>
+        <ToolButton title="Centra" active={editor.isActive({ textAlign: "center" })} onClick={() => chain().setTextAlign("center").run()}><AlignCenter size={15} /></ToolButton>
+        <ToolButton title="Allinea a destra" active={editor.isActive({ textAlign: "right" })} onClick={() => chain().setTextAlign("right").run()}><AlignRight size={15} /></ToolButton>
+        <ToolButton title="Giustifica" active={editor.isActive({ textAlign: "justify" })} onClick={() => chain().setTextAlign("justify").run()}><AlignJustify size={15} /></ToolButton>
+        {sep}
+        <ToolButton title="Elenco puntato" active={editor.isActive("bulletList")} onClick={() => chain().toggleBulletList().run()}><List size={15} /></ToolButton>
+        <ToolButton title="Elenco numerato" active={editor.isActive("orderedList")} onClick={() => chain().toggleOrderedList().run()}><ListOrdered size={15} /></ToolButton>
+        <ToolButton title="Riduci rientro" disabled={!inList} onClick={() => chain().liftListItem("listItem").run()}><IndentDecrease size={15} /></ToolButton>
+        <ToolButton title="Aumenta rientro" disabled={!inList} onClick={() => chain().sinkListItem("listItem").run()}><IndentIncrease size={15} /></ToolButton>
+        <ToolButton title="Citazione" active={editor.isActive("blockquote")} onClick={() => chain().toggleBlockquote().run()}><Quote size={15} /></ToolButton>
+        <ToolButton title="Linea divisoria" onClick={() => chain().setHorizontalRule().run()}><Minus size={15} /></ToolButton>
+        {sep}
+        <ToolButton title="Collegamento web" active={editor.isActive("link")} onClick={setLink}><LinkIcon size={15} /></ToolButton>
+        <select title="Tabella" className={`${smallSelect} w-28`} value="" onChange={(e) => { if (e.target.value) tableAction(e.target.value); e.target.value = ""; }}>
+          <option value="">Tabella…</option>
+          <option value="insert">Inserisci 3×3</option>
+          {inTable && (
+            <>
+              <option value="addRow">Aggiungi riga</option>
+              <option value="addCol">Aggiungi colonna</option>
+              <option value="delRow">Elimina riga</option>
+              <option value="delCol">Elimina colonna</option>
+              <option value="merge">Unisci celle</option>
+              <option value="split">Dividi cella</option>
+              <option value="delTable">Elimina tabella</option>
+            </>
+          )}
+        </select>
+        {sep}
+        <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={onInsertFigure}>
+          <ImagePlus size={14} /> Figura WebMap
+        </Button>
+        <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={onGenerate}>
+          <Sparkles size={14} /> Da giornale
+        </Button>
+      </div>
     </div>
   );
 }
@@ -322,6 +436,8 @@ figure { margin: 12px 0; text-align: center; break-inside: avoid; } figure img {
 figcaption { font-style: italic; font-size: 10pt; }
 blockquote { margin-left: 18px; padding-left: 10px; border-left: 3px solid #ccc; }
 p { margin: 0 0 8px; }
+table { border-collapse: collapse; width: 100%; margin: 8px 0; } td, th { border: 1px solid #888; padding: 4px 6px; vertical-align: top; } th { background: #eee; }
+mark { padding: 0 1px; }
 </style></head><body>
 ${header.intestazione ? `<div class="hd">${esc(header.intestazione)}</div>` : ""}
 ${html}
@@ -420,14 +536,20 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast }: 
 
   const editor = useEditor({
     extensions: [
-      StarterKit,
+      StarterKit.configure({ link: { openOnClick: false, autolink: true } }),
+      TextStyleKit.configure({ backgroundColor: false }),
+      Highlight.configure({ multicolor: true }),
+      TextAlign.configure({ types: ["heading", "paragraph"] }),
+      Subscript,
+      Superscript,
+      TableKit.configure({ table: { resizable: false } }),
       SnapshotFigure,
       UsLink,
       Placeholder.configure({ placeholder: "Scrivi la relazione, oppure inserisci una figura dalla WebMap…" }),
     ],
     content: initialContent,
     editorProps: {
-      attributes: { class: "prose prose-sm max-w-none focus:outline-none min-h-[60vh] px-10 py-8 [&_.us-link]:text-primary [&_.us-link]:border-b [&_.us-link]:border-dotted [&_.us-link]:border-primary [&_.us-link]:cursor-pointer" },
+      attributes: { class: "prose prose-sm max-w-none focus:outline-none min-h-[60vh] px-10 py-8 [&_.us-link]:text-primary [&_.us-link]:border-b [&_.us-link]:border-dotted [&_.us-link]:border-primary [&_.us-link]:cursor-pointer [&_table]:border-collapse [&_table]:w-full [&_td]:border [&_th]:border [&_td]:border-border [&_th]:border-border [&_td]:p-1.5 [&_th]:p-1.5 [&_th]:bg-muted/60 [&_td]:align-top [&_a]:text-blue-700 [&_a]:underline" },
       handleKeyDown: (_view, event) => {
         const { suggest: sg, suggestions: list, sugIndex: idx } = live.current;
         if (!sg) return false;
