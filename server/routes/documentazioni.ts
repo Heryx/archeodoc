@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from "docx";
 import { insertImageIntoDocx } from "../docx_image_insert";
-import { generateRelazioneTesto } from "../relazione_generate";
+import { generateRelazioneTesto, usKey, usLabel } from "../relazione_generate";
 import { buildRelazioneDocx, type PmNode, type RelazioneIntestazione } from "../relazione_export";
 import type { WithProject } from "./types";
 
@@ -256,6 +256,74 @@ export function registerDocumentazioniRoutes(app: Express, helpers: RegisterDocu
     } catch (error: any) {
       res.status(400).json({ error: error?.message || "Errore nella generazione del testo" });
     }
+  }));
+
+  // Grafo: documenti e US collegate; con ?stratigrafia=1 tutte le US e le loro relazioni
+  app.get("/api/cantieri/:cid/relazioni-grafo", withProject((ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const withStrat = req.query.stratigrafia === "1";
+    const usList = ctx.storage.getUSList(cid);
+    const usById = new Map(usList.map((u) => [u.id, u]));
+    const usByKey = new Map<string, number>();
+    for (const u of usList) {
+      const key = usKey(u.codiceUS, u.tipo);
+      if (key && !usByKey.has(key)) usByKey.set(key, u.id);
+    }
+
+    type GNode = { id: string; kind: "doc" | "us"; label: string; sub: string | null; ref: number };
+    type GEdge = { from: string; to: string; kind: "cita" | "copre" | "si_lega_a" | "uguale_a" };
+    const nodes = new Map<string, GNode>();
+    const edges: GEdge[] = [];
+    const addUs = (id: number) => {
+      const u = usById.get(id);
+      if (!u) return null;
+      const nid = `u${id}`;
+      if (!nodes.has(nid)) {
+        nodes.set(nid, { id: nid, kind: "us", label: usLabel(u), sub: u.definizione || u.tipo || null, ref: id });
+      }
+      return nid;
+    };
+
+    for (const doc of ctx.storage.getDocumentazioni(cid)) {
+      const targets = collectUsLinks(doc.contenuto).map(addUs).filter((x): x is string => !!x);
+      if (targets.length === 0 && !withStrat) continue;
+      const nid = `d${doc.id}`;
+      nodes.set(nid, { id: nid, kind: "doc", label: doc.titolo, sub: doc.stato, ref: doc.id });
+      targets.forEach((t) => edges.push({ from: nid, to: t, kind: "cita" }));
+    }
+
+    if (withStrat) {
+      usList.forEach((u) => addUs(u.id));
+      const seen = new Set<string>();
+      const parseTargets = (raw: string | null) =>
+        String(raw || "")
+          .split(/[,;/\n]+/)
+          .map((t) => t.trim())
+          .filter(Boolean)
+          .map((t) => {
+            const m = /^(US|T|SB|SF)?\.?\s?(\d{1,4})$/i.exec(t);
+            if (!m) return null;
+            const direct = usByKey.get(`${(m[1] || "US").toUpperCase()}:${Number(m[2])}`);
+            return direct ?? null;
+          })
+          .filter((x): x is number => x != null);
+      const link = (a: number, b: number, kind: GEdge["kind"]) => {
+        if (a === b) return;
+        const symmetric = kind !== "copre";
+        const key = symmetric ? `${kind}:${Math.min(a, b)}:${Math.max(a, b)}` : `${kind}:${a}:${b}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        edges.push({ from: `u${a}`, to: `u${b}`, kind });
+      };
+      for (const u of usList) {
+        parseTargets(u.copre).forEach((t) => link(u.id, t, "copre"));
+        parseTargets(u.coperto_da).forEach((t) => link(t, u.id, "copre"));
+        parseTargets(u.si_lega_a).forEach((t) => link(u.id, t, "si_lega_a"));
+        parseTargets(u.uguale_a).forEach((t) => link(u.id, t, "uguale_a"));
+      }
+    }
+
+    res.json({ nodes: Array.from(nodes.values()), edges });
   }));
 
   // Backlink: per ogni US, i documenti che la richiamano con un [[link]]

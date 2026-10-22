@@ -26,13 +26,13 @@ function parseList(raw: string | null | undefined): string[] {
 // Toglie spazi e punti finali (i campi del giornale spesso ne hanno già)
 const trimEnd = (t: string) => t.replace(/[\s.]+$/, "").trim();
 
-function usKey(codice: string, tipo: string | null | undefined): string | null {
+export function usKey(codice: string, tipo: string | null | undefined): string | null {
   const parsed = parseUsCode(codice);
   if (!parsed) return null;
   return `${parsed.prefix ?? expectedUsPrefix(tipo)}:${Number(parsed.number)}`;
 }
 
-function usLabel(us: UnitaStratigrafica): string {
+export function usLabel(us: UnitaStratigrafica): string {
   const parsed = parseUsCode(us.codiceUS);
   if (!parsed) return us.codiceUS;
   const prefix = parsed.prefix ?? expectedUsPrefix(us.tipo);

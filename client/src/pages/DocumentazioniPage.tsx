@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useParams } from "wouter";
 import { extractSearchFromLocation } from "@/lib/location";
 import {
-  Plus, FileText, Loader2,
+  Plus, FileText, Loader2, Network,
   Trash2, Download, Image, Upload, FolderOpen, X, Stethoscope, CheckCircle2, AlertCircle,
   ExternalLink, FolderCog, RefreshCcw, Copy,
 } from "lucide-react";
@@ -31,6 +31,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { RelazioniGrafo } from "@/components/relazioni/RelazioniGrafo";
 import { RelazioneEditorPanel } from "@/components/relazioni/RelazioneEditor";
 
 type DocumentazioneTipo = "giornaliera" | "settimanale" | "fine_scavo";
@@ -81,7 +82,7 @@ const USO_OPTIONS = [
   { value: "altro", label: "Altro" },
 ];
 
-type Tab = "documentazioni" | "google" | "immagini" | "template" | "export";
+type Tab = "documentazioni" | "grafo" | "google" | "immagini" | "template" | "export";
 
 // ─── TAB: Export archivio ZIP ─────────────────────────────────────────────────
 
@@ -1015,6 +1016,7 @@ function GoogleDriveTab({ cantiereId }: { cantiereId: number }) {
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: "documentazioni", label: "Relazioni", icon: FileText },
+  { id: "grafo", label: "Grafo", icon: Network },
   { id: "google", label: "Google Drive", icon: FolderCog },
   { id: "immagini", label: "Immagini progetto", icon: Image },
   { id: "template", label: "Template report", icon: FolderOpen },
@@ -1055,6 +1057,7 @@ export function DocumentazioniPage() {
 
       {/* Tab content */}
       {activeTab === "documentazioni" && <DocumentazioniTab cantiereId={cantiereId} />}
+      {activeTab === "grafo" && <RelazioniGrafo cantiereId={cantiereId} />}
       {activeTab === "google" && <GoogleDriveTab cantiereId={cantiereId} />}
       {activeTab === "immagini" && <ImmaginiTab />}
       {activeTab === "template" && <TemplateTab cantiereId={cantiereId} />}
