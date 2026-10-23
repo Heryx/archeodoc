@@ -16,7 +16,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Plus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { PerplexityAttribution } from "@/components/PerplexityAttribution";
 import { getCurrentProjectId } from "@/lib/project";
 import { CantiereFormFields } from "@/components/cantieri/CantiereFormFields";
 import { CantiereDeleteImpactDetails } from "@/components/cantieri/CantiereDeleteImpact";
@@ -339,10 +338,6 @@ export function CantieriPage() {
         }}
         onTransfer={openTransferDialog}
       />
-
-      <div className="mt-12">
-        <PerplexityAttribution />
-      </div>
     </div>
   );
 }
