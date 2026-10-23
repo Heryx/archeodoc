@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Plus } from "lucide-react";
+import { Loader2, Plus, Trash2 } from "lucide-react";
 import { calcolaSettimaneProgetto } from "@shared/weekUtils";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
@@ -37,6 +37,16 @@ export function NuovoDocumentoForm({ cantiereId, onCreated }: { cantiereId: numb
   const [dayTo, setDayTo] = useState("");
   const [week, setWeek] = useState<number | null>(null);
   const [month, setMonth] = useState("");
+  const [modello, setModello] = useState("");
+
+  type ModelloRef = { id: string; nome: string; descrizione: string | null };
+  const modelliQuery = useQuery<{ builtin: ModelloRef[]; custom: ModelloRef[] }>({
+    queryKey: ["/api/modelli-elaborato"],
+    queryFn: async () => (await apiRequest("GET", "/api/modelli-elaborato")).json(),
+  });
+  const modelli = modelliQuery.data;
+  const modelloScelto = [...(modelli?.builtin || []), ...(modelli?.custom || [])].find((m) => m.id === modello);
+  const modelloPersonale = !!modello && !modello.startsWith("builtin:");
 
   const giornateQuery = useQuery<{ id: number; data: string }[]>({
     queryKey: ["/api/cantieri", String(cantiereId), "giornate", "per-relazioni"],
@@ -90,13 +100,19 @@ export function NuovoDocumentoForm({ cantiereId, onCreated }: { cantiereId: numb
         titolo: titolo.trim() || (periodo ? `Relazione – ${periodo.label}` : null),
         dataInizio: periodo?.from ?? null,
         dataFine: periodo?.to ?? null,
+        modello: modello || undefined,
       })).json(),
     onSuccess: async (data: any) => {
       await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", String(cantiereId), "documentazioni"] });
       const id = Number(data?.documentazione?.id);
       if (Number.isFinite(id)) onCreated(id);
       setTitolo("");
-      toast({ title: "Documento creato", description: "Usa «Da giornale» per precompilare il testo del periodo." });
+      toast({
+        title: "Documento creato",
+        description: modello
+          ? "Compila i blocchi IA uno per uno, oppure tutti insieme con «Compila tutti»."
+          : "Usa «Da giornale» per precompilare il testo del periodo.",
+      });
     },
     onError: (e: any) => toast({ title: "Errore creazione", description: e?.message, variant: "destructive" }),
   });
@@ -151,6 +167,37 @@ export function NuovoDocumentoForm({ cantiereId, onCreated }: { cantiereId: numb
           : !giornate.length ? "Nessuna giornata nel giornale: il periodo non può essere scelto."
           : periodo ? <>Periodo: <strong className="text-foreground">{fmt(periodo.from)} → {fmt(periodo.to)}</strong> · {periodo.n} giornat{periodo.n === 1 ? "a" : "e"}</>
           : "Seleziona il periodo."}
+      </div>
+
+      <div>
+        <Label>Modello</Label>
+        <div className="flex items-center gap-1.5">
+          <select value={modello} onChange={(e) => setModello(e.target.value)} className={selectCls}>
+            <option value="">Documento vuoto</option>
+            {!!modelli?.builtin.length && (
+              <optgroup label="Predefiniti">
+                {modelli.builtin.map((m) => <option key={m.id} value={m.id}>{m.nome}</option>)}
+              </optgroup>
+            )}
+            {!!modelli?.custom.length && (
+              <optgroup label="I miei modelli">
+                {modelli.custom.map((m) => <option key={m.id} value={m.id}>{m.nome}</option>)}
+              </optgroup>
+            )}
+          </select>
+          {modelloPersonale && (
+            <Button type="button" variant="ghost" size="icon" className="mt-1 h-8 w-8 shrink-0 text-destructive" title="Elimina questo modello"
+              onClick={async () => {
+                if (!window.confirm(`Eliminare il modello «${modelloScelto?.nome}»? I documenti già creati non cambiano.`)) return;
+                await apiRequest("DELETE", `/api/modelli-elaborato/${modello}`);
+                setModello("");
+                queryClient.invalidateQueries({ queryKey: ["/api/modelli-elaborato"] });
+              }}>
+              <Trash2 size={14} />
+            </Button>
+          )}
+        </div>
+        {modelloScelto?.descrizione && <p className="mt-1 text-xs text-muted-foreground">{modelloScelto.descrizione}</p>}
       </div>
 
       <div>

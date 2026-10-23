@@ -40,7 +40,7 @@ const PAGE_CONTEXT_LABELS: Record<string, string> = {
   giornata: "Giornata di scavo",
   materiali: "Materiali",
   webmap: "WebMap",
-  documentazioni: "Relazioni e consegne",
+  documentazioni: "Elaborati",
   sas: "Saggi",
   report: "Report",
   stats: "Statistiche",

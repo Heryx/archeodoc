@@ -381,6 +381,18 @@ export const insertDocumentazioneSnapshotSchema = createInsertSchema(documentazi
 export type InsertDocumentazioneSnapshot = z.infer<typeof insertDocumentazioneSnapshotSchema>;
 export type DocumentazioneSnapshot = typeof documentazioneSnapshots.$inferSelect;
 
+// Modelli di elaborato: struttura riusabile (titoli, testo fisso, blocchi IA con prompt) per nuove relazioni
+export const modelliElaborato = sqliteTable("modelli_elaborato", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  nome: text("nome").notNull(),
+  descrizione: text("descrizione"),
+  contenuto: text("contenuto").notNull(),
+  intestazione: text("intestazione"),
+  createdAt: text("created_at").notNull(),
+});
+
+export type ModelloElaborato = typeof modelliElaborato.$inferSelect;
+
 // Anagrafica persone (per import giornale di scavo)
 export const persone = sqliteTable("persone", {
   id: integer("id").primaryKey({ autoIncrement: true }),

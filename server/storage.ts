@@ -16,6 +16,8 @@ import {
   nodiParadati,
   archiParadati,
   persone,
+  modelliElaborato,
+  type ModelloElaborato,
   type Cantiere,
   type InsertCantiere,
   type Giornata,
@@ -451,6 +453,15 @@ function migrate(sqlite: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_documentazione_snapshots_posizione
       ON documentazione_snapshots (documentazione_id, posizione);
 
+    CREATE TABLE IF NOT EXISTS modelli_elaborato (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nome TEXT NOT NULL,
+      descrizione TEXT,
+      contenuto TEXT NOT NULL,
+      intestazione TEXT,
+      created_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS periodi (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       cantiere_id INTEGER NOT NULL,
@@ -729,6 +740,12 @@ export interface IStorage {
   createMapSnapshot(data: InsertMapSnapshot): MapSnapshot;
   updateMapSnapshot(id: number, data: Partial<InsertMapSnapshot>): MapSnapshot | undefined;
   deleteMapSnapshot(id: number): boolean;
+
+  // Modelli di elaborato
+  getModelliElaborato(): ModelloElaborato[];
+  getModelloElaborato(id: number): ModelloElaborato | undefined;
+  createModelloElaborato(data: { nome: string; descrizione: string | null; contenuto: string; intestazione: string | null }): ModelloElaborato;
+  deleteModelloElaborato(id: number): boolean;
 
   // Documentazioni
   getDocumentazioni(cantiereId: number): Documentazione[];
@@ -1097,6 +1114,25 @@ class SQLiteStorage implements IStorage {
     const existing = this.getMapSnapshot(id);
     if (!existing) return false;
     this.db.delete(mapSnapshots).where(eq(mapSnapshots.id, id)).run();
+    return true;
+  }
+
+  // Modelli di elaborato
+  getModelliElaborato() {
+    return this.db.select().from(modelliElaborato).orderBy(asc(modelliElaborato.nome)).all();
+  }
+
+  getModelloElaborato(id: number) {
+    return this.db.select().from(modelliElaborato).where(eq(modelliElaborato.id, id)).get();
+  }
+
+  createModelloElaborato(data: { nome: string; descrizione: string | null; contenuto: string; intestazione: string | null }) {
+    return this.db.insert(modelliElaborato).values({ ...data, createdAt: now() }).returning().get();
+  }
+
+  deleteModelloElaborato(id: number) {
+    if (!this.getModelloElaborato(id)) return false;
+    this.db.delete(modelliElaborato).where(eq(modelliElaborato.id, id)).run();
     return true;
   }
 

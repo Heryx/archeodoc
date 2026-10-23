@@ -44,7 +44,7 @@ function usMark(id: number) {
 }
 
 // Trasforma un testo in nodi inline, collegando ogni US citata ("US 101", "T.12") a [[link]]
-function linkify(text: string, index: Map<string, UnitaStratigrafica>): PmNode[] {
+export function linkify(text: string, index: Map<string, UnitaStratigrafica>): PmNode[] {
   const out: PmNode[] = [];
   const re = /\b(US|T|SB|SF)\.?\s?(\d{1,4})\b/g;
   let last = 0;
@@ -71,7 +71,7 @@ function longDate(iso: string): string {
 
 // ─── Senza IA: riepilogo strutturato giornata per giornata ────────────────────
 
-function buildStructured(input: GenerateTestoInput, index: Map<string, UnitaStratigrafica>): PmNode[] {
+export function buildStructured(input: GenerateTestoInput, index: Map<string, UnitaStratigrafica>): PmNode[] {
   const out: PmNode[] = [];
   for (const g of input.giornate) {
     out.push(h(2, `Giornata del ${longDate(g.data)}`));
@@ -128,7 +128,7 @@ function aiSource(input: GenerateTestoInput): string {
 }
 
 // Markdown minimale (titoli, elenchi, paragrafi) -> nodi dell'editor
-function markdownToNodes(md: string, index: Map<string, UnitaStratigrafica>): PmNode[] {
+export function markdownToNodes(md: string, index: Map<string, UnitaStratigrafica>): PmNode[] {
   const out: PmNode[] = [];
   let list: PmNode | null = null;
   const clean = (t: string) => t.replace(/\*\*(.+?)\*\*/g, "$1").replace(/__(.+?)__/g, "$1").trim();
@@ -198,4 +198,13 @@ export async function generateRelazioneTesto(
   }
 
   return { content: buildStructured(input, index), warnings };
+}
+
+export function buildUsIndex(usList: UnitaStratigrafica[]): Map<string, UnitaStratigrafica> {
+  const index = new Map<string, UnitaStratigrafica>();
+  for (const u of usList) {
+    const key = usKey(u.codiceUS, u.tipo);
+    if (key && !index.has(key)) index.set(key, u);
+  }
+  return index;
 }

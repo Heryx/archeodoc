@@ -8,8 +8,11 @@ import { apiRequest } from "@/lib/queryClient";
 import { extractPathFromLocation, extractSearchFromLocation } from "@/lib/location";
 import { getCurrentProjectId, setCurrentProjectId } from "@/lib/project";
 import { useToast } from "@/hooks/use-toast";
+import { usePersistedFlag } from "@/hooks/usePersistedFlag";
 import {
   type LucideIcon,
+  PanelLeftClose,
+  PanelLeftOpen,
   Layers,
   CalendarDays,
   Upload,
@@ -89,6 +92,7 @@ function panelFromValue(value: string | null): "settings" | "qc" | "stats" | "th
 }
 
 export function Sidebar() {
+  const [collapsed, setCollapsed] = usePersistedFlag("sidebar-collapsed", false);
   const [location] = useLocation();
   const cleanLocation = extractPathFromLocation(location);
   const { theme, toggle } = useTheme();
@@ -278,7 +282,7 @@ export function Sidebar() {
         {
           href: `/cantiere/${cid}/documentazioni`,
           icon: FileText,
-          label: "Relazioni e consegne",
+          label: "Elaborati",
           isActive: (path: string) =>
             path === `/cantiere/${cid}/documentazioni` || path.startsWith(`/cantiere/${cid}/documentazioni/`),
           isPanel: false,
@@ -357,6 +361,22 @@ export function Sidebar() {
       ]
     : [];
 
+  if (collapsed) {
+    return (
+      <aside className="w-10 h-full flex flex-col items-center border-r border-border bg-card shrink-0 py-3">
+        <button
+          type="button"
+          onClick={() => setCollapsed(false)}
+          title="Mostra la barra laterale"
+          aria-label="Mostra la barra laterale"
+          className="h-8 w-8 inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          <PanelLeftOpen size={17} />
+        </button>
+      </aside>
+    );
+  }
+
   return (
     <aside className="w-56 h-full flex flex-col border-r border-border bg-card shrink-0">
       <div className="px-4 py-5 border-b border-border">
@@ -372,6 +392,15 @@ export function Sidebar() {
             <div className="font-semibold text-sm leading-tight">ArcheoDoc</div>
             <div className="text-xs text-muted-foreground">Documentazione Scavo</div>
           </div>
+          <button
+            type="button"
+            onClick={() => setCollapsed(true)}
+            title="Nascondi la barra laterale"
+            aria-label="Nascondi la barra laterale"
+            className="ml-auto h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <PanelLeftClose size={16} />
+          </button>
         </div>
       </div>
 

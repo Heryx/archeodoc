@@ -16,7 +16,7 @@ import {
   Bold, Italic, Underline as UnderlineIcon, Heading1, Heading2, Heading3, List, ListOrdered,
   Quote, Minus, Undo2, Redo2, ImagePlus, FileText, Printer, Loader2, Download, Trash2, Check, Link2, Sparkles, BookOpen,
   Strikethrough, AlignLeft, AlignCenter, AlignRight, AlignJustify, Subscript as SubIcon, Superscript as SuperIcon,
-  Highlighter, Table as TableIcon, RemoveFormatting, Link as LinkIcon, IndentIncrease, IndentDecrease,
+  Highlighter, Table as TableIcon, RemoveFormatting, Link as LinkIcon, IndentIncrease, IndentDecrease, PanelRightClose, PanelRightOpen, LayoutTemplate,
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,8 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { usePersistedFlag } from "@/hooks/usePersistedFlag";
+import { AiBlock, errorMessage, fillAiBlock } from "@/components/relazioni/AiBlock";
 
 export type RelazioneDoc = {
   id: number;
@@ -184,7 +186,9 @@ function ColorTool({ title, icon, value, onPick, onClear }: {
   );
 }
 
-function Toolbar({ editor, onInsertFigure, onGenerate }: { editor: Editor; onInsertFigure: () => void; onGenerate: () => void }) {
+function Toolbar({ editor, onInsertFigure, onGenerate, onFillAll, filling }: {
+  editor: Editor; onInsertFigure: () => void; onGenerate: () => void; onFillAll: () => void; filling: boolean;
+}) {
   const chain = () => editor.chain().focus();
   const sep = <span className="w-px h-5 bg-border mx-1" />;
   const attrs = editor.getAttributes("textStyle");
@@ -293,6 +297,14 @@ function Toolbar({ editor, onInsertFigure, onGenerate }: { editor: Editor; onIns
         </Button>
         <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={onGenerate}>
           <Sparkles size={14} /> Da giornale
+        </Button>
+        <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 text-xs"
+          onClick={() => chain().insertContent({ type: "aiBlock", attrs: { prompt: "" }, content: [{ type: "paragraph" }] }).run()}>
+          <Sparkles size={14} className="text-violet-600" /> Blocco IA
+        </Button>
+        <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={onFillAll} disabled={filling}
+          title="Compila tutti i blocchi IA del documento, uno dopo l'altro">
+          {filling ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} Compila tutti
         </Button>
       </div>
     </div>
@@ -545,11 +557,12 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast }: 
       TableKit.configure({ table: { resizable: false } }),
       SnapshotFigure,
       UsLink,
-      Placeholder.configure({ placeholder: "Scrivi la relazione, oppure inserisci una figura dalla WebMap…" }),
+      AiBlock.configure({ cantiereId, docId: doc.id }),
+      Placeholder.configure({ placeholder: "Scrivi la relazione, inserisci una figura dalla WebMap, oppure un blocco IA con «[# istruzione]»…" }),
     ],
     content: initialContent,
     editorProps: {
-      attributes: { class: "prose prose-sm max-w-none focus:outline-none min-h-[60vh] px-10 py-8 [&_.us-link]:text-primary [&_.us-link]:border-b [&_.us-link]:border-dotted [&_.us-link]:border-primary [&_.us-link]:cursor-pointer [&_table]:border-collapse [&_table]:w-full [&_td]:border [&_th]:border [&_td]:border-border [&_th]:border-border [&_td]:p-1.5 [&_th]:p-1.5 [&_th]:bg-muted/60 [&_td]:align-top [&_a]:text-blue-700 [&_a]:underline" },
+      attributes: { class: "prose prose-sm max-w-none focus:outline-none min-h-[60vh] px-10 py-8 bg-white text-neutral-900 [--tw-prose-body:#171717] [--tw-prose-headings:#171717] [--tw-prose-bold:#171717] [--tw-prose-quotes:#171717] [--tw-prose-bullets:#525252] [--tw-prose-counters:#525252] [&_.us-link]:text-primary [&_.us-link]:border-b [&_.us-link]:border-dotted [&_.us-link]:border-primary [&_.us-link]:cursor-pointer [&_table]:border-collapse [&_table]:w-full [&_td]:border [&_th]:border [&_td]:border-neutral-300 [&_th]:border-neutral-300 [&_td]:p-1.5 [&_th]:p-1.5 [&_th]:bg-neutral-100 [&_td]:align-top [&_a]:text-blue-700 [&_a]:underline" },
       handleKeyDown: (_view, event) => {
         const { suggest: sg, suggestions: list, sugIndex: idx } = live.current;
         if (!sg) return false;
@@ -610,6 +623,18 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast }: 
     if (editor && !doc.contenuto) schedule({ contenuto: editor.getJSON() });
   }, [editor]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const saveAsModel = async () => {
+    const nome = window.prompt("Nome del modello? Restano titoli, testo fisso e prompt dei blocchi IA; il testo già generato non viene salvato.", doc.titolo);
+    if (!nome?.trim()) return;
+    try {
+      await apiRequest("POST", "/api/modelli-elaborato", { nome: nome.trim(), contenuto: editor?.getJSON(), intestazione: header });
+      queryClient.invalidateQueries({ queryKey: ["/api/modelli-elaborato"] });
+      toast({ title: "Modello salvato", description: "Lo trovi in «Modello» quando crei un nuovo documento." });
+    } catch (e: any) {
+      toast({ title: "Salvataggio del modello non riuscito", description: errorMessage(e), variant: "destructive" });
+    }
+  };
+
   const generate = useMutation({
     mutationFn: async () => {
       await flush();
@@ -623,6 +648,35 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast }: 
     },
     onError: (e: any) => toast({ title: "Errore generazione DOCX", description: e?.message, variant: "destructive" }),
   });
+
+  // Compila tutti i blocchi IA, dall'ultimo al primo così le posizioni dei precedenti restano valide
+  const [filling, setFilling] = useState(false);
+  const [sideHidden, setSideHidden] = usePersistedFlag("elaborati-side-hidden", false);
+  const fillAll = async () => {
+    if (!editor) return;
+    const positions: number[] = [];
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === "aiBlock") { positions.push(pos); return false; }
+    });
+    if (!positions.length) {
+      toast({ title: "Nessun blocco IA", description: "Inserisci un blocco con il pulsante «Blocco IA» o scrivendo [# istruzione]." });
+      return;
+    }
+    if (!window.confirm(`Compilare ${positions.length} blocchi IA? Il testo già presente nei blocchi sarà sostituito.`)) return;
+    setFilling(true);
+    let ok = 0;
+    const failed: string[] = [];
+    for (const pos of positions.reverse()) {
+      try { await fillAiBlock(editor, cantiereId, doc.id, pos); ok++; }
+      catch (e: any) { failed.push(errorMessage(e)); }
+    }
+    setFilling(false);
+    toast({
+      title: failed.length ? `Compilati ${ok} blocchi su ${positions.length}` : `Compilati ${ok} blocchi`,
+      description: failed.length ? failed[0] : "Rileggi e correggi prima di consegnare.",
+      variant: failed.length ? "destructive" : undefined,
+    });
+  };
 
   if (!editor) return null;
 
@@ -649,7 +703,7 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast }: 
               {header.intestazione}
             </div>
           )}
-          <Toolbar editor={editor} onInsertFigure={() => setPickerOpen(true)} onGenerate={() => setGenOpen(true)} />
+          <Toolbar editor={editor} onInsertFigure={() => setPickerOpen(true)} onGenerate={() => setGenOpen(true)} onFillAll={fillAll} filling={filling} />
           <EditorContent editor={editor} />
           {(header.piePagina || header.numeroPagina) && (
             <div className="text-center text-xs text-muted-foreground border-t border-dashed border-border py-1.5 bg-muted/20">
@@ -658,8 +712,20 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast }: 
           )}
         </div>
 
+        {sideHidden ? (
+          <Button type="button" variant="outline" size="icon" className="h-8 w-8" title="Mostra intestazione, esporta e collegamenti"
+            onClick={() => setSideHidden(false)}>
+            <PanelRightOpen size={15} />
+          </Button>
+        ) : (
         <div className="w-64 space-y-3 rounded border border-border p-3">
-          <div className="text-sm font-medium">Intestazione e piè di pagina</div>
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium">Intestazione e piè di pagina</div>
+            <button type="button" title="Nascondi il pannello" aria-label="Nascondi il pannello" onClick={() => setSideHidden(true)}
+              className="h-6 w-6 inline-flex items-center justify-center rounded text-muted-foreground hover:bg-muted">
+              <PanelRightClose size={14} />
+            </button>
+          </div>
           <div>
             <Label className="text-xs">Intestazione (es. dicitura da cantiere)</Label>
             <Input
@@ -731,8 +797,12 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast }: 
                 <Download size={12} /> Ultimo DOCX
               </a>
             )}
+            <Button variant="outline" className="w-full gap-2" onClick={saveAsModel} title="Salva la struttura di questo documento come modello riusabile">
+              <LayoutTemplate size={14} /> Salva come modello
+            </Button>
           </div>
         </div>
+        )}
       </div>
 
       {suggest && suggestions.length > 0 && (

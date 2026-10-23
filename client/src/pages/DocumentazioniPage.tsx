@@ -5,11 +5,12 @@ import { extractSearchFromLocation } from "@/lib/location";
 import {
   Plus, FileText, Loader2, Network,
   Trash2, Download, Image, Upload, FolderOpen, X, Stethoscope, CheckCircle2, AlertCircle,
-  ExternalLink, FolderCog, RefreshCcw, Copy,
+  ExternalLink, FolderCog, RefreshCcw, Copy, PanelLeftClose, PanelLeftOpen,
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { buildProjectUrl, getCurrentProjectId, getProjectHeader } from "@/lib/project";
 import { Button } from "@/components/ui/button";
+import { usePersistedFlag } from "@/hooks/usePersistedFlag";
 import { GoogleSyncReviewDialog } from "@/components/giornata/GoogleSyncReviewDialog";
 import { GiornataDocxImportDialog } from "@/components/giornata/GiornataDocxImportDialog";
 import { GiornaleImportDialog } from "@/components/giornata/GiornaleImportDialog";
@@ -730,13 +731,26 @@ function DocumentazioniTab({ cantiereId }: { cantiereId: number }) {
   });
 
   const selectedDetail = detailQuery.data?.documentazione;
+  const [listHidden, setListHidden] = usePersistedFlag("elaborati-list-hidden", false);
 
   return (
-    <div className="grid grid-cols-[300px_1fr] gap-4 min-h-[60vh]">
+    <div className={`grid ${listHidden ? "grid-cols-[auto_1fr]" : "grid-cols-[300px_1fr]"} gap-4 min-h-[60vh]`}>
       {/* Colonna sinistra */}
+      {listHidden ? (
+        <div>
+          <Button type="button" variant="outline" size="icon" className="h-8 w-8" title="Mostra l'elenco dei documenti"
+            onClick={() => setListHidden(false)}>
+            <PanelLeftOpen size={15} />
+          </Button>
+        </div>
+      ) : (
       <Card className="h-full">
-        <CardHeader className="pb-3">
+        <CardHeader className="pb-3 flex-row items-center justify-between space-y-0">
           <CardTitle className="text-base">Nuovo documento</CardTitle>
+          <Button type="button" variant="ghost" size="icon" className="h-7 w-7" title="Nascondi l'elenco dei documenti"
+            onClick={() => setListHidden(true)}>
+            <PanelLeftClose size={15} />
+          </Button>
         </CardHeader>
         <CardContent className="space-y-3">
           <NuovoDocumentoForm cantiereId={cantiereId} onCreated={(id) => setSelectedId(id)} />
@@ -765,6 +779,7 @@ function DocumentazioniTab({ cantiereId }: { cantiereId: number }) {
           </div>
         </CardContent>
       </Card>
+      )}
 
       {/* Colonna destra: editor */}
       <div className="min-w-0">
@@ -982,7 +997,7 @@ export function DocumentazioniPage() {
   return (
     <div className="p-6 space-y-5">
       <div>
-        <h1 className="text-2xl font-bold">Relazioni e consegne</h1>
+        <h1 className="text-2xl font-bold">Elaborati</h1>
         <p className="text-sm text-muted-foreground mt-1">
           Scrivi le relazioni da consegnare alla committenza (con figure dalla WebMap), ed esportale in Word o PDF. Qui trovi anche immagini, template e sincronizzazioni.
         </p>

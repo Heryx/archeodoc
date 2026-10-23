@@ -4,6 +4,8 @@ import path from "path";
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from "docx";
 import { insertImageIntoDocx } from "../docx_image_insert";
 import { generateRelazioneTesto, usKey, usLabel } from "../relazione_generate";
+import { generaBlocco, normalizeFonti } from "../relazione_blocco";
+import { MODELLI_BUILTIN, applyPlaceholders, clearAiBlocks, findBuiltin, placeholderValues } from "../relazione_modelli";
 import { buildRelazioneDocx, type PmNode, type RelazioneIntestazione } from "../relazione_export";
 import type { WithProject } from "./types";
 
@@ -180,6 +182,25 @@ export function registerDocumentazioniRoutes(app: Express, helpers: RegisterDocu
     const titoloRaw = String(req.body?.titolo || "").trim();
     const titolo = titoloRaw || defaultTitolo(tipo, dataInizio, dataFine);
 
+    // Con un modello il documento nasce già strutturato (titoli, testo fisso, blocchi IA da compilare)
+    let contenuto: string | null = null;
+    let intestazione: string | null = null;
+    const modelloId = String(req.body?.modello ?? "").trim();
+    if (modelloId) {
+      let struttura: PmNode | null = null;
+      if (modelloId.startsWith("builtin:")) {
+        struttura = findBuiltin(modelloId)?.contenuto ?? null;
+      } else {
+        const saved = ctx.storage.getModelloElaborato(Number(modelloId));
+        if (saved) {
+          try { struttura = JSON.parse(saved.contenuto); } catch { struttura = null; }
+          intestazione = saved.intestazione;
+        }
+      }
+      if (!struttura) return res.status(400).json({ error: "Modello non trovato" });
+      contenuto = JSON.stringify(applyPlaceholders(struttura, placeholderValues(cantiere, titolo)));
+    }
+
     const created = ctx.storage.createDocumentazione({
       cantiereId: cid,
       tipo,
@@ -188,6 +209,8 @@ export function registerDocumentazioniRoutes(app: Express, helpers: RegisterDocu
       dataFine,
       stato: "bozza",
       allegatoId: null,
+      contenuto,
+      intestazione,
     });
 
     res.json({ documentazione: created });
@@ -258,6 +281,78 @@ export function registerDocumentazioniRoutes(app: Express, helpers: RegisterDocu
     } catch (error: any) {
       res.status(400).json({ error: error?.message || "Errore nella generazione del testo" });
     }
+  }));
+
+  // Compila un blocco IA dell'editor: prompt + fonti scelte (US, giornale, periodi…); l'inserimento lo fa il client
+  app.post("/api/cantieri/:cid/documentazioni/genera-blocco", withProject(async (ctx, req, res) => {
+    const cid = Number(req.params.cid);
+    const cantiere = ctx.storage.getCantiere(cid);
+    if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
+
+    const fonti = normalizeFonti(req.body?.fonti);
+    if (fonti.giornate === "documento") {
+      // Periodo del documento che contiene il blocco; senza date si usano tutte le giornate
+      const doc = ctx.storage.getDocumentazione(Number(req.body?.docId));
+      if (doc && doc.cantiereId === cid && (doc.dataInizio || doc.dataFine)) {
+        fonti.da = doc.dataInizio;
+        fonti.a = doc.dataFine || doc.dataInizio;
+        fonti.giornate = "periodo";
+      } else {
+        fonti.giornate = "tutte";
+      }
+    }
+    const giornate = fonti.giornate === "nessuna"
+      ? []
+      : ctx.storage
+          .getGiornate(cid)
+          .filter((g) => fonti.giornate === "tutte" || ((!fonti.da || g.data >= fonti.da) && (!fonti.a || g.data <= fonti.a)))
+          .sort((x, y) => x.data.localeCompare(y.data));
+
+    try {
+      const result = await generaBlocco({
+        cantiere,
+        prompt: String(req.body?.prompt || ""),
+        fonti,
+        useAI: req.body?.useAI === true,
+        usList: ctx.storage.getUSList(cid),
+        giornate,
+        periodi: fonti.periodi ? ctx.storage.getPeriodi(cid) : [],
+        reperti: fonti.reperti ? ctx.storage.getRaRecords(cid) : [],
+        saggi: fonti.saggi ? ctx.storage.getSasRecords(cid) : [],
+      });
+      res.json(result);
+    } catch (error: any) {
+      res.status(400).json({ error: error?.message || "Errore nella generazione del blocco" });
+    }
+  }));
+
+  // Modelli di elaborato: predefiniti (nel codice) e salvati dall'utente (condivisi tra i cantieri del progetto)
+  app.get("/api/modelli-elaborato", withProject((ctx, _req, res) => {
+    res.json({
+      builtin: MODELLI_BUILTIN.map(({ id, nome, descrizione }) => ({ id, nome, descrizione })),
+      custom: ctx.storage.getModelliElaborato().map(({ id, nome, descrizione }) => ({ id: String(id), nome, descrizione })),
+    });
+  }));
+
+  app.post("/api/modelli-elaborato", withProject((ctx, req, res) => {
+    const nome = String(req.body?.nome || "").trim();
+    if (!nome) return res.status(400).json({ error: "Dai un nome al modello" });
+    const contenuto = req.body?.contenuto as PmNode | undefined;
+    if (!contenuto || contenuto.type !== "doc") return res.status(400).json({ error: "Contenuto del modello non valido" });
+    const descrizione = String(req.body?.descrizione || "").trim() || null;
+    const intestazione = req.body?.intestazione == null ? null : JSON.stringify(req.body.intestazione);
+    const created = ctx.storage.createModelloElaborato({
+      nome,
+      descrizione,
+      contenuto: JSON.stringify(clearAiBlocks(contenuto)),
+      intestazione,
+    });
+    res.json({ modello: { id: String(created.id), nome: created.nome, descrizione: created.descrizione } });
+  }));
+
+  app.delete("/api/modelli-elaborato/:id", withProject((ctx, req, res) => {
+    if (!ctx.storage.deleteModelloElaborato(Number(req.params.id))) return res.status(404).json({ error: "Modello non trovato" });
+    res.json({ ok: true });
   }));
 
   // Grafo: documenti e US collegate; con ?stratigrafia=1 tutte le US e le loro relazioni
