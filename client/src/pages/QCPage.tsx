@@ -3,21 +3,29 @@ import { useProjectCodeSettings } from "@/hooks/useProjectCodeSettings";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "wouter";
-import { Bot, Eye, EyeOff, RefreshCw, ShieldCheck, ShieldOff, Wrench } from "lucide-react";
+import { Bot, CalendarDays, Eye, EyeOff, Layers, RefreshCw, ShieldCheck, ShieldOff, SlidersHorizontal, Wrench } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { setAiJobResult, startAiJob, useAiJobActive, useAiJobResult } from "@/lib/aiJobs";
 import { getCurrentProjectId } from "@/lib/project";
+import { QcRulesCard } from "@/components/settings/QcRulesCard";
 import { QcGiornataCard } from "@/components/qc/QcGiornataCard";
 import { QcUSCard } from "@/components/qc/QcUSCard";
-import { QcSummaryCards } from "@/components/qc/QcSummaryCards";
+import { QcItemList } from "@/components/qc/QcItemList";
+import { QcSection } from "@/components/qc/QcSection";
 import { SequenceRepairDialog } from "@/components/qc/SequenceRepairDialog";
 import { computeQcStatusStats } from "@/components/qc/types";
 import type { QcLog } from "@shared/schema";
 
 const QC_ENABLED_KEY = "archeodoc_qc_enabled";
+const QC_SECTIONS_KEY = "archeodoc_qc_sections";
+
+// Ogni categoria di schede sottoposta a QC e' una sezione: per aggiungerne una (schede
+// materiali, SAS...) basta un id qui e un blocco <QcSection> con la sua lista.
+const QC_SECTION_IDS = ["regole", "giornate", "us"] as const;
+type QcSectionId = (typeof QC_SECTION_IDS)[number];
 
 type QCPageProps = {
   cidOverride?: string;
@@ -61,6 +69,29 @@ export function QCPage({ cidOverride, embedded = false }: QCPageProps = {}) {
     } catch {
       return true;
     }
+  });
+
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(QC_SECTIONS_KEY) || "{}");
+    } catch {
+      return {};
+    }
+  });
+
+  const updateSections = (patch: Record<string, boolean>) => {
+    setOpenSections((prev) => {
+      const next = { ...prev, ...patch };
+      try { localStorage.setItem(QC_SECTIONS_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  };
+  const setAllSections = (open: boolean) =>
+    updateSections(Object.fromEntries(QC_SECTION_IDS.map((id) => [id, open])));
+  const sectionProps = (id: QcSectionId) => ({
+    id,
+    open: !!openSections[id],
+    onOpenChange: (open: boolean) => updateSections({ [id]: open }),
   });
 
   const toggleQcEnabled = () => {
@@ -276,6 +307,7 @@ export function QCPage({ cidOverride, embedded = false }: QCPageProps = {}) {
   const allUsLogs = Object.values(usQcLogsMap).flat();
   const dismissedCount = [...allLogs, ...allUsLogs].filter((log) => log.dismissed).length;
   const stats = computeQcStatusStats(giornate);
+  const usStats = computeQcStatusStats(usList);
   const runPending = runAllQcMutation.isPending || runGiornataQc.isPending || runUsQcMutation.isPending || runAllUsQcMutation.isPending;
   const wrapperClass = embedded ? "p-4 space-y-4" : "p-8 max-w-4xl mx-auto";
 
@@ -415,10 +447,8 @@ export function QCPage({ cidOverride, embedded = false }: QCPageProps = {}) {
         />
       )}
 
-      <QcSummaryCards stats={stats} />
-
-      {dismissedCount > 0 && (
-        <div className="mb-4 flex items-center gap-2">
+      <div className="mt-4 mb-3 flex flex-wrap items-center gap-2">
+        {dismissedCount > 0 && (
           <Button
             variant={showDismissed ? "secondary" : "outline"}
             size="sm"
@@ -428,57 +458,76 @@ export function QCPage({ cidOverride, embedded = false }: QCPageProps = {}) {
             {showDismissed ? <Eye size={14} /> : <EyeOff size={14} />}
             Mostra nascosti ({dismissedCount})
           </Button>
+        )}
+        <div className="ml-auto flex items-center gap-1">
+          <Button variant="ghost" size="sm" onClick={() => setAllSections(true)}>Espandi tutto</Button>
+          <Button variant="ghost" size="sm" onClick={() => setAllSections(false)}>Comprimi tutto</Button>
         </div>
-      )}
+      </div>
 
-      {/* ── Sezione Giornate ── */}
-      {isLoading ? (
-        <div className="space-y-3">
-          {[1, 2, 3].map((item) => (
-            <div key={item} className="h-20 bg-muted animate-pulse rounded-lg" />
-          ))}
-        </div>
-      ) : giornate.length === 0 ? (
-        <div className="text-center py-10 border-2 border-dashed border-border rounded-xl">
-          <ShieldCheck size={32} className="mx-auto mb-3 text-muted-foreground" />
-          <p className="font-medium">Nessuna giornata da verificare</p>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Giornate</p>
-          {giornate.map((giornata: any) => (
-            <QcGiornataCard
-              key={giornata.id}
-              giornata={giornata}
-              logs={qcLogsMap[giornata.id] ?? []}
-              showDismissed={showDismissed}
-              runPending={runGiornataQc.isPending}
-              onRunQc={(giornataId) => runGiornataQc.mutate(giornataId)}
-              onToggleDismiss={handleToggleDismiss}
-            />
-          ))}
-        </div>
-      )}
+      <div className="space-y-3">
+        <QcSection {...sectionProps("regole")} title="Regole QC delle schede US" icon={SlidersHorizontal}>
+          <QcRulesCard />
+        </QcSection>
 
-      {/* ── Sezione US ── */}
-      {usList.length > 0 && (
-        <div className="space-y-4 mt-6">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Unità Stratigrafiche ({usList.length})
-          </p>
-          {usList.map((us: any) => (
-            <QcUSCard
-              key={us.id}
-              us={us}
-              logs={usQcLogsMap[us.id] ?? []}
-              showDismissed={showDismissed}
-              runPending={runUsQcMutation.isPending}
-              onRunQc={(usId) => runUsQcMutation.mutate(usId)}
-              onToggleDismiss={handleToggleDismiss}
+        <QcSection {...sectionProps("giornate")} title="Giornate" icon={CalendarDays} count={giornate.length} stats={stats}>
+          {isLoading ? (
+            <div className="space-y-2">
+              {[1, 2, 3].map((item) => (
+                <div key={item} className="h-9 bg-muted animate-pulse rounded-md" />
+              ))}
+            </div>
+          ) : giornate.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">Nessuna giornata da verificare</p>
+          ) : (
+            <QcItemList
+              items={giornate}
+              getKey={(giornata: any) => giornata.id}
+              getStatus={(giornata: any) => giornata.qcStatus || "pending"}
+              getSearchText={(giornata: any) => `${giornata.data ?? ""} ${giornata.settore ?? ""}`}
+              searchPlaceholder="Data o settore..."
+              renderItem={(giornata: any, defaultOpen) => (
+                <QcGiornataCard
+                  giornata={giornata}
+                  logs={qcLogsMap[giornata.id] ?? []}
+                  showDismissed={showDismissed}
+                  runPending={runGiornataQc.isPending}
+                  defaultOpen={defaultOpen}
+                  onRunQc={(giornataId) => runGiornataQc.mutate(giornataId)}
+                  onToggleDismiss={handleToggleDismiss}
+                />
+              )}
             />
-          ))}
-        </div>
-      )}
+          )}
+        </QcSection>
+
+        <QcSection {...sectionProps("us")} title="Unità Stratigrafiche" icon={Layers} count={usList.length} stats={usStats}>
+          {usList.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">Nessuna US da verificare</p>
+          ) : (
+            <QcItemList
+              items={usList}
+              getKey={(us: any) => us.id}
+              getStatus={(us: any) => us.qcStatus || "pending"}
+              getSearchText={(us: any) =>
+                `${formatUsCode(us.codiceUS, us.tipo, codeSettings.tombaStyle)} ${us.definizione ?? ""}`
+              }
+              searchPlaceholder="Codice o definizione..."
+              renderItem={(us: any, defaultOpen) => (
+                <QcUSCard
+                  us={us}
+                  logs={usQcLogsMap[us.id] ?? []}
+                  showDismissed={showDismissed}
+                  runPending={runUsQcMutation.isPending}
+                  defaultOpen={defaultOpen}
+                  onRunQc={(usId) => runUsQcMutation.mutate(usId)}
+                  onToggleDismiss={handleToggleDismiss}
+                />
+              )}
+            />
+          )}
+        </QcSection>
+      </div>
     </div>
   );
 }

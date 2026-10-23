@@ -1367,17 +1367,14 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
         usBaseInput.tipo,
         usThesaurus.definizione,
       );
+      let schemaWarnings: Record<string, string[]> | undefined;
       if (saveMode === "final") {
         const usValidationInput = toUSValidationInput(usBaseInput, schedaDataRecord);
         // Usa passthrough per consentire i campi extra del modello US (es. ICCD)
         const usValidator = buildEntityZodSchema(projectSchema, "us", { allowUnknown: true });
+        // Campi richiesti dallo schema/modello: non bloccano il salvataggio, vengono segnalati come avvisi.
         const parsed = usValidator.safeParse(usValidationInput);
-        if (!parsed.success) {
-          return res.status(422).json({
-            error: "Validazione schema US fallita",
-            fieldErrors: validationErrors(parsed.error),
-          });
-        }
+        if (!parsed.success) schemaWarnings = validationErrors(parsed.error);
       } else if (!isNonEmptyText(usBaseInput.codiceUS)) {
         return res.status(422).json({
           error: "Validazione schema US fallita",
@@ -1429,7 +1426,7 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
         schedaData: serializeDataRecord(filteredSchedaData),
       } as any);
       syncInverseRelations(ctx.storage, us.id);
-      res.json(us);
+      res.json(schemaWarnings ? { ...us, schemaWarnings } : us);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
@@ -1486,6 +1483,7 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
       usThesaurus.definizione,
     );
 
+    let schemaWarnings: Record<string, string[]> | undefined;
     if (saveMode === "final") {
       // Usa passthrough (allowUnknown: true) per le US: i campi extra del modello
       // (es. ICCD) vengono già separati da stripTopLevelKeysFromSchedaData e salvati
@@ -1493,12 +1491,7 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
       // nello schema base del progetto.
       const usValidator = buildEntityZodSchema(projectSchema, "us", { allowUnknown: true });
       const parsed = usValidator.safeParse(toUSValidationInput(nextUSBase, nextSchedaData));
-      if (!parsed.success) {
-        return res.status(422).json({
-          error: "Validazione schema US fallita",
-          fieldErrors: validationErrors(parsed.error),
-        });
-      }
+      if (!parsed.success) schemaWarnings = validationErrors(parsed.error);
     } else if (!isNonEmptyText(nextUSBase.codiceUS)) {
       return res.status(422).json({
         error: "Validazione schema US fallita",
@@ -1531,7 +1524,7 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
 
     // Re-fetch after sync (other US may have been updated, but return the saved one)
     const final = ctx.storage.getUS(id) ?? updated;
-    res.json(final);
+    res.json(schemaWarnings ? { ...final, schemaWarnings } : final);
   }));
 
   // PATCH — modifica di una singola cella dell'elenco US (edit inline nella tabella).

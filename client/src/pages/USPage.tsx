@@ -80,6 +80,12 @@ type CantiereLiteResponse = {
 };
 
 type USSaveMode = "draft" | "final";
+function describeSchemaWarnings(warnings?: Record<string, string[]>): string | undefined {
+  const keys = warnings ? Object.keys(warnings) : [];
+  if (!keys.length) return undefined;
+  return `Salvata con avvisi (vedi Controllo qualità): ${keys.slice(0, 4).join(", ")}${keys.length > 4 ? "..." : ""}.`;
+}
+
 type CreateUSVariables = { data: USForm; saveMode: USSaveMode; force?: boolean };
 type DuplicateWarningPayload = {
   message: string;
@@ -522,7 +528,10 @@ export function USPage() {
         ...emptyUSForm,
         schedaModelKey: activeModelKey,
       });
-      toast({ title: variables.saveMode === "draft" ? "US salvata in bozza" : "US registrata come completa" });
+      toast({
+        title: variables.saveMode === "draft" ? "US salvata in bozza" : "US registrata come completa",
+        description: describeSchemaWarnings(result?.schemaWarnings),
+      });
       if (result?.id) fetchAndShowPendingInverses(result.id);
     },
     onError: (err: any, variables) => {
@@ -553,7 +562,10 @@ export function USPage() {
       qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", "all", activeProjectId] });
       setOpenEdit(false);
       setEditingId(null);
-      toast({ title: variables.saveMode === "draft" ? "Bozza US aggiornata" : "US aggiornata come completa" });
+      toast({
+        title: variables.saveMode === "draft" ? "Bozza US aggiornata" : "US aggiornata come completa",
+        description: describeSchemaWarnings(result?.schemaWarnings),
+      });
       if (result?.id) fetchAndShowPendingInverses(result.id);
     },
     onError: (err: any) => {
@@ -1131,7 +1143,7 @@ export function USPage() {
         submitPending={createUS.isPending}
         submitLabelIdle="Registra US completa"
         submitLabelPending="Salvataggio..."
-        submitDisabled={!createForm.codiceUS || createUS.isPending || createMissingRequired.length > 0}
+        submitDisabled={!createForm.codiceUS || createUS.isPending}
         onSaveDraft={() => createUS.mutate({ data: { ...createForm, schedaModelKey: activeModelKey }, saveMode: "draft" })}
         draftLabelIdle="Salva bozza"
         draftLabelPending="Salvataggio bozza..."
@@ -1166,7 +1178,7 @@ export function USPage() {
         submitPending={updateUS.isPending}
         submitLabelIdle="Salva come completa"
         submitLabelPending="Aggiornamento..."
-        submitDisabled={!editForm.codiceUS || !editingId || updateUS.isPending || editMissingRequired.length > 0}
+        submitDisabled={!editForm.codiceUS || !editingId || updateUS.isPending}
         onSaveDraft={() => {
           if (editingId) updateUS.mutate({ id: editingId, data: editForm, saveMode: "draft" });
         }}

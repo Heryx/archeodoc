@@ -114,8 +114,8 @@ export function USFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[97vw] max-w-[1400px] max-h-[95vh] overflow-hidden p-0">
-        <DialogHeader className="border-b border-border bg-muted/20 px-4 py-3 sm:px-6">
+      <DialogContent className="w-[97vw] max-w-[1400px] max-h-[95vh] flex flex-col gap-0 overflow-hidden p-0">
+        <DialogHeader className="shrink-0 border-b border-border bg-muted/20 px-4 py-3 sm:px-6">
           <div className="flex items-center justify-between gap-2 pr-6">
             <DialogTitle>{title}</DialogTitle>
             {cid && (
@@ -128,7 +128,7 @@ export function USFormDialog({
           </div>
         </DialogHeader>
 
-        <div className="max-h-[calc(95vh-158px)] overflow-y-auto px-4 py-4 sm:px-6">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
           <div className="space-y-4">
             <div className="rounded-md border border-border bg-muted/10 p-3">
               <GoogleDocsImport mode="us" onImport={handleImport} />
@@ -154,11 +154,11 @@ export function USFormDialog({
           </div>
         </div>
 
-        <div className="border-t border-border bg-background px-4 py-3 sm:px-6">
+        <div className="shrink-0 border-t border-border bg-background px-4 py-3 sm:px-6">
           {missingRequired.length > 0 ? (
             <p className="mb-2 text-xs text-amber-700">
-              Campi obbligatori mancanti: {missingRequired.slice(0, 3).join(", ")}
-              {missingRequired.length > 3 ? "..." : ""}. Puoi comunque salvare in bozza.
+              Campi consigliati mancanti: {missingRequired.slice(0, 3).join(", ")}
+              {missingRequired.length > 3 ? "..." : ""}. Puoi comunque salvare: verranno segnalati dal controllo qualità.
             </p>
           ) : (
             <p className="mb-2 text-xs text-muted-foreground">Scheda completa: puoi registrarla come definitiva.</p>

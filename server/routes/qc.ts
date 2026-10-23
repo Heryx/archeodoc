@@ -1,9 +1,19 @@
 import type { Express } from "express";
 import type { WithProject } from "./types";
 import { applySequenceRepair, planSequenceRepair } from "../sequence_repair";
-import { checkAllUS, checkCicliStratigrafici, checkCoerenzaStratigrafica, checkGiornata, checkUS } from "../qc";
+import { type RequiredModelFields, checkAllUS, checkCicliStratigrafici, checkCoerenzaStratigrafica, checkGiornata, checkUS } from "../qc";
 import { getQcUsConfigForProject } from "../qc_settings";
+import { listUSModels } from "../us_models";
 import { AI_AVAILABLE, analizzaRelazioniQC } from "../ai";
+
+function requiredFieldsByModel(project: Parameters<typeof listUSModels>[0]): RequiredModelFields {
+  const out: RequiredModelFields = {};
+  for (const model of listUSModels(project)) {
+    const req = model.fields.filter((f) => f.required).map((f) => ({ key: f.key, label: f.label }));
+    if (req.length) out[model.key] = req;
+  }
+  return out;
+}
 
 export function registerQCRoutes(app: Express, withProject: WithProject) {
   // QC
@@ -69,7 +79,7 @@ export function registerQCRoutes(app: Express, withProject: WithProject) {
     }
 
     // QC US indipendente dalle giornate
-    const usResult = checkAllUS(tutteLeUS, (usId) => ctx.storage.getAllegati(cid, undefined, usId), getQcUsConfigForProject(ctx.project));
+    const usResult = checkAllUS(tutteLeUS, (usId) => ctx.storage.getAllegati(cid, undefined, usId), getQcUsConfigForProject(ctx.project), requiredFieldsByModel(ctx.project));
     for (const us of tutteLeUS) {
       const usIssues = usResult.issues.filter((i) => i.usId === us.id);
       ctx.storage.updateUS(us.id, {
@@ -103,7 +113,7 @@ export function registerQCRoutes(app: Express, withProject: WithProject) {
     const tutteLeUS = ctx.storage.getUSList(us.cantiereId);
 
     const qcConfig = getQcUsConfigForProject(ctx.project);
-    const usIssues = checkUS(us, allegatiUS, qcConfig);
+    const usIssues = checkUS(us, allegatiUS, qcConfig, requiredFieldsByModel(ctx.project));
     const coerenzaIssues = [
       ...checkCoerenzaStratigrafica(tutteLeUS, qcConfig),
       ...checkCicliStratigrafici(tutteLeUS, qcConfig),
@@ -171,7 +181,7 @@ export function registerQCRoutes(app: Express, withProject: WithProject) {
   app.post("/api/cantieri/:cid/us-qc-all", withProject((ctx, req, res) => {
     const cid = Number(req.params.cid);
     const tutteLeUS = ctx.storage.getUSList(cid);
-    const usResult = checkAllUS(tutteLeUS, (usId) => ctx.storage.getAllegati(cid, undefined, usId), getQcUsConfigForProject(ctx.project));
+    const usResult = checkAllUS(tutteLeUS, (usId) => ctx.storage.getAllegati(cid, undefined, usId), getQcUsConfigForProject(ctx.project), requiredFieldsByModel(ctx.project));
 
     for (const us of tutteLeUS) {
       const usIssues = usResult.issues.filter((i) => i.usId === us.id);

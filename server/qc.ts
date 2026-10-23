@@ -134,10 +134,14 @@ function extractRelationFields(us: UnitaStratigrafica): RelationFieldValue[] {
   return refs;
 }
 
+/** Campi richiesti da ciascun modello di scheda US, per chiave modello. */
+export type RequiredModelFields = Record<string, { key: string; label: string }[]>;
+
 export function checkUS(
   us: UnitaStratigrafica,
   allegatiUS: Allegato[],
   configInput?: QcUsConfigInput | QcUsConfig | null,
+  requiredByModel?: RequiredModelFields,
 ): QcIssue[] {
   const config = resolveQcUsConfig(configInput ?? null);
   const issues: QcIssue[] = [];
@@ -149,6 +153,21 @@ export function checkUS(
       campoInteressato: "daRivedere",
       usId: us.id,
     });
+  }
+
+  const requiredFields = requiredByModel?.[us.schedaModelKey ?? ""] ?? [];
+  if (requiredFields.length) {
+    const sd = parseSchedaData(us.schedaData) as Record<string, unknown>;
+    const record = us as unknown as Record<string, unknown>;
+    const missing = requiredFields.filter((f) => !String(record[f.key] ?? sd[f.key] ?? "").trim());
+    if (missing.length) {
+      emit(issues, config, "campi_modello_mancanti", {
+        categoria: "completezza",
+        messaggio: `US ${us.codiceUS}: campi del modello non compilati: ${missing.map((f) => f.label).join(", ")}`,
+        campoInteressato: missing[0].key,
+        usId: us.id,
+      });
+    }
   }
 
   // Completezza campi obbligatori
@@ -562,11 +581,12 @@ export function checkAllUS(
   usList: UnitaStratigrafica[],
   allegatiPerUS: (usId: number) => Allegato[],
   configInput?: QcUsConfigInput | QcUsConfig | null,
+  requiredByModel?: RequiredModelFields,
 ): { issues: QcIssue[]; status: "ok" | "warning" | "error" } {
   const config = resolveQcUsConfig(configInput ?? null);
   const issues: QcIssue[] = [];
   for (const us of usList) {
-    issues.push(...checkUS(us, allegatiPerUS(us.id), config));
+    issues.push(...checkUS(us, allegatiPerUS(us.id), config, requiredByModel));
   }
   issues.push(...checkCoerenzaStratigrafica(usList, config));
   issues.push(...checkCicliStratigrafici(usList, config));

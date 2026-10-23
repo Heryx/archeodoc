@@ -8,7 +8,7 @@ import { AiConfigCard, type AiConfigFile } from "@/components/settings/AiConfigC
 import { GoogleDocsCard } from "@/components/settings/GoogleDocsCard";
 import { LogsCard } from "@/components/settings/LogsCard";
 import { CodeSettingsCard } from "@/components/settings/CodeSettingsCard";
-import { QcRulesCard } from "@/components/settings/QcRulesCard";
+import { PageToc } from "@/components/ui/page-toc";
 import type { AiPromptSetting, AiSettings, GoogleStatus } from "@/components/settings/types";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -289,6 +289,8 @@ export function ImpostazioniPage({ embedded = false }: ImpostazioniPageProps = {
         <p className="text-muted-foreground mt-1">Configura le chiavi API per le funzioni AI.</p>
       </div>
 
+      <PageToc />
+
       <AIStatusCard settings={settings} />
 
       <AIKeysCard {...aiKeysProps} />
@@ -330,8 +332,6 @@ export function ImpostazioniPage({ embedded = false }: ImpostazioniPageProps = {
       />
 
       <CodeSettingsCard />
-
-      <QcRulesCard />
 
       <GoogleDocsCard
         googleLoading={googleLoading}

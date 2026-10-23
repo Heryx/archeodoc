@@ -1,6 +1,6 @@
 // Registro configurabile delle regole di Controllo Qualità per le schede US.
 // Ogni regola ha un livello di default (errore/avviso/info) che l'utente può
-// riclassificare o disattivare dalle Impostazioni. Alcune regole espongono anche
+// riclassificare o disattivare dal QC Check. Alcune regole espongono anche
 // soglie numeriche modificabili.
 
 export type QcLevel = "error" | "warning" | "info";
@@ -32,6 +32,13 @@ export const QC_US_RULES: QcRuleDef[] = [
     id: "da_rivedere",
     label: "US da rivedere",
     description: "La scheda è stata importata automaticamente dall'elenco US ed è contrassegnata come «da rivedere e completare».",
+    categoria: "completezza",
+    defaultLevel: "warning",
+  },
+  {
+    id: "campi_modello_mancanti",
+    label: "Campi richiesti dal modello di scheda non compilati",
+    description: "Il modello di scheda in uso (es. ICCD: ente responsabile, anno, natura US) prevede campi che risultano vuoti.",
     categoria: "completezza",
     defaultLevel: "warning",
   },

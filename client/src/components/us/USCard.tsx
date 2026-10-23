@@ -31,6 +31,7 @@ import {
 import { cn } from "@/lib/utils";
 import { buildProjectUrl, getProjectHeader } from "@/lib/project";
 import { USAIPanel } from "@/components/us/USAIPanel";
+import { countUSRelations } from "@/lib/us_relations";
 import { USFotoPanel } from "@/components/us/USFotoPanel";
 
 function QcIcon({ status }: { status?: string | null }) {
@@ -106,19 +107,12 @@ export function USCard({
     qcIssues = [];
   }
 
-  // Count filled relation fields
-  const TOP_LEVEL_REL_KEYS = ["copre", "coperto_da", "si_lega_a", "uguale_a"] as const;
-  const SCHEDA_REL_KEYS = ["taglia", "tagliatoDa", "riempie", "riempitoDa", "siAppoggiaA", "gliSiAppoggia", "posterioreA", "anterioreA"] as const;
-  let relCount = 0;
-  for (const k of TOP_LEVEL_REL_KEYS) {
-    if (us[k]?.trim()) relCount++;
-  }
-  try {
-    const sd = JSON.parse(us.schedaData || "{}");
-    for (const k of SCHEDA_REL_KEYS) {
-      if (sd[k]?.trim()) relCount++;
-    }
-  } catch { /* ignore */ }
+  const relCounts = countUSRelations(us);
+  const relCount = relCounts.totale;
+  const relTitle = [
+    `${relCounts.fisici} rapport${relCounts.fisici === 1 ? "o" : "i"} fisic${relCounts.fisici === 1 ? "o" : "i"}`,
+    `${relCounts.stratigrafici} rapport${relCounts.stratigrafici === 1 ? "o" : "i"} stratigrafic${relCounts.stratigrafici === 1 ? "o" : "i"}`,
+  ].join(" · ");
   const visibleIssues = showAllIssues ? qcIssues : qcIssues.slice(0, 3);
   const hiddenIssuesCount = Math.max(0, qcIssues.length - visibleIssues.length);
 
@@ -177,7 +171,7 @@ export function USCard({
             <Badge
               variant="outline"
               className="text-[10px] tabular-nums hidden sm:inline-flex gap-0.5 px-1.5"
-              title={`${relCount} relazion${relCount === 1 ? "e" : "i"} stratigrafica${relCount === 1 ? "" : "e"}`}
+              title={relTitle}
             >
               R:{relCount}
             </Badge>
@@ -279,7 +273,7 @@ export function USCard({
                 </div>
               )}
 
-              <USAIPanel usId={us.id} schedaAiGenerata={us.schedaAiGenerata} />
+              <USAIPanel us={us} cantiereId={cantiereId} schedaAiGenerata={us.schedaAiGenerata} />
 
               {cantiereId && (
                 <div className="mt-2 pt-2 border-t border-border/40">
