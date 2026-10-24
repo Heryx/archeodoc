@@ -1,10 +1,13 @@
 import mammoth from "mammoth";
 import type { UnitaStratigrafica } from "@shared/schema";
 import { calcolaSettimaneProgetto } from "@shared/weekUtils";
+import { RELAZIONE_TEXT_WIDTH_PX } from "@shared/relazione_layout";
 import { usKey, usLabel } from "./relazione_generate";
 import type { PmNode } from "./relazione_export";
+import { buildLayoutTransform, layoutStyleMap, readDocxLayout } from "./docx_layout";
 
-export type ImportedImage = { buffer: Buffer; ext: "png" | "jpg" | "gif" | "webp" };
+// widthPct: larghezza originale nel Word, in % del testo (null se non nota)
+export type ImportedImage = { buffer: Buffer; ext: "png" | "jpg" | "gif" | "webp"; widthPct: number | null };
 
 export type DocxToPmResult = {
   doc: PmNode;
@@ -129,13 +132,25 @@ type Ctx = {
   avvisi: string[];
   // immagini trovate dentro tabelle: vengono messe dopo la tabella
   hoisted: PmNode[] | null;
+  // larghezze delle colonne (twips) per tabella, in pre-ordine; null se non affidabili
+  tableGrids: number[][] | null;
+  tableCounter: number;
+  pageTextTwips: number;
 };
 
 function imageNode(index: number, ctx: Ctx): PmNode | null {
   const img = ctx.images[index];
   if (!img) return null;
-  return { type: "projectImage", attrs: { name: `__img:${index}`, src: "", didascalia: "", width: 560 } };
+  return {
+    type: "projectImage",
+    attrs: { name: `__img:${index}`, src: "", didascalia: "", widthPct: img.widthPct ?? 60, align: "center" },
+  };
 }
+
+const alignOf = (n: HNode): string | null => {
+  const m = /\bal-(center|right|justify)\b/.exec(n.attrs.class || "");
+  return m ? m[1] : null;
+};
 
 // Un paragrafo con immagini inline diventa: testo prima, immagine, testo dopo
 function paragraphBlocks(inline: Inline[], ctx: Ctx, type: "paragraph" | "heading" = "paragraph", attrs?: Record<string, any>): PmNode[] {
@@ -192,22 +207,41 @@ function tableNode(n: HNode, ctx: Ctx): PmNode | null {
     }
   };
   collect(n.children);
+
+  // Larghezza delle colonne dal Word, riportata ai px del foglio dell'editor
+  const grid = ctx.tableGrids?.[ctx.tableCounter] ?? null;
+  ctx.tableCounter++;
+  const colPx = grid && grid.length && grid.every((w) => w > 0)
+    ? grid.map((w) => Math.max(30, Math.round((w / ctx.pageTextTwips) * RELAZIONE_TEXT_WIDTH_PX)))
+    : null;
+  const total = colPx ? colPx.reduce((a, b) => a + b, 0) : 0;
+  const scale = colPx && total > RELAZIONE_TEXT_WIDTH_PX ? RELAZIONE_TEXT_WIDTH_PX / total : 1;
+  const occupied: number[] = [];
+
   const rows: PmNode[] = [];
   for (const tr of rowsSrc) {
     const cells: PmNode[] = [];
+    let col = 0;
     for (const td of tr.children.filter((c) => c.tag === "td" || c.tag === "th")) {
       const content = blocksOf(td.children, ctx);
-      const attrs: Record<string, number> = {};
-      const colspan = Number(td.attrs.colspan);
-      const rowspan = Number(td.attrs.rowspan);
+      const attrs: Record<string, any> = {};
+      const colspan = Math.max(Number(td.attrs.colspan) || 1, 1);
+      const rowspan = Math.max(Number(td.attrs.rowspan) || 1, 1);
       if (colspan > 1) attrs.colspan = colspan;
       if (rowspan > 1) attrs.rowspan = rowspan;
+      while ((occupied[col] || 0) > 0) col++;
+      if (colPx && col + colspan <= colPx.length) {
+        attrs.colwidth = colPx.slice(col, col + colspan).map((w) => Math.max(30, Math.round(w * scale)));
+      }
+      if (rowspan > 1) for (let c = col; c < col + colspan; c++) occupied[c] = rowspan;
+      col += colspan;
       cells.push({
         type: td.tag === "th" ? "tableHeader" : "tableCell",
         ...(Object.keys(attrs).length ? { attrs } : {}),
         content: content.length ? content : [{ type: "paragraph" }],
       });
     }
+    for (let c = 0; c < occupied.length; c++) if ((occupied[c] || 0) > 0) occupied[c]--;
     if (cells.length) rows.push({ type: "tableRow", content: cells });
   }
   return rows.length ? { type: "table", content: rows } : null;
@@ -227,12 +261,15 @@ function blocksOf(nodes: HNode[], ctx: Ctx): PmNode[] {
     }
     flushLoose();
     switch (n.tag) {
-      case "p":
-        out.push(...paragraphBlocks(inlineOf(n.children, []), ctx));
+      case "p": {
+        const al = alignOf(n);
+        out.push(...paragraphBlocks(inlineOf(n.children, []), ctx, "paragraph", al ? { textAlign: al } : undefined));
         break;
+      }
       case "h1": case "h2": case "h3": case "h4": case "h5": case "h6": {
         const level = Math.min(Number(n.tag[1]), 4);
-        out.push(...paragraphBlocks(inlineOf(n.children, []), ctx, "heading", { level }));
+        const al = alignOf(n);
+        out.push(...paragraphBlocks(inlineOf(n.children, []), ctx, "heading", { level, ...(al ? { textAlign: al } : {}) }));
         break;
       }
       case "ul": case "ol":
@@ -308,10 +345,20 @@ export async function docxToPm(buffer: Buffer): Promise<DocxToPmResult> {
   const avvisi: string[] = [];
   let skipped = 0;
 
+  const layout = await readDocxLayout(buffer);
+  const { transform, stats } = buildLayoutTransform(layout);
+  // Larghezza originale delle immagini: usata solo se i conteggi tornano con quelli del file
+  let imageExtents: number[] | null = null;
+
   const result = await mammoth.convertToHtml(
     { buffer },
     {
-      styleMap: STYLE_MAP,
+      styleMap: [...layoutStyleMap(), ...STYLE_MAP],
+      transformDocument: (root: any) => {
+        const out = transform(root);
+        imageExtents = stats.images === layout.imageExtentsEmu.length ? layout.imageExtentsEmu : null;
+        return out;
+      },
       convertImage: mammoth.images.imgElement(async (image) => {
         const ext = IMAGE_TYPES[String(image.contentType || "").toLowerCase()];
         if (!ext) {
@@ -319,15 +366,26 @@ export async function docxToPm(buffer: Buffer): Promise<DocxToPmResult> {
           return { src: "" };
         }
         const data = await image.readAsBuffer();
-        images.push({ buffer: data, ext });
-        return { src: `__img:${images.length - 1}` };
+        const tag = /^__i:(\d+)$/.exec(String((image as { altText?: string }).altText || ""));
+        const emu = tag && imageExtents ? imageExtents[Number(tag[1])] : 0;
+        const pct = emu > 0 ? Math.round((emu / 635 / layout.pageTextTwips) * 100) : null;
+        images.push({ buffer: data, ext, widthPct: pct ? Math.min(100, Math.max(10, pct)) : null });
+        return { src: `__img:${images.length - 1}`, alt: "" };
       }),
     },
   );
   if (skipped) avvisi.push(`${skipped} immagin${skipped === 1 ? "e" : "i"} in formato non supportato (EMF/WMF o altro) non importat${skipped === 1 ? "a" : "e"}: reinseriscile dall'editor.`);
 
-  const ctx: Ctx = { images, avvisi, hoisted: null };
   const tree = parseHtml(result.value);
+  const htmlTables = (result.value.match(/<table\b/g) || []).length;
+  const ctx: Ctx = {
+    images,
+    avvisi,
+    hoisted: null,
+    tableGrids: htmlTables === layout.tableGrids.length ? layout.tableGrids : null,
+    tableCounter: 0,
+    pageTextTwips: layout.pageTextTwips,
+  };
   const content = attachCaptions(blocksOf(tree.children, ctx));
   return { doc: { type: "doc", content: content.length ? content : [{ type: "paragraph" }] }, images, avvisi };
 }

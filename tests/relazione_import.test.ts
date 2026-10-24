@@ -185,3 +185,72 @@ test("anteprimaTesto separa le celle delle tabelle", async () => {
   const { doc } = await docxToPm(await sampleDocx());
   assert.match(anteprimaTesto(doc), /Settore \| US\nA \| US 102/);
 });
+
+// Documento "come lo scrive un archeologo": titoli solo con grassetto e dimensione, nessuno stile Word
+async function plainFormattedDocx(): Promise<Buffer> {
+  const body = (t: string) => new Paragraph({ children: [new TextRun({ text: t, size: 22 })] });
+  const doc = new Document({
+    sections: [{
+      children: [
+        new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: "RELAZIONE SETTIMANALE DI SCAVO", bold: true, size: 36 })] }),
+        new Paragraph({ children: [new TextRun({ text: "1. Premessa", bold: true, size: 28 })] }),
+        body("Il presente documento descrive le attività svolte nella settimana in oggetto e le principali evidenze emerse dallo scavo."),
+        new Paragraph({ children: [new TextRun({ text: "1.1 Settore A", bold: true, size: 24 })] }),
+        body("Nel settore A è stata messa in luce l'US 101, coperta da uno strato di crollo con abbondanti frammenti ceramici."),
+        new Paragraph({ children: [new TextRun({ text: "Attenzione: ", bold: true, size: 22 }), new TextRun({ text: "il testo seguente non è un titolo.", size: 22 })] }),
+        new Paragraph({ alignment: AlignmentType.JUSTIFIED, children: [new TextRun({ text: "Un paragrafo lungo e giustificato che prosegue la descrizione delle attività con ulteriori dettagli sulle misure e sulle quote.", size: 22 })] }),
+        new Paragraph({ children: [new TextRun({ text: "2. Conclusioni", bold: true, size: 28 })] }),
+        body("Le attività proseguiranno nella settimana successiva."),
+      ],
+    }],
+  });
+  return Packer.toBuffer(doc);
+}
+
+test("docxToPm riconosce i titoli dall'aspetto (grassetto, dimensione, numerazione)", async () => {
+  const { doc } = await docxToPm(await plainFormattedDocx());
+  const heads = find(doc, "heading").map((h) => [h.attrs?.level, (h.content || []).map((c) => c.text).join("")]);
+  assert.deepEqual(heads, [
+    [1, "RELAZIONE SETTIMANALE DI SCAVO"],
+    [2, "1. Premessa"],
+    [3, "1.1 Settore A"],
+    [2, "2. Conclusioni"],
+  ]);
+  // il titolo centrato resta centrato, il paragrafo con solo un inizio in grassetto non diventa titolo
+  assert.equal(find(doc, "heading")[0].attrs?.textAlign, "center");
+  const paras = find(doc, "paragraph");
+  assert.ok(paras.some((p) => (p.content || [])[0]?.text === "Attenzione: "));
+  assert.ok(paras.some((p) => p.attrs?.textAlign === "justify"));
+});
+
+test("docxToPm non indovina i titoli se quasi tutto è in grassetto", async () => {
+  const lines = Array.from({ length: 12 }, (_, i) => new Paragraph({ children: [new TextRun({ text: `Voce ${i + 1}`, bold: true })] }));
+  const buf = await Packer.toBuffer(new Document({ sections: [{ children: lines }] }));
+  const { doc } = await docxToPm(buf);
+  assert.equal(find(doc, "heading").length, 0);
+});
+
+test("docxToPm legge dimensione delle immagini e larghezza delle colonne", async () => {
+  const doc = new Document({
+    sections: [{
+      properties: { page: { size: { width: 11906, height: 16838 }, margin: { left: 1417, right: 1417, top: 1417, bottom: 1417 } } },
+      children: [
+        // 8 cm di 15,9 cm di testo -> ~50%
+        new Paragraph({ children: [new ImageRun({ type: "png", data: PNG, transformation: { width: Math.round(8 / 2.54 * 96), height: 40 } })] }),
+        new Table({
+          columnWidths: [2000, 4000, 3072],
+          rows: [new TableRow({ children: [2000, 4000, 3072].map((w) => new TableCell({ width: { size: w, type: "dxa" }, children: [new Paragraph("x")] })) })],
+        }),
+      ],
+    }],
+  });
+  const { doc: pm, images } = await docxToPm(await Packer.toBuffer(doc));
+  const pct = images[0].widthPct as number;
+  assert.ok(pct >= 48 && pct <= 52, `percentuale ${pct}`);
+  assert.equal(find(pm, "projectImage")[0].attrs?.widthPct, pct);
+  const widths = find(pm, "tableCell").map((c) => (c.attrs?.colwidth as number[])[0]);
+  assert.equal(widths.length, 3);
+  // rapporti 2000:4000:3072 rispettati, somma entro la larghezza del foglio
+  assert.ok(widths[1] > widths[0] * 1.8 && widths[1] < widths[0] * 2.2);
+  assert.ok(widths.reduce((a, b) => a + b, 0) <= 740);
+});

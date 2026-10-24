@@ -1,5 +1,6 @@
 import {
   AlignmentType,
+  BorderStyle,
   Document,
   ExternalHyperlink,
   Footer,
@@ -15,9 +16,11 @@ import {
   TableCell,
   TableRow,
   TextRun,
+  VerticalAlign,
   WidthType,
   type ParagraphChild,
 } from "docx";
+import { RELAZIONE_EXPORT_WIDTH_PX, RELAZIONE_TEXT_WIDTH_PX, figureWidthPct } from "@shared/relazione_layout";
 
 type Block = Paragraph | Table;
 
@@ -54,7 +57,7 @@ export type RelazioneExportInput = {
 };
 
 const ORDERED_REF = "relazione-ordered";
-const MAX_IMAGE_WIDTH_PX = 560; // ~ 15 cm
+const MAX_IMAGE_WIDTH_PX = RELAZIONE_EXPORT_WIDTH_PX; // ~ 15 cm
 const HEADINGS = [
   HeadingLevel.HEADING_1,
   HeadingLevel.HEADING_2,
@@ -76,6 +79,7 @@ function halfPoints(v: unknown): number | undefined {
 }
 
 const ALIGN: Record<string, (typeof AlignmentType)[keyof typeof AlignmentType]> = {
+  left: AlignmentType.LEFT,
   center: AlignmentType.CENTER,
   right: AlignmentType.RIGHT,
   justify: AlignmentType.JUSTIFIED,
@@ -112,6 +116,36 @@ function textRuns(node: PmNode): ParagraphChild[] {
   return out;
 }
 
+const TEXT_WIDTH_DXA = 9000;
+
+// Larghezza delle colonne in DXA: i px salvati nell'editor (base 740 = tutto il foglio) vengono
+// riportati alla pagina; senza larghezze note le colonne sono uguali e occupano tutto il testo.
+function tableColumnWidths(rows: PmNode[], cols: number): number[] {
+  const px: (number | null)[] = Array(cols).fill(null);
+  for (const row of rows) {
+    let col = 0;
+    for (const cell of row.content || []) {
+      const span = Number(cell.attrs?.colspan) || 1;
+      const cw = cell.attrs?.colwidth as number[] | null | undefined;
+      if (cw) cw.forEach((w, i) => { if (w > 0 && col + i < cols && px[col + i] == null) px[col + i] = w; });
+      col += span;
+    }
+  }
+  if (px.every((w) => w != null)) {
+    return (px as number[]).map((w) => Math.max(400, Math.round((w / RELAZIONE_TEXT_WIDTH_PX) * TEXT_WIDTH_DXA)));
+  }
+  return Array(cols).fill(Math.floor(TEXT_WIDTH_DXA / cols));
+}
+
+function tableBorders(mode: string) {
+  if (mode !== "none" && mode !== "horizontal") return null;
+  const none = { style: BorderStyle.NONE, size: 0, color: "FFFFFF" };
+  const line = { style: BorderStyle.SINGLE, size: 4, color: "888888" };
+  return mode === "none"
+    ? { top: none, bottom: none, left: none, right: none, insideHorizontal: none, insideVertical: none }
+    : { top: line, bottom: line, left: none, right: none, insideHorizontal: line, insideVertical: none };
+}
+
 function figure(node: PmNode, input: RelazioneExportInput, warnings: string[]): Paragraph[] {
   const snapshotId = Number(node.attrs?.snapshotId);
   const caption = String(node.attrs?.didascalia || "").trim();
@@ -126,12 +160,17 @@ function figure(node: PmNode, input: RelazioneExportInput, warnings: string[]): 
     return [];
   }
   const ratio = img.width && img.height && img.width > 0 && img.height > 0 ? img.width / img.height : 16 / 9;
-  const wanted = Number(node.attrs?.width);
-  const width = Number.isFinite(wanted) && wanted > 20 ? Math.min(wanted, MAX_IMAGE_WIDTH_PX) : MAX_IMAGE_WIDTH_PX;
-  const height = Math.round(Math.min(width / ratio, 760));
+  // Larghezza scelta nel gestore figure (% del testo); le altezze eccessive riducono la figura mantenendo le proporzioni
+  let width = Math.round((figureWidthPct(node.attrs) / 100) * MAX_IMAGE_WIDTH_PX);
+  let height = Math.round(width / ratio);
+  if (height > 760) {
+    height = 760;
+    width = Math.round(height * ratio);
+  }
+  const align = ALIGN[String(node.attrs?.align || "center")] ?? AlignmentType.CENTER;
   const paragraphs = [
     new Paragraph({
-      alignment: AlignmentType.CENTER,
+      alignment: align,
       keepNext: !!caption,
       spacing: { before: 120, after: 60 },
       children: [
@@ -142,7 +181,7 @@ function figure(node: PmNode, input: RelazioneExportInput, warnings: string[]): 
   if (caption) {
     paragraphs.push(
       new Paragraph({
-        alignment: AlignmentType.CENTER,
+        alignment: align,
         spacing: { after: 200 },
         children: [new TextRun({ text: caption, italics: true, size: 20 })],
       }),
@@ -210,24 +249,34 @@ function blocks(
       case "table": {
         const rows = (node.content || []).filter((r) => r.type === "tableRow");
         const cols = (rows[0]?.content || []).reduce((n, c) => n + (Number(c.attrs?.colspan) || 1), 0) || 1;
-        const colWidth = Math.floor(9000 / cols);
+        const colWidths = tableColumnWidths(rows, cols);
+        const total = colWidths.reduce((a, b) => a + b, 0);
+        const borders = tableBorders(String(node.attrs?.borders || "all"));
+        const colOf = (row: PmNode, idx: number) =>
+          (row.content || []).slice(0, idx).reduce((n, c) => n + (Number(c.attrs?.colspan) || 1), 0);
         out.push(
           new Table({
-            width: { size: 9000, type: WidthType.DXA },
-            columnWidths: Array(cols).fill(colWidth),
+            width: { size: total, type: WidthType.DXA },
+            columnWidths: colWidths,
+            ...(borders ? { borders } : {}),
             rows: rows.map(
               (row) =>
                 new TableRow({
                   tableHeader: (row.content || []).every((c) => c.type === "tableHeader"),
-                  children: (row.content || []).map((cell) => {
+                  children: (row.content || []).map((cell, idx) => {
                     const span = Number(cell.attrs?.colspan) || 1;
                     const isHeader = cell.type === "tableHeader";
                     const inner = blocks(cell.content || [], input, warnings).filter((b): b is Paragraph => b instanceof Paragraph);
+                    const fill = hex(cell.attrs?.background) ?? (isHeader ? "EDEDED" : undefined);
+                    const first = colOf(row, idx);
+                    const width = colWidths.slice(first, first + span).reduce((a, b) => a + b, 0);
+                    const valign = cell.attrs?.valign === "middle" ? VerticalAlign.CENTER : cell.attrs?.valign === "bottom" ? VerticalAlign.BOTTOM : undefined;
                     return new TableCell({
                       columnSpan: span > 1 ? span : undefined,
                       rowSpan: Number(cell.attrs?.rowspan) > 1 ? Number(cell.attrs?.rowspan) : undefined,
-                      width: { size: colWidth * span, type: WidthType.DXA },
-                      shading: isHeader ? { type: ShadingType.CLEAR, fill: "EDEDED", color: "auto" } : undefined,
+                      width: { size: width || Math.floor(total / cols) * span, type: WidthType.DXA },
+                      shading: fill ? { type: ShadingType.CLEAR, fill, color: "auto" } : undefined,
+                      verticalAlign: valign,
                       margins: { top: 60, bottom: 60, left: 100, right: 100 },
                       children: inner.length ? inner : [new Paragraph({ text: "" })],
                     });

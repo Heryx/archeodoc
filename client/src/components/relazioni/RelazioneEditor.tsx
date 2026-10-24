@@ -13,6 +13,10 @@ import Subscript from "@tiptap/extension-subscript";
 import Superscript from "@tiptap/extension-superscript";
 import { TableKit } from "@tiptap/extension-table";
 import {
+  FigurePanel, ProjectImage, SnapshotFigure, figureNodeFor, isFigureName, isImageFile, selectedFigure, uploadProjectImage,
+} from "@/components/relazioni/FigureTools";
+import { RTable, RTableCell, RTableHeader, TablePanel, currentTable } from "@/components/relazioni/TableTools";
+import {
   Bold, Italic, Underline as UnderlineIcon, Heading1, Heading2, Heading3, List, ListOrdered,
   Quote, Minus, Undo2, Redo2, ImagePlus, FileText, Printer, Loader2, Download, Trash2, Check, Link2, Sparkles, BookOpen,
   Strikethrough, AlignLeft, AlignCenter, AlignRight, AlignJustify, Subscript as SubIcon, Superscript as SuperIcon,
@@ -47,115 +51,6 @@ type LinkedSnapshot = { snapshotId: number; posizione: number; snapshot: Snapsho
 type Intestazione = { intestazione: string; piePagina: string; numeroPagina: boolean };
 const EMPTY_HEADER: Intestazione = { intestazione: "", piePagina: "", numeroPagina: true };
 
-// ─── Nodo "figura" legato a uno snapshot WebMap ───────────────────────────────
-
-function FigureView({ node, updateAttributes, deleteNode, selected }: any) {
-  return (
-    <NodeViewWrapper className={`my-4 text-center ${selected ? "ring-2 ring-primary rounded" : ""}`} data-drag-handle>
-      <div className="relative inline-block max-w-full group">
-        <img src={node.attrs.src} alt={node.attrs.didascalia || ""} className="max-w-full rounded border border-border" />
-        <button
-          type="button"
-          onClick={() => deleteNode()}
-          className="absolute top-1 right-1 hidden group-hover:block bg-background/90 border border-border rounded p-1 text-destructive"
-          title="Rimuovi figura"
-        >
-          <Trash2 size={13} />
-        </button>
-      </div>
-      <input
-        value={node.attrs.didascalia || ""}
-        onChange={(e) => updateAttributes({ didascalia: e.target.value })}
-        placeholder="Didascalia della figura"
-        className="block mx-auto mt-1 w-full max-w-md text-center text-sm italic bg-transparent border-0 border-b border-transparent focus:border-border outline-none"
-      />
-    </NodeViewWrapper>
-  );
-}
-
-const SnapshotFigure = Node.create({
-  name: "snapshotFigure",
-  group: "block",
-  atom: true,
-  draggable: true,
-  addAttributes() {
-    return {
-      snapshotId: { default: null },
-      src: { default: "" },
-      didascalia: { default: "" },
-    };
-  },
-  parseHTML() {
-    return [{ tag: "figure[data-snapshot-id]" }];
-  },
-  renderHTML({ node }) {
-    return [
-      "figure",
-      { "data-snapshot-id": node.attrs.snapshotId, style: "text-align:center" },
-      ["img", { src: node.attrs.src, style: "max-width:100%" }],
-      ["figcaption", {}, node.attrs.didascalia || ""],
-    ];
-  },
-  addNodeView() {
-    return ReactNodeViewRenderer(FigureView);
-  },
-});
-
-// ─── Nodo "immagine di progetto" (logo, stemma, ecc. dalle Immagini progetto) ──
-
-const IMG_WIDTHS = [
-  { value: 160, label: "Piccola" },
-  { value: 320, label: "Media" },
-  { value: 560, label: "Larga" },
-];
-
-function ProjectImageView({ node, updateAttributes, deleteNode, selected }: any) {
-  const width = Number(node.attrs.width) || 560;
-  return (
-    <NodeViewWrapper className={`my-3 text-center ${selected ? "ring-2 ring-primary rounded" : ""}`} data-drag-handle>
-      <div className="relative inline-block max-w-full group">
-        <img src={node.attrs.src} alt={node.attrs.name} style={{ width }} className="max-w-full" />
-        <div className="absolute top-1 right-1 hidden group-hover:flex items-center gap-1 bg-background/95 border border-border rounded p-0.5">
-          <select value={width} onChange={(e) => updateAttributes({ width: Number(e.target.value) })}
-            className="text-xs bg-transparent outline-none" title="Dimensione">
-            {IMG_WIDTHS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
-          </select>
-          <button type="button" onClick={() => deleteNode()} className="p-1 text-destructive" title="Rimuovi immagine"><Trash2 size={13} /></button>
-        </div>
-      </div>
-      <input
-        value={node.attrs.didascalia || ""}
-        onChange={(e) => updateAttributes({ didascalia: e.target.value })}
-        placeholder="Didascalia (facoltativa)"
-        className="block mx-auto mt-1 w-full max-w-md text-center text-sm italic bg-transparent border-0 border-b border-transparent focus:border-border outline-none"
-      />
-    </NodeViewWrapper>
-  );
-}
-
-const ProjectImage = Node.create({
-  name: "projectImage",
-  group: "block",
-  atom: true,
-  draggable: true,
-  addAttributes() {
-    return { name: { default: "" }, src: { default: "" }, didascalia: { default: "" }, width: { default: 560 } };
-  },
-  parseHTML() {
-    return [{ tag: "figure[data-project-image]" }];
-  },
-  renderHTML({ node }) {
-    return [
-      "figure",
-      { "data-project-image": node.attrs.name, style: "text-align:center" },
-      ["img", { src: node.attrs.src, style: `width:${node.attrs.width}px;max-width:100%` }],
-      ["figcaption", {}, node.attrs.didascalia || ""],
-    ];
-  },
-  addNodeView() {
-    return ReactNodeViewRenderer(ProjectImageView);
-  },
-});
 
 function ProjectImagePicker({ open, onOpenChange, onPick }: {
   open: boolean; onOpenChange: (v: boolean) => void; onPick: (img: { name: string; url: string }) => void;
@@ -305,8 +200,8 @@ function ColorTool({ title, icon, value, onPick, onClear }: {
   );
 }
 
-function Toolbar({ editor, onInsertFigure, onInsertImage, onGenerate, onFillAll, filling }: {
-  editor: Editor; onInsertFigure: () => void; onInsertImage: () => void; onGenerate: () => void; onFillAll: () => void; filling: boolean;
+function Toolbar({ editor, onInsertFigure, onInsertImage, onOpenTables, onGenerate, onFillAll, filling }: {
+  editor: Editor; onInsertFigure: () => void; onInsertImage: () => void; onOpenTables: () => void; onGenerate: () => void; onFillAll: () => void; filling: boolean;
 }) {
   const chain = () => editor.chain().focus();
   const sep = <span className="w-px h-5 bg-border mx-1" />;
@@ -322,20 +217,6 @@ function Toolbar({ editor, onInsertFigure, onInsertImage, onGenerate, onFillAll,
     if (url === null) return;
     if (url.trim() === "" || url.trim() === "https://") chain().extendMarkRange("link").unsetLink().run();
     else chain().extendMarkRange("link").setLink({ href: url.trim() }).run();
-  };
-
-  const tableAction = (action: string) => {
-    const c = chain();
-    switch (action) {
-      case "insert": c.insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(); break;
-      case "addRow": c.addRowAfter().run(); break;
-      case "addCol": c.addColumnAfter().run(); break;
-      case "delRow": c.deleteRow().run(); break;
-      case "delCol": c.deleteColumn().run(); break;
-      case "merge": c.mergeCells().run(); break;
-      case "split": c.splitCell().run(); break;
-      case "delTable": c.deleteTable().run(); break;
-    }
   };
 
   return (
@@ -395,27 +276,16 @@ function Toolbar({ editor, onInsertFigure, onInsertImage, onGenerate, onFillAll,
         <ToolButton title="Linea divisoria" onClick={() => chain().setHorizontalRule().run()}><Minus size={15} /></ToolButton>
         {sep}
         <ToolButton title="Collegamento web" active={editor.isActive("link")} onClick={setLink}><LinkIcon size={15} /></ToolButton>
-        <select title="Tabella" className={`${smallSelect} w-28`} value="" onChange={(e) => { if (e.target.value) tableAction(e.target.value); e.target.value = ""; }}>
-          <option value="">Tabella…</option>
-          <option value="insert">Inserisci 3×3</option>
-          {inTable && (
-            <>
-              <option value="addRow">Aggiungi riga</option>
-              <option value="addCol">Aggiungi colonna</option>
-              <option value="delRow">Elimina riga</option>
-              <option value="delCol">Elimina colonna</option>
-              <option value="merge">Unisci celle</option>
-              <option value="split">Dividi cella</option>
-              <option value="delTable">Elimina tabella</option>
-            </>
-          )}
-        </select>
+        <Button type="button" size="sm" variant={inTable ? "default" : "outline"} className="h-8 gap-1.5 text-xs" onClick={onOpenTables}
+          title="Apre gli strumenti Tabelle: inserisci, righe, colonne, celle, larghezza, colori">
+          <TableIcon size={14} /> Tabelle
+        </Button>
         {sep}
         <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={onInsertFigure}>
           <ImagePlus size={14} /> Figura WebMap
         </Button>
         <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={onInsertImage}
-          title="Logo o altra immagine fissa dalle Immagini progetto">
+          title="Importa un'immagine esterna o scegline una dalle Immagini progetto; apre gli strumenti Figure">
           <ImageIcon size={14} /> Immagine
         </Button>
         <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={onGenerate}>
@@ -663,6 +533,10 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
   const [pickerOpen, setPickerOpen] = useState(false);
   const [genOpen, setGenOpen] = useState(false);
   const [imgOpen, setImgOpen] = useState(false);
+  const [pickMode, setPickMode] = useState<"insert" | "replace">("insert");
+  const [sideTab, setSideTab] = useState<"doc" | "figure" | "table">("doc");
+  const [, setTick] = useState(0);
+  const [uploading, setUploading] = useState(false);
   const [headings, setHeadings] = useState<HeadingItem[]>([]);
   const [activeHeading, setActiveHeading] = useState<number | null>(null);
   const [outlineHidden, setOutlineHidden] = usePersistedFlag("elaborati-outline-hidden", false);
@@ -729,7 +603,10 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
       TextAlign.configure({ types: ["heading", "paragraph"] }),
       Subscript,
       Superscript,
-      TableKit.configure({ table: { resizable: false } }),
+      TableKit.configure({ table: false, tableCell: false, tableHeader: false }),
+      RTable,
+      RTableCell,
+      RTableHeader,
       SnapshotFigure,
       ProjectImage,
       UsLink,
@@ -738,7 +615,7 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
     ],
     content: initialContent,
     editorProps: {
-      attributes: { class: "prose prose-sm max-w-none focus:outline-none min-h-[70vh] px-10 py-8 bg-white text-neutral-900 [--tw-prose-body:#171717] [--tw-prose-headings:#171717] [--tw-prose-bold:#171717] [--tw-prose-quotes:#171717] [--tw-prose-bullets:#525252] [--tw-prose-counters:#525252] [&_.us-link]:text-primary [&_.us-link]:border-b [&_.us-link]:border-dotted [&_.us-link]:border-primary [&_.us-link]:cursor-pointer [&_table]:border-collapse [&_table]:w-full [&_td]:border [&_th]:border [&_td]:border-neutral-300 [&_th]:border-neutral-300 [&_td]:p-1.5 [&_th]:p-1.5 [&_th]:bg-neutral-100 [&_td]:align-top [&_a]:text-blue-700 [&_a]:underline" },
+      attributes: { class: "relazione-doc prose prose-sm max-w-none focus:outline-none min-h-[70vh] px-10 py-8 bg-white text-neutral-900 [--tw-prose-body:#171717] [--tw-prose-headings:#171717] [--tw-prose-bold:#171717] [--tw-prose-quotes:#171717] [--tw-prose-bullets:#525252] [--tw-prose-counters:#525252] [&_.us-link]:text-primary [&_.us-link]:border-b [&_.us-link]:border-dotted [&_.us-link]:border-primary [&_.us-link]:cursor-pointer [&_table]:border-collapse [&_table]:w-full [&_td]:border [&_th]:border [&_td]:border-neutral-300 [&_th]:border-neutral-300 [&_td]:p-1.5 [&_th]:p-1.5 [&_th]:bg-neutral-100 [&_td]:align-top [&_a]:text-blue-700 [&_a]:underline" },
       handleKeyDown: (_view, event) => {
         const { suggest: sg, suggestions: list, sugIndex: idx } = live.current;
         if (!sg) return false;
@@ -756,6 +633,23 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
         }
         return false;
       },
+      // Immagini incollate (es. screenshot) o trascinate nel foglio diventano figure
+      handlePaste: (_view, event) => {
+        const data = event.clipboardData;
+        const files = Array.from(data?.files || []).filter(isImageFile);
+        if (!files.length || data?.types.includes("text/plain")) return false;
+        event.preventDefault();
+        void actions.current.insertImages(files);
+        return true;
+      },
+      handleDrop: (view, event) => {
+        const files = Array.from((event as DragEvent).dataTransfer?.files || []).filter(isImageFile);
+        if (!files.length) return false;
+        event.preventDefault();
+        const at = view.posAtCoords({ left: (event as DragEvent).clientX, top: (event as DragEvent).clientY })?.pos;
+        void actions.current.insertImages(files, at);
+        return true;
+      },
     },
     onUpdate: ({ editor }) => {
       const json = editor.getJSON();
@@ -763,9 +657,80 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
       setUsIds(Array.from(collectUsIds(json)));
       refreshOutline(editor);
       detectSuggest(editor);
+      trackSelection(editor);
     },
-    onSelectionUpdate: ({ editor }) => { refreshOutline(editor, false); detectSuggest(editor); },
+    onSelectionUpdate: ({ editor }) => { refreshOutline(editor, false); detectSuggest(editor); trackSelection(editor); },
   });
+
+  // I pannelli Figure e Tabelle si accendono quando si seleziona una figura o si entra in una tabella
+  function trackSelection(ed: Editor) {
+    setTick((t) => t + 1);
+    const fig = !!selectedFigure(ed);
+    const tbl = !fig && !!currentTable(ed);
+    if (fig && !wasFigure.current) { setSideHidden(false); setSideTab("figure"); }
+    else if (tbl && !wasTable.current) { setSideHidden(false); setSideTab("table"); }
+    wasFigure.current = fig;
+    wasTable.current = tbl;
+  }
+  const wasFigure = useRef(false);
+  const wasTable = useRef(false);
+
+  // Inserisce figure nel punto indicato, altrimenti al cursore; con una figura selezionata vanno dopo di essa
+  // (inserire sopra una selezione di nodo la sostituirebbe)
+  function insertFigureNodes(nodes: any[], at?: number) {
+    if (!editor) return;
+    const sel = selectedFigure(editor);
+    const chain = editor.chain().focus();
+    if (at != null) chain.insertContentAt(at, nodes);
+    else if (sel) chain.insertContentAt(sel.pos + sel.node.nodeSize, nodes);
+    else chain.insertContent(nodes);
+    chain.run();
+  }
+
+  // Carica immagini esterne e le inserisce come figure (nel punto indicato, altrimenti al cursore)
+  async function insertImages(files: File[], at?: number) {
+    if (!editor) return;
+    const imgs = files.filter(isImageFile);
+    if (!imgs.length) return;
+    setUploading(true);
+    try {
+      const nodes = [];
+      for (let i = 0; i < imgs.length; i++) nodes.push(figureNodeFor(await uploadProjectImage(imgs[i], i)));
+      insertFigureNodes(nodes, at);
+      toast({ title: nodes.length === 1 ? "Figura inserita" : `${nodes.length} figure inserite`, description: "Selezionala per ridimensionarla e aggiungere la didascalia." });
+    } catch (e: any) {
+      toast({ title: "Caricamento non riuscito", description: errorMessage(e), variant: "destructive" });
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  // Sostituisce l'immagine della figura selezionata mantenendo didascalia, larghezza e posizione
+  function replaceFigure(img: { name: string; url: string }) {
+    if (!editor) return;
+    const sel = selectedFigure(editor);
+    if (!sel) return;
+    editor.chain().focus().insertContentAt({ from: sel.pos, to: sel.pos + sel.node.nodeSize }, {
+      type: "projectImage",
+      attrs: {
+        name: img.name, src: img.url, didascalia: sel.node.attrs.didascalia || "",
+        widthPct: sel.node.attrs.widthPct ?? null, width: sel.node.attrs.width ?? null, align: sel.node.attrs.align || "center",
+      },
+    }).run();
+  }
+
+  async function replaceWithUpload(file: File) {
+    setUploading(true);
+    try {
+      replaceFigure(await uploadProjectImage(file));
+    } catch (e: any) {
+      toast({ title: "Caricamento non riuscito", description: errorMessage(e), variant: "destructive" });
+    } finally {
+      setUploading(false);
+    }
+  }
+  const actions = useRef({ insertImages });
+  actions.current = { insertImages };
 
   // Indice dei capitoli e capitolo in cui si trova il cursore
   function refreshOutline(ed: Editor, rescan = true) {
@@ -919,10 +884,13 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
         )}
 
         <div className="flex-1 min-w-0 min-h-0 flex flex-col rounded border border-border overflow-hidden">
-          <Toolbar editor={editor} onInsertFigure={() => setPickerOpen(true)} onInsertImage={() => setImgOpen(true)}
+          <Toolbar editor={editor} onInsertFigure={() => setPickerOpen(true)}
+            onInsertImage={() => { setSideHidden(false); setSideTab("figure"); }}
+            onOpenTables={() => { setSideHidden(false); setSideTab("table"); }}
             onGenerate={() => setGenOpen(true)} onFillAll={fillAll} filling={filling} />
-          <div className="flex-1 min-h-0 overflow-y-auto bg-muted/50 p-4">
-            <div className="mx-auto max-w-[820px] bg-white text-neutral-900 shadow-md">
+          <div className="flex-1 min-h-0 overflow-auto bg-muted/50 p-4">
+            {/* Foglio a larghezza fissa (testo = 740 px): figure e tabelle si misurano su questa base, come nell'export */}
+            <div className="mx-auto w-[820px] shrink-0 bg-white text-neutral-900 shadow-md">
               {header.intestazione && (
                 <div className="text-center text-xs text-neutral-500 border-b border-dashed border-neutral-300 py-1.5 mx-10">
                   {header.intestazione}
@@ -946,15 +914,40 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
             </Button>
           </div>
         ) : (
-          <aside className="w-64 shrink-0 min-h-0 overflow-y-auto">
+          <aside className="w-72 shrink-0 min-h-0 overflow-y-auto space-y-2">
+            <div className="flex items-center gap-1 rounded border border-border bg-background p-1">
+              {([["doc", "Documento"], ["figure", "Figure"], ["table", "Tabelle"]] as const).map(([id, label]) => (
+                <button key={id} type="button" onClick={() => setSideTab(id)}
+                  className={`flex-1 rounded px-2 py-1 text-xs font-medium ${sideTab === id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}>
+                  {label}
+                </button>
+              ))}
+              <button type="button" title="Nascondi il pannello" aria-label="Nascondi il pannello" onClick={() => setSideHidden(true)}
+                className="h-6 w-6 shrink-0 inline-flex items-center justify-center rounded text-muted-foreground hover:bg-muted">
+                <PanelRightClose size={14} />
+              </button>
+            </div>
+            {sideTab === "figure" && (
+              <div className="rounded border border-border bg-background p-3">
+                <FigurePanel
+                  editor={editor}
+                  uploading={uploading}
+                  onUploadFiles={(files) => void insertImages(files)}
+                  onPickProject={() => { setPickMode("insert"); setImgOpen(true); }}
+                  onPickSnapshot={() => setPickerOpen(true)}
+                  onReplaceProject={() => { setPickMode("replace"); setImgOpen(true); }}
+                  onReplaceUpload={(file) => void replaceWithUpload(file)}
+                />
+              </div>
+            )}
+            {sideTab === "table" && (
+              <div className="rounded border border-border bg-background p-3">
+                <TablePanel editor={editor} />
+              </div>
+            )}
+            {sideTab === "doc" && (
     <div className="space-y-3 rounded border border-border bg-background p-3">
-          <div className="flex items-center justify-between">
-            <div className="text-sm font-medium">Intestazione e piè di pagina</div>
-            <button type="button" title="Nascondi il pannello" aria-label="Nascondi il pannello" onClick={() => setSideHidden(true)}
-              className="h-6 w-6 inline-flex items-center justify-center rounded text-muted-foreground hover:bg-muted">
-              <PanelRightClose size={14} />
-            </button>
-          </div>
+          <div className="text-sm font-medium">Intestazione e piè di pagina</div>
           <div>
             <Label className="text-xs">Intestazione (es. dicitura da cantiere)</Label>
             <Input
@@ -1031,6 +1024,7 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
             </Button>
           </div>
         </div>
+        )}
           </aside>
         )}
       </div>
@@ -1067,9 +1061,11 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
       <ProjectImagePicker
         open={imgOpen}
         onOpenChange={setImgOpen}
-        onPick={(img) =>
-          editor.chain().focus().insertContent({ type: "projectImage", attrs: { name: img.name, src: img.url, didascalia: "", width: 320 } }).run()
-        }
+        onPick={(img) => {
+          const sel = selectedFigure(editor);
+          if (pickMode === "replace" && sel) replaceFigure({ name: img.name, url: img.url });
+          else insertFigureNodes([figureNodeFor({ name: img.name, url: img.url, widthPct: 60 })]);
+        }}
       />
 
       <FigurePicker
@@ -1077,10 +1073,10 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
         onOpenChange={setPickerOpen}
         cantiereId={cantiereId}
         onPick={(s) =>
-          editor.chain().focus().insertContent({
+          insertFigureNodes([{
             type: "snapshotFigure",
-            attrs: { snapshotId: s.id, src: s.url, didascalia: s.didascalia || s.titolo },
-          }).run()
+            attrs: { snapshotId: s.id, src: s.url, didascalia: s.didascalia || s.titolo, widthPct: 100, align: "center" },
+          }])
         }
       />
     </div>
