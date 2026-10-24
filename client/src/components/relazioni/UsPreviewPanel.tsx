@@ -1,9 +1,12 @@
-import { ExternalLink, FilePlus2, X } from "lucide-react";
+import { useState } from "react";
+import { ExternalLink, FilePlus2, FileText, X } from "lucide-react";
 import { formatUsCode, type TombaCodeStyle } from "@shared/us_code";
 import { usCodeKey } from "@shared/normalize_us_code";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { PanelSection } from "@/components/relazioni/Ribbon";
+import { SchedaPreview } from "@/components/us/USAIPanel";
 
 export type UsItem = Record<string, any> & { id: number; codiceUS: string; tipo: string | null; definizione: string | null };
 
@@ -50,6 +53,7 @@ export function UsPreviewPanel({ us, usList, tombaStyle, linked, onSelect, onOpe
   onInsert: (u: UsItem) => void;
   onClose: () => void;
 }) {
+  const [schedaOpen, setSchedaOpen] = useState(false);
   const label = (u: UsItem) => formatUsCode(u.codiceUS, u.tipo, tombaStyle);
   const byKey = new Map<string, UsItem>();
   for (const u of usList) byKey.set(usCodeKey(u.codiceUS), u);
@@ -80,9 +84,9 @@ export function UsPreviewPanel({ us, usList, tombaStyle, linked, onSelect, onOpe
       </div>
 
       <div className="grid grid-cols-2 gap-1.5">
-        <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={() => onOpenFull(us.id)}
-          title="Apre la scheda completa nella pagina delle US">
-          <ExternalLink size={13} /> Scheda completa
+        <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={() => setSchedaOpen(true)}
+          title="Mostra la scheda US completa, come in «Vedi scheda» nella pagina delle US">
+          <FileText size={13} /> Scheda completa
         </Button>
         <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={() => onInsert(us)}
           title="Inserisce nel testo, alla posizione del cursore, il riferimento a questa US">
@@ -131,6 +135,21 @@ export function UsPreviewPanel({ us, usList, tombaStyle, linked, onSelect, onOpe
           </dl>
         </PanelSection>
       )}
+
+      <Dialog open={schedaOpen} onOpenChange={setSchedaOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-3">
+              <span className="font-mono">{label(us)}</span>
+              <Button type="button" size="sm" variant="ghost" className="h-7 gap-1.5 text-xs" onClick={() => onOpenFull(us.id)}
+                title="Apre la scheda nella pagina delle US per modificarla">
+                <ExternalLink size={13} /> Apri nella pagina US
+              </Button>
+            </DialogTitle>
+          </DialogHeader>
+          <SchedaPreview us={us} />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

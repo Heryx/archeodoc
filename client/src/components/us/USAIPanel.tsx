@@ -69,7 +69,7 @@ function RelCell({ us, keys }: { us: any; keys: string[] }) {
   return <Val>{codes.join(", ")}</Val>;
 }
 
-function SchedaPreview({ us }: { us: any }) {
+export function SchedaPreview({ us }: { us: any }) {
   const periodo =
     us.periodoFase || [us.periodoIniziale, us.periodoFinale].filter(Boolean).join(" – ") || "";
 
