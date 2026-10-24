@@ -4,13 +4,16 @@ import { NodeSelection, Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import type { Node as PmNode } from "@tiptap/pm/model";
 import {
-  ArrowDown, ArrowUp, Copy, Crosshair, Folder, GripVertical, ImagePlus, Map as MapIcon, RefreshCw, Trash2, Upload, X,
+  ArrowDown, ArrowUp, Copy, Crosshair, Folder, GripVertical, ImagePlus, Map as MapIcon, RefreshCw, Trash2, Type, Upload, X,
 } from "lucide-react";
 import {
   RELAZIONE_EXPORT_WIDTH_PX, RELAZIONE_TEXT_WIDTH_PX, figureFloatSide, figureWidthPct, figureWrap, type FigureAlign, type FigureWrap,
 } from "@shared/relazione_layout";
 import { buildProjectUrl } from "@/lib/project";
 import { Button } from "@/components/ui/button";
+import {
+  NumField, PanelSection as Section, RibbonBig, RibbonBtn, RibbonGroup, RibbonRow, RibbonStack, useScrollToSection,
+} from "@/components/relazioni/Ribbon";
 
 // ─── Nodi figura ──────────────────────────────────────────────────────────────
 
@@ -332,6 +335,9 @@ function selectFigure(editor: Editor, pos: number) {
 
 const PRESETS = [25, 33, 50, 75, 100];
 
+// Larghezza approssimativa nel Word, in cm
+const figureCm = (pct: number) => ((pct / 100) * (RELAZIONE_EXPORT_WIDTH_PX / 96) * 2.54).toFixed(1);
+
 type LayoutId = "left" | "center" | "right" | "float-left" | "float-right";
 const LAYOUTS: { id: LayoutId; wrap: FigureWrap; align: FigureAlign; label: string }[] = [
   { id: "left", wrap: "none", align: "left", label: "A sinistra, da sola sulla riga" },
@@ -373,19 +379,25 @@ function LayoutIcon({ id }: { id: LayoutId }) {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-1.5 pt-3 border-t border-border first:border-0 first:pt-0">
-      <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{title}</div>
-      {children}
-    </div>
-  );
+// Con il testo a fianco una figura molto larga lascerebbe poco spazio alle parole
+function applyFigureLayout(editor: Editor, sel: FigureRef, l: (typeof LAYOUTS)[number]) {
+  const pct = figureWidthPct(sel.node.attrs);
+  editor.chain().focus().updateAttributes(sel.node.type.name, {
+    wrap: l.wrap, align: l.align, ...(l.wrap === "square" && pct > 60 ? { widthPct: 50 } : {}),
+  }).run();
+}
+
+function currentLayout(sel: FigureRef): LayoutId {
+  const align = (sel.node.attrs.align as FigureAlign) || "center";
+  return figureWrap(sel.node.attrs) === "square" ? (align === "right" ? "float-right" : "float-left") : align;
 }
 
 export function FigurePanel({
   editor, uploading, placing, askWhere, onAskWhere, onMove, onCancelMove,
-  onUploadFiles, onPickProject, onPickSnapshot, onReplaceProject, onReplaceUpload,
+  onUploadFiles, onPickProject, onPickSnapshot, onReplaceProject, onReplaceUpload, section, nonce = 0,
 }: {
+  section?: string;
+  nonce?: number;
   editor: Editor;
   uploading: boolean;
   placing: boolean;
@@ -407,13 +419,11 @@ export function FigurePanel({
   const pct = sel ? figureWidthPct(sel.node.attrs) : 100;
   const align = (sel?.node.attrs.align as FigureAlign) || "center";
   const wrap = sel ? figureWrap(sel.node.attrs) : "none";
-  const layout: LayoutId = wrap === "square" ? (align === "right" ? "float-right" : "float-left") : align;
+  const layout: LayoutId = sel ? currentLayout(sel) : "center";
   const index = sel ? all.findIndex((f) => f.pos === sel.pos) : -1;
-  const cm = ((pct / 100) * (RELAZIONE_EXPORT_WIDTH_PX / 96) * 2.54).toFixed(1);
-
-  // Con il testo a fianco una figura molto larga lascerebbe poco spazio alle parole
-  const applyLayout = (l: (typeof LAYOUTS)[number]) =>
-    set({ wrap: l.wrap, align: l.align, ...(l.wrap === "square" && pct > 60 ? { widthPct: 50 } : {}) });
+  const cm = figureCm(pct);
+  const applyLayout = (l: (typeof LAYOUTS)[number]) => applyFigureLayout(editor, sel!, l);
+  useScrollToSection(section, nonce);
 
   useEffect(() => {
     if (!placing) return;
@@ -436,7 +446,7 @@ export function FigurePanel({
             <img src={sel.node.attrs.src} alt="" className="max-h-28 w-full rounded border border-border bg-white object-contain" />
           </Section>
 
-          <Section title="Dimensione">
+          <Section title="Dimensione" id="fig-dimensione">
             <div className="flex items-center gap-2">
               <input type="range" min={10} max={100} step={5} value={pct} onChange={(e) => set({ widthPct: Number(e.target.value) })} className="flex-1" />
               <div className="flex items-center gap-1">
@@ -456,7 +466,7 @@ export function FigurePanel({
             <p className="text-xs text-muted-foreground">Circa {cm} cm di larghezza nel Word. Puoi anche trascinare l'angolo della figura.</p>
           </Section>
 
-          <Section title="Disposizione">
+          <Section title="Disposizione" id="fig-disposizione">
             <div className="grid grid-cols-5 gap-1">
               {LAYOUTS.map((l) => (
                 <button key={l.id} type="button" title={l.label} aria-label={l.label} onMouseDown={(e) => e.preventDefault()} onClick={() => applyLayout(l)}
@@ -472,7 +482,7 @@ export function FigurePanel({
             </p>
           </Section>
 
-          <Section title="Posizione nel documento">
+          <Section title="Posizione nel documento" id="fig-posizione">
             <Button type="button" size="sm" variant={placing ? "default" : "outline"} className="w-full h-8 gap-1.5 text-xs"
               onClick={placing ? onCancelMove : onMove}>
               {placing ? <><X size={13} /> Annulla spostamento</> : <><Crosshair size={13} /> Scegli dove metterla…</>}
@@ -488,7 +498,7 @@ export function FigurePanel({
             </p>
           </Section>
 
-          <Section title="Didascalia">
+          <Section title="Didascalia" id="fig-didascalia">
             <textarea
               value={sel.node.attrs.didascalia || ""}
               onChange={(e) => set({ didascalia: e.target.value })}
@@ -498,7 +508,7 @@ export function FigurePanel({
             />
           </Section>
 
-          <Section title="Immagine">
+          <Section title="Immagine" id="fig-immagine">
             <div className="grid grid-cols-2 gap-1.5">
               <input ref={replaceRef} type="file" accept="image/*" className="hidden"
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) onReplaceUpload(f); e.target.value = ""; }} />
@@ -521,7 +531,7 @@ export function FigurePanel({
         </div>
       )}
 
-      <Section title="Importa figure">
+      <Section title="Importa figure" id="fig-importa">
         <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" multiple className="hidden"
           onChange={(e) => { const fs = Array.from(e.target.files || []); if (fs.length) onUploadFiles(fs); e.target.value = ""; }} />
         <Button type="button" size="sm" className="w-full h-8 gap-1.5 text-xs" disabled={uploading} onClick={() => fileRef.current?.click()}>
@@ -563,5 +573,84 @@ export function FigurePanel({
         )}
       </Section>
     </div>
+  );
+}
+
+// ─── Scheda «Figura» della barra multifunzione ────────────────────────────────
+
+export function FigureRibbon({
+  editor, placing, onMove, onCancelMove, onReplaceProject, onReplaceUpload, onOpenPanel,
+}: {
+  editor: Editor;
+  placing: boolean;
+  onMove: () => void;
+  onCancelMove: () => void;
+  onReplaceProject: () => void;
+  onReplaceUpload: (file: File) => void;
+  onOpenPanel: (section?: string) => void;
+}) {
+  const replaceRef = useRef<HTMLInputElement>(null);
+  const sel = selectedFigure(editor);
+  if (!sel) return null;
+  const all = listFigures(editor);
+  const index = all.findIndex((f) => f.pos === sel.pos);
+  const pct = figureWidthPct(sel.node.attrs);
+  const layout = currentLayout(sel);
+  const set = (attrs: Record<string, unknown>) => editor.chain().focus().updateAttributes(sel.node.type.name, attrs).run();
+
+  return (
+    <>
+      <RibbonGroup label="Dimensione" onLauncher={() => onOpenPanel("fig-dimensione")} launcherTitle="Dimensione: cursore e misure">
+        <RibbonStack>
+          <RibbonRow>
+            <span className="text-xs">Larghezza</span>
+            <NumField value={pct} suffix="%" min={10} max={100} className="w-12" title="Larghezza in % del testo"
+              onCommit={(n) => { if (n) set({ widthPct: Math.round(n) }); }} />
+            <span className="text-[11px] text-muted-foreground">≈ {figureCm(pct)} cm</span>
+          </RibbonRow>
+          <RibbonRow>
+            {PRESETS.map((p) => (
+              <button key={p} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => set({ widthPct: p })}
+                className={`h-7 min-w-8 rounded border px-1 text-xs ${pct === p ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted"}`}>
+                {p}%
+              </button>
+            ))}
+          </RibbonRow>
+        </RibbonStack>
+      </RibbonGroup>
+
+      <RibbonGroup label="Disposizione" onLauncher={() => onOpenPanel("fig-disposizione")} launcherTitle="Disposizione rispetto al testo">
+        {LAYOUTS.map((l) => (
+          <button key={l.id} type="button" title={l.label} aria-label={l.label} onMouseDown={(e) => e.preventDefault()} onClick={() => applyFigureLayout(editor, sel, l)}
+            className={`flex items-center justify-center rounded border p-0.5 ${layout === l.id ? "border-primary bg-primary/10 text-primary" : "border-transparent text-muted-foreground hover:bg-muted"}`}>
+            <LayoutIcon id={l.id} />
+          </button>
+        ))}
+      </RibbonGroup>
+
+      <RibbonGroup label="Posizione" onLauncher={() => onOpenPanel("fig-posizione")} launcherTitle="Posizione nel documento">
+        <RibbonBig label={placing ? "Annulla" : "Sposta in…"} active={placing} icon={placing ? <X size={20} /> : <Crosshair size={20} />}
+          title={placing ? "Annulla lo spostamento" : "Mostra nel documento i punti «Metti qui» per scegliere dove spostarla"}
+          onClick={placing ? onCancelMove : onMove} />
+        <RibbonStack>
+          <RibbonRow><RibbonBtn title="Sposta la figura sopra il blocco precedente" label="Su" icon={<ArrowUp size={14} />} disabled={index < 0} onClick={() => moveBlock(editor, sel, -1)} /></RibbonRow>
+          <RibbonRow><RibbonBtn title="Sposta la figura sotto il blocco successivo" label="Giù" icon={<ArrowDown size={14} />} disabled={index < 0} onClick={() => moveBlock(editor, sel, 1)} /></RibbonRow>
+        </RibbonStack>
+      </RibbonGroup>
+
+      <RibbonGroup label="Didascalia" onLauncher={() => onOpenPanel("fig-didascalia")} launcherTitle="Testo della didascalia">
+        <RibbonBig label="Didascalia" icon={<Type size={20} />} title="Modifica la didascalia (anche direttamente sotto la figura)" onClick={() => onOpenPanel("fig-didascalia")} />
+      </RibbonGroup>
+
+      <RibbonGroup label="Immagine" onLauncher={() => onOpenPanel("fig-immagine")} launcherTitle="Sostituisci, duplica, elimina">
+        <input ref={replaceRef} type="file" accept="image/*" className="hidden"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) onReplaceUpload(f); e.target.value = ""; }} />
+        <RibbonBig label="Sostituisci" icon={<RefreshCw size={20} />} title="Sostituisci con un file del computer, mantenendo misure e didascalia" onClick={() => replaceRef.current?.click()} />
+        <RibbonBig label="Da progetto" icon={<Folder size={20} />} title="Sostituisci con un'immagine del progetto" onClick={onReplaceProject} />
+        <RibbonBig label="Duplica" icon={<Copy size={20} />} title="Inserisce una copia subito dopo"
+          onClick={() => editor.chain().focus().insertContentAt(sel.pos + sel.node.nodeSize, sel.node.toJSON()).run()} />
+        <RibbonBig label="Elimina" danger icon={<Trash2 size={20} />} title="Elimina la figura" onClick={() => editor.chain().focus().deleteSelection().run()} />
+      </RibbonGroup>
+    </>
   );
 }

@@ -264,6 +264,34 @@ function figure(node: PmNode, input: RelazioneExportInput, warnings: string[]): 
   return paragraphs;
 }
 
+// Rientri, spaziatura e flusso del paragrafo scelti nell'editor (cm e pt) in unità di Word (twip)
+function paragraphFormat(attrs: Record<string, any> | undefined, base: { before?: number; after: number }, quoteIndent = 0) {
+  const a = attrs || {};
+  const num = (v: unknown) => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
+  const cm = (v: number) => Math.round(v * TWIPS_PER_CM);
+  const left = num(a.indentLeft), right = num(a.indentRight), first = num(a.indentFirst);
+  const before = num(a.spaceBefore), after = num(a.spaceAfter), line = num(a.lineHeight);
+  const hasIndent = left != null || right != null || first != null || quoteIndent > 0;
+  return {
+    indent: hasIndent
+      ? {
+          left: quoteIndent + (left != null ? cm(left) : 0) || undefined,
+          right: right != null ? cm(right) : undefined,
+          ...(first != null ? (first >= 0 ? { firstLine: cm(first) } : { hanging: cm(-first) }) : {}),
+        }
+      : undefined,
+    spacing: {
+      ...(base.before != null ? { before: base.before } : {}),
+      after: base.after,
+      ...(before != null ? { before: Math.round(before * 20) } : {}),
+      ...(after != null ? { after: Math.round(after * 20) } : {}),
+      ...(line != null ? { line: Math.round(line * 240) } : {}),
+    },
+    pageBreakBefore: a.pageBreakBefore === true ? true : undefined,
+    keepNext: a.keepNext === true ? true : undefined,
+  };
+}
+
 function blocks(
   nodes: PmNode[],
   input: RelazioneExportInput,
@@ -275,12 +303,16 @@ function blocks(
     switch (node.type) {
       case "paragraph": {
         const children = textRuns(node);
+        // in un elenco il rientro lo gestisce la numerazione
+        const fmt = paragraphFormat(ctx.list ? undefined : node.attrs, { after: 120 }, ctx.quote ? 567 : 0);
         out.push(
           new Paragraph({
             children,
             alignment: ALIGN[node.attrs?.textAlign],
-            indent: ctx.quote ? { left: 567 } : undefined,
-            spacing: { after: 120 },
+            indent: fmt.indent,
+            spacing: fmt.spacing,
+            pageBreakBefore: fmt.pageBreakBefore,
+            keepNext: fmt.keepNext,
             ...(ctx.list
               ? ctx.list.ordered
                 ? { numbering: { reference: ORDERED_REF, level: Math.min(ctx.list.level, 3) } }
@@ -292,13 +324,16 @@ function blocks(
       }
       case "heading": {
         const level = Math.min(Math.max(Number(node.attrs?.level) || 1, 1), 4);
+        const fmt = paragraphFormat(node.attrs, { before: 240, after: 120 });
         out.push(
           new Paragraph({
             heading: HEADINGS[level - 1],
             alignment: ALIGN[node.attrs?.textAlign],
             children: textRuns(node),
-            spacing: { before: 240, after: 120 },
-            keepNext: true,
+            indent: fmt.indent,
+            spacing: fmt.spacing,
+            pageBreakBefore: fmt.pageBreakBefore,
+            keepNext: node.attrs?.keepNext !== false,
           }),
         );
         break;

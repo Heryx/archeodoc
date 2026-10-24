@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Extension, findParentNode, type Editor } from "@tiptap/react";
 import { Table, TableCell, TableHeader, TableRow, TableView } from "@tiptap/extension-table";
 import { CellSelection, TableMap, selectedRect } from "@tiptap/pm/tables";
@@ -6,8 +6,8 @@ import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { Node as PmNode } from "@tiptap/pm/model";
 import {
-  AlignCenter, AlignJustify, AlignLeft, AlignRight, ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, ArrowUpToLine,
-  Columns3, Merge, Plus, Rows3, Split, Table as TableIcon, Trash2,
+  AlignCenter, AlignJustify, AlignLeft, AlignRight, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd, AlignVerticalJustifyStart,
+  ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, ArrowUpToLine, Columns3, Merge, Plus, Rows3, Settings2, Split, Table as TableIcon, Trash2,
 } from "lucide-react";
 import { RELAZIONE_TEXT_WIDTH_PX } from "@shared/relazione_layout";
 import {
@@ -16,6 +16,11 @@ import {
   type BorderPreset, type CellBorders, type GridCell, type Pen, type PenStyle, type Side,
 } from "@shared/relazione_table";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  NumField, PanelSection as Section, PanelTool as Tool, RibbonBig, RibbonBtn, RibbonGroup, RibbonRow, RibbonStack,
+  useScrollToSection,
+} from "@/components/relazioni/Ribbon";
 
 // ─── Estensioni: celle, righe e tabella ───────────────────────────────────────
 
@@ -463,69 +468,6 @@ function setTablePreset(editor: Editor, preset: BorderPreset) {
 const SWATCHES = ["#fff3bf", "#d3f9d8", "#d0ebff", "#ffe3e3", "#e9ecef", "#ced4da"];
 const WIDTH_PRESETS = [50, 75, 100];
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-1.5 pt-3 border-t border-border first:border-0 first:pt-0">
-      <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{title}</div>
-      {children}
-    </div>
-  );
-}
-
-function Tool({ label, icon, onClick, active, disabled, danger }: {
-  label: string; icon: React.ReactNode; onClick: () => void; active?: boolean; disabled?: boolean; danger?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={onClick}
-      className={`flex items-center gap-1.5 rounded border px-2 py-1.5 text-left text-xs disabled:opacity-40 ${
-        active ? "border-primary bg-primary/10 text-primary" : danger ? "border-border text-destructive hover:bg-destructive/10" : "border-border hover:bg-muted"
-      }`}
-    >
-      {icon}
-      <span className="leading-tight">{label}</span>
-    </button>
-  );
-}
-
-// Campo numerico che si conferma con Invio o uscendo dal campo; vuoto = nessun valore
-function NumField({ value, onCommit, suffix, min = 0, max, placeholder, className = "w-16", title }: {
-  value: number | null; onCommit: (n: number | null) => void; suffix?: string; min?: number; max?: number;
-  placeholder?: string; className?: string; title?: string;
-}) {
-  const show = (v: number | null) => (v == null ? "" : String(v).replace(".", ","));
-  const [text, setText] = useState(show(value));
-  const focused = useRef(false);
-  useEffect(() => { if (!focused.current) setText(show(value)); }, [value]);
-  const commit = () => {
-    const raw = text.trim().replace(",", ".");
-    if (raw === "") return onCommit(null);
-    let n = Number(raw);
-    if (!Number.isFinite(n)) return setText(show(value));
-    n = Math.max(min, max != null ? Math.min(max, n) : n);
-    onCommit(Math.round(n * 100) / 100);
-  };
-  return (
-    <span className="inline-flex items-center gap-1">
-      <input
-        type="text"
-        inputMode="decimal"
-        value={text}
-        title={title}
-        placeholder={placeholder}
-        onChange={(e) => setText(e.target.value)}
-        onFocus={(e) => { focused.current = true; e.currentTarget.select(); }}
-        onBlur={() => { focused.current = false; commit(); }}
-        onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") { setText(show(value)); e.currentTarget.blur(); } }}
-        className={`h-7 rounded border border-input bg-background px-1.5 text-xs tabular-nums ${className}`}
-      />
-      {suffix && <span className="text-xs text-muted-foreground">{suffix}</span>}
-    </span>
-  );
-}
 
 // Schema 18×18: le linee sempre presenti in grigio, quelle attive in evidenza
 type Seg = "t" | "b" | "l" | "r" | "h" | "v" | "x";
@@ -576,7 +518,8 @@ function PenControls({ pen, onChange }: { pen: Pen; onChange: (p: Pen) => void }
   );
 }
 
-export function TablePanel({ editor }: { editor: Editor }) {
+export function TablePanel({ editor, section, nonce = 0 }: { editor: Editor; section?: string; nonce?: number }) {
+  useScrollToSection(section, nonce);
   const table = currentTable(editor);
   const all = listTables(editor);
   const [rows, setRows] = useState(3);
@@ -636,7 +579,7 @@ export function TablePanel({ editor }: { editor: Editor }) {
             </div>
           </Section>
 
-          <Section title="Celle">
+          <Section title="Celle" id="tbl-celle">
             <div className="grid grid-cols-2 gap-1.5">
               <Tool label="Unisci celle" icon={<Merge size={14} />} disabled={!editor.can().mergeCells()} onClick={() => chain().mergeCells().run()} />
               <Tool label="Dividi cella" icon={<Split size={14} />} disabled={!editor.can().splitCell()} onClick={() => chain().splitCell().run()} />
@@ -671,7 +614,7 @@ export function TablePanel({ editor }: { editor: Editor }) {
             </div>
           </Section>
 
-          <Section title="Larghezza delle colonne">
+          <Section title="Larghezza delle colonne" id="tbl-larghezza">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span className="text-xs">Tabella</span>
               <NumField value={round1(totalCm)} suffix="cm" min={2} max={RELAZIONE_TEXT_WIDTH_CM}
@@ -710,7 +653,7 @@ export function TablePanel({ editor }: { editor: Editor }) {
             <p className="text-xs text-muted-foreground">Puoi anche trascinare il bordo di una colonna nella tabella.</p>
           </Section>
 
-          <Section title="Altezza e margini">
+          <Section title="Altezza e margini" id="tbl-altezza">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
               <span className="text-xs">{selRows.length > 1 ? `Righe ${selRows[0] + 1}–${selRows[selRows.length - 1] + 1}` : `Riga ${(selRows[0] ?? 0) + 1}`}</span>
               <NumField value={rowHeight} suffix="cm" min={0.3} max={25} placeholder="auto" title="Altezza minima della riga; vuoto = secondo il contenuto"
@@ -735,7 +678,7 @@ export function TablePanel({ editor }: { editor: Editor }) {
             <p className="text-xs text-muted-foreground">L'allineamento si vede solo se la tabella è più stretta del foglio.</p>
           </Section>
 
-          <Section title="Bordi della tabella">
+          <Section title="Bordi della tabella" id="tbl-bordi">
             <div className="grid grid-cols-4 gap-1">
               {BORDER_PRESETS.map((p) => (
                 <button key={p} type="button" title={PRESET_LABELS[p]} aria-label={PRESET_LABELS[p]} onMouseDown={(e) => e.preventDefault()} onClick={() => setTablePreset(editor, p)}
@@ -748,7 +691,7 @@ export function TablePanel({ editor }: { editor: Editor }) {
             <PenControls pen={look.pen} onChange={(p) => setTableAttrs(editor, { lineStyle: p.s, lineWidth: p.w, lineColor: p.c })} />
           </Section>
 
-          <Section title="Bordi delle celle selezionate">
+          <Section title="Bordi delle celle selezionate" id="tbl-bordi-celle">
             <PenControls pen={cellPen} onChange={(p) => setCellPen(normalizePen(p))} />
             <div className="grid grid-cols-4 gap-1">
               {CELL_OPS.map((o) => (
@@ -772,7 +715,7 @@ export function TablePanel({ editor }: { editor: Editor }) {
       )}
 
       {!table && (
-        <Section title="Nuova tabella">
+        <Section title="Nuova tabella" id="tbl-nuova">
           <div className="grid grid-cols-2 gap-2">
             <label className="text-xs">
               Righe
@@ -822,5 +765,162 @@ export function TablePanel({ editor }: { editor: Editor }) {
         )}
       </Section>
     </div>
+  );
+}
+
+// ─── Scheda «Tabella» della barra multifunzione ───────────────────────────────
+
+function RibbonPop({ trigger, children, width = "w-64" }: { trigger: React.ReactNode; children: React.ReactNode; width?: string }) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+      <PopoverContent align="start" className={`${width} space-y-2 p-2`} onOpenAutoFocus={(e) => e.preventDefault()}>{children}</PopoverContent>
+    </Popover>
+  );
+}
+
+export function TableRibbon({ editor, onOpenPanel }: { editor: Editor; onOpenPanel: (section?: string) => void }) {
+  const [cellPen, setCellPen] = useState<Pen>(DEFAULT_PEN);
+  const table = currentTable(editor);
+  if (!table) return null;
+  const chain = () => editor.chain().focus();
+  const map = TableMap.get(table.node);
+  const look = tableLook(table.node.attrs);
+  const sel = selection(editor);
+  const totalCm = pxToCm(columnWidths(table).reduce((a, b) => a + b, 0));
+  const selRows = sel ? Array.from({ length: sel.bottom - sel.top }, (_, i) => sel.top + i) : [];
+  const rowHeight = selRows.length ? (table.node.child(selRows[0]).attrs.height as number | null) ?? null : null;
+  const align = (table.node.attrs.align as string) || "left";
+  const cellBg = (editor.getAttributes("tableCell").background || editor.getAttributes("tableHeader").background || "") as string;
+  const valign = (editor.getAttributes("tableCell").valign || editor.getAttributes("tableHeader").valign || "") as string;
+  const setCell = (name: string, value: string | null) => chain().setCellAttribute(name, value).run();
+  const widthPct = tableWidthPct(table);
+
+  return (
+    <>
+      <RibbonGroup label="Righe">
+        <RibbonStack>
+          <RibbonRow>
+            <RibbonBtn title="Inserisci una riga sopra" label="Sopra" icon={<ArrowUpToLine size={14} />} onClick={() => { chain().addRowBefore().run(); ensureWidths(editor); }} />
+            <RibbonBtn title="Inserisci una riga sotto" label="Sotto" icon={<ArrowDownToLine size={14} />} onClick={() => { chain().addRowAfter().run(); ensureWidths(editor); }} />
+          </RibbonRow>
+          <RibbonRow>
+            <RibbonBtn title="Elimina la riga" label="Elimina" danger icon={<Rows3 size={14} />} disabled={map.height <= 1} onClick={() => chain().deleteRow().run()} />
+            <RibbonBtn title="Trasforma la riga in intestazione (o viceversa)" label="Intestaz." icon={<Rows3 size={14} />} onClick={() => chain().toggleHeaderRow().run()} />
+          </RibbonRow>
+        </RibbonStack>
+      </RibbonGroup>
+
+      <RibbonGroup label="Colonne">
+        <RibbonStack>
+          <RibbonRow>
+            <RibbonBtn title="Inserisci una colonna a sinistra" label="Sinistra" icon={<ArrowLeftToLine size={14} />} onClick={() => { chain().addColumnBefore().run(); ensureWidths(editor); }} />
+            <RibbonBtn title="Inserisci una colonna a destra" label="Destra" icon={<ArrowRightToLine size={14} />} onClick={() => { chain().addColumnAfter().run(); ensureWidths(editor); }} />
+          </RibbonRow>
+          <RibbonRow>
+            <RibbonBtn title="Elimina la colonna" label="Elimina" danger icon={<Columns3 size={14} />} disabled={map.width <= 1} onClick={() => chain().deleteColumn().run()} />
+            <RibbonBtn title="Trasforma la colonna in intestazione (o viceversa)" label="Intestaz." icon={<Columns3 size={14} />} onClick={() => chain().toggleHeaderColumn().run()} />
+          </RibbonRow>
+        </RibbonStack>
+      </RibbonGroup>
+
+      <RibbonGroup label="Celle" onLauncher={() => onOpenPanel("tbl-celle")} launcherTitle="Impostazioni delle celle">
+        <RibbonBig label="Unisci" icon={<Merge size={20} />} title="Unisci le celle selezionate (trascina il mouse su più celle)"
+          disabled={!editor.can().mergeCells()} onClick={() => chain().mergeCells().run()} />
+        <RibbonBig label="Dividi" icon={<Split size={20} />} title="Dividi la cella unita" disabled={!editor.can().splitCell()} onClick={() => chain().splitCell().run()} />
+        <RibbonStack>
+          <RibbonRow>
+            {([["left", <AlignLeft size={14} />], ["center", <AlignCenter size={14} />], ["right", <AlignRight size={14} />], ["justify", <AlignJustify size={14} />]] as const).map(([v, icon]) => (
+              <RibbonBtn key={v} title={`Testo ${v}`} icon={icon} active={editor.isActive({ textAlign: v })} onClick={() => chain().setTextAlign(v).run()} />
+            ))}
+          </RibbonRow>
+          <RibbonRow>
+            {([["", "In alto", <AlignVerticalJustifyStart size={14} />], ["middle", "Al centro", <AlignVerticalJustifyCenter size={14} />], ["bottom", "In basso", <AlignVerticalJustifyEnd size={14} />]] as const).map(([v, label, icon]) => (
+              <RibbonBtn key={v || "top"} title={`Allineamento verticale: ${label}`} icon={icon} active={valign === v} onClick={() => setCell("valign", v || null)} />
+            ))}
+          </RibbonRow>
+        </RibbonStack>
+      </RibbonGroup>
+
+      <RibbonGroup label="Dimensioni" onLauncher={() => onOpenPanel("tbl-larghezza")} launcherTitle="Larghezza di ogni colonna, altezza righe e spazi">
+        <RibbonStack>
+          <RibbonRow>
+            <span className="w-14 text-xs">Larghezza</span>
+            <NumField value={round1(totalCm)} suffix="cm" min={2} max={RELAZIONE_TEXT_WIDTH_CM} className="w-14"
+              title={`Larghezza totale (foglio: ${RELAZIONE_TEXT_WIDTH_CM} cm)`} onCommit={(n) => { if (n) setTableWidthPx(editor, cmToPx(n)); }} />
+            {[50, 100].map((p) => (
+              <button key={p} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => setTableWidthPx(editor, (RELAZIONE_TEXT_WIDTH_PX * p) / 100)}
+                className={`h-7 rounded border px-1.5 text-xs ${widthPct === p ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted"}`}>{p}%</button>
+            ))}
+          </RibbonRow>
+          <RibbonRow>
+            <span className="w-14 text-xs">{selRows.length > 1 ? "Altezze" : "Altezza"}</span>
+            <NumField value={rowHeight} suffix="cm" min={0.3} max={25} placeholder="auto" className="w-14" title="Altezza minima delle righe selezionate"
+              onCommit={(n) => setRowHeights(editor, selRows, n)} />
+            <RibbonBtn title="Colonne alla stessa larghezza" icon={<Columns3 size={14} />} onClick={() => equalColumns(editor)} />
+            <RibbonBtn title="Righe alla stessa altezza" icon={<Rows3 size={14} />} onClick={() => equalRows(editor)} />
+          </RibbonRow>
+        </RibbonStack>
+      </RibbonGroup>
+
+      <RibbonGroup label="Bordi" onLauncher={() => onOpenPanel("tbl-bordi")} launcherTitle="Bordi della tabella e delle celle">
+        <RibbonPop width="w-60" trigger={<RibbonBig label="Tabella" title="Disposizione dei bordi di tutta la tabella" icon={<LineIcon on={PRESET_SEGS[look.preset]} />} />}>
+          <div className="grid grid-cols-4 gap-1">
+            {BORDER_PRESETS.map((p) => (
+              <button key={p} type="button" title={PRESET_LABELS[p]} aria-label={PRESET_LABELS[p]} onClick={() => setTablePreset(editor, p)}
+                className={`flex items-center justify-center rounded border p-1.5 ${look.preset === p ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted"}`}>
+                <LineIcon on={PRESET_SEGS[p]} />
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">{PRESET_LABELS[look.preset]}. Azzera i bordi impostati sulle singole celle.</p>
+          <PenControls pen={look.pen} onChange={(p) => setTableAttrs(editor, { lineStyle: p.s, lineWidth: p.w, lineColor: p.c })} />
+        </RibbonPop>
+        <RibbonPop width="w-60" trigger={<RibbonBig label="Celle" title="Bordi delle celle selezionate" icon={<TableIcon size={20} />} />}>
+          <PenControls pen={cellPen} onChange={(p) => setCellPen(normalizePen(p))} />
+          <div className="grid grid-cols-4 gap-1">
+            {CELL_OPS.map((o) => (
+              <button key={o.op} type="button" title={o.label} aria-label={o.label} onClick={() => applyCellBorders(editor, o.op, cellPen)}
+                className="flex items-center justify-center rounded border border-border p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground">
+                <LineIcon on={o.segs} />
+              </button>
+            ))}
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            <Tool label="Togli i bordi" icon={<LineIcon on={[]} />} onClick={() => applyCellBorders(editor, "none", "none")} />
+            <Tool label="Come la tabella" icon={<TableIcon size={14} />} onClick={() => applyCellBorders(editor, "all", null)} />
+          </div>
+          <p className="text-xs text-muted-foreground">Seleziona le celle trascinando, poi scegli i lati.</p>
+        </RibbonPop>
+      </RibbonGroup>
+
+      <RibbonGroup label="Sfondo">
+        <div className="grid grid-cols-4 gap-1">
+          {SWATCHES.map((c) => (
+            <button key={c} type="button" title={c} onMouseDown={(e) => e.preventDefault()} onClick={() => setCell("background", c)}
+              className={`h-5 w-5 rounded border ${cellBg === c ? "ring-2 ring-primary" : "border-border"}`} style={{ background: c }} />
+          ))}
+          <label className="relative h-5 w-5 cursor-pointer rounded border border-border text-center text-[10px] leading-5" title="Altro colore">
+            +
+            <input type="color" className="absolute inset-0 opacity-0 cursor-pointer" value={cellBg || "#ffffff"} onChange={(e) => setCell("background", e.target.value)} />
+          </label>
+          <button type="button" title="Nessuno sfondo" onMouseDown={(e) => e.preventDefault()} onClick={() => setCell("background", null)}
+            className="h-5 w-5 rounded border border-border text-[10px] leading-5 text-muted-foreground hover:bg-muted">∅</button>
+        </div>
+      </RibbonGroup>
+
+      <RibbonGroup label="Tabella" onLauncher={() => onOpenPanel()} launcherTitle="Tutte le impostazioni della tabella">
+        <RibbonBig label="Proprietà" title="Apre il pannello laterale con tutte le impostazioni della tabella" icon={<Settings2 size={20} />} onClick={() => onOpenPanel()} />
+        <RibbonBig label="Elimina" danger title="Elimina l'intera tabella" icon={<Trash2 size={20} />} onClick={() => chain().deleteTable().run()} />
+        <RibbonStack>
+          <RibbonRow>
+            {([["left", "A sinistra", <AlignLeft size={14} />], ["center", "Al centro", <AlignCenter size={14} />], ["right", "A destra", <AlignRight size={14} />]] as const).map(([v, label, icon]) => (
+              <RibbonBtn key={v} title={`Tabella sul foglio: ${label.toLowerCase()}`} icon={icon} active={align === v}
+                onClick={() => setTableAttrs(editor, { align: v === "left" ? null : v })} />
+            ))}
+          </RibbonRow>
+        </RibbonStack>
+      </RibbonGroup>
+    </>
   );
 }

@@ -13,18 +13,18 @@ import Subscript from "@tiptap/extension-subscript";
 import Superscript from "@tiptap/extension-superscript";
 import { TableKit } from "@tiptap/extension-table";
 import {
-  FigurePanel, FigurePlacement, ProjectImage, SnapshotFigure, figureNodeFor, isFigureName, isImageFile, moveFigureTo, selectedFigure,
-  startPlacing, stopPlacing, uploadProjectImage,
+  FigurePanel, FigurePlacement, FigureRibbon, ProjectImage, SnapshotFigure, figureNodeFor, moveFigureTo, selectedFigure,
+  startPlacing, stopPlacing, uploadProjectImage, isImageFile,
 } from "@/components/relazioni/FigureTools";
 import {
-  RTable, RTableCell, RTableHeader, RTableRow, TableBorderStyles, TablePanel, applyTableStylesToHtml, currentTable,
+  RTable, RTableCell, RTableHeader, RTableRow, TableBorderStyles, TablePanel, TableRibbon, applyTableStylesToHtml, currentTable,
 } from "@/components/relazioni/TableTools";
+import { ParagraphFormat, ParagraphPanel } from "@/components/relazioni/ParagraphTools";
+import { RibbonBody, RibbonTabs, type RibbonTabDef } from "@/components/relazioni/Ribbon";
+import { DocumentRibbon, HomeRibbon, InsertRibbon, type SideTab } from "@/components/relazioni/DocumentRibbon";
+import { UsPreviewPanel, type UsItem } from "@/components/relazioni/UsPreviewPanel";
 import {
-  Bold, Italic, Underline as UnderlineIcon, Heading1, Heading2, Heading3, List, ListOrdered,
-  Quote, Minus, Undo2, Redo2, ImagePlus, FileText, Printer, Loader2, Download, Trash2, Check, Link2, Sparkles, BookOpen,
-  Strikethrough, AlignLeft, AlignCenter, AlignRight, AlignJustify, Subscript as SubIcon, Superscript as SuperIcon,
-  Highlighter, Table as TableIcon, RemoveFormatting, Link as LinkIcon, IndentIncrease, IndentDecrease, PanelRightClose, PanelRightOpen, LayoutTemplate,
-  ArrowLeft, PanelLeftClose, PanelLeftOpen, ListTree, Image as ImageIcon, Upload,
+  Loader2, Check, Link2, BookOpen, PanelRightClose, ArrowLeft, PanelLeftClose, PanelLeftOpen, ListTree, X,
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
@@ -129,11 +129,10 @@ const UsLink = Mark.create({
     return [{ tag: "span[data-us-id]" }];
   },
   renderHTML({ mark }) {
-    return ["span", { "data-us-id": mark.attrs.usId, class: "us-link", title: "Ctrl+clic per aprire la scheda US" }, 0];
+    return ["span", { "data-us-id": mark.attrs.usId, class: "us-link", title: "Clic per l'anteprima della scheda US" }, 0];
   },
 });
 
-type UsItem = { id: number; codiceUS: string; tipo: string | null; definizione: string | null };
 type Suggest = { from: number; to: number; query: string; x: number; y: number };
 
 // Elenca gli ID delle US richiamate nel documento
@@ -159,152 +158,6 @@ function buildInitialContent(titolo: string, linked: LinkedSnapshot[]) {
     });
   }
   return { type: "doc", content };
-}
-
-// ─── Toolbar ──────────────────────────────────────────────────────────────────
-
-function ToolButton({ active, disabled, onClick, title, children }: {
-  active?: boolean; disabled?: boolean; onClick: () => void; title: string; children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      disabled={disabled}
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={onClick}
-      className={`h-8 w-8 inline-flex items-center justify-center rounded text-sm disabled:opacity-40 ${
-        active ? "bg-primary/15 text-primary" : "hover:bg-muted"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
-const FONTS = ["Times New Roman", "Arial", "Calibri", "Georgia", "Verdana", "Courier New"];
-const SIZES = ["8pt", "9pt", "10pt", "11pt", "12pt", "14pt", "16pt", "18pt", "20pt", "24pt", "28pt", "36pt"];
-const smallSelect = "h-8 rounded border border-input bg-background px-1.5 text-xs";
-
-function ColorTool({ title, icon, value, onPick, onClear }: {
-  title: string; icon: React.ReactNode; value: string; onPick: (c: string) => void; onClear: () => void;
-}) {
-  return (
-    <span className="relative inline-flex">
-      <label title={title} className="h-8 w-8 inline-flex flex-col items-center justify-center rounded hover:bg-muted cursor-pointer">
-        {icon}
-        <span className="block h-[3px] w-4 rounded -mt-0.5" style={{ background: value || "transparent", border: value ? "none" : "1px solid hsl(var(--border))" }} />
-        <input type="color" className="absolute inset-0 opacity-0 cursor-pointer" value={value || "#000000"}
-          onChange={(e) => onPick(e.target.value)} />
-      </label>
-      <button type="button" title={`${title}: rimuovi`} onMouseDown={(e) => e.preventDefault()} onClick={onClear}
-        className="text-[10px] leading-none text-muted-foreground hover:text-foreground self-start -ml-1 mt-0.5">×</button>
-    </span>
-  );
-}
-
-function Toolbar({ editor, onInsertFigure, onInsertImage, onOpenTables, onGenerate, onFillAll, filling }: {
-  editor: Editor; onInsertFigure: () => void; onInsertImage: () => void; onOpenTables: () => void; onGenerate: () => void; onFillAll: () => void; filling: boolean;
-}) {
-  const chain = () => editor.chain().focus();
-  const sep = <span className="w-px h-5 bg-border mx-1" />;
-  const attrs = editor.getAttributes("textStyle");
-  const blockValue = editor.isActive("heading", { level: 1 }) ? "1" : editor.isActive("heading", { level: 2 }) ? "2"
-    : editor.isActive("heading", { level: 3 }) ? "3" : editor.isActive("heading", { level: 4 }) ? "4" : "0";
-  const inTable = editor.isActive("table");
-  const inList = editor.isActive("bulletList") || editor.isActive("orderedList");
-
-  const setLink = () => {
-    const prev = editor.getAttributes("link").href || "https://";
-    const url = window.prompt("Indirizzo del collegamento (vuoto per rimuoverlo)", prev);
-    if (url === null) return;
-    if (url.trim() === "" || url.trim() === "https://") chain().extendMarkRange("link").unsetLink().run();
-    else chain().extendMarkRange("link").setLink({ href: url.trim() }).run();
-  };
-
-  return (
-    <div className="shrink-0 border-b border-border bg-muted/30 px-2 py-1 space-y-0.5">
-      <div className="flex flex-wrap items-center gap-1">
-        <ToolButton title="Annulla" onClick={() => chain().undo().run()} disabled={!editor.can().undo()}><Undo2 size={15} /></ToolButton>
-        <ToolButton title="Ripeti" onClick={() => chain().redo().run()} disabled={!editor.can().redo()}><Redo2 size={15} /></ToolButton>
-        {sep}
-        <select title="Stile del paragrafo" className={`${smallSelect} w-28`} value={blockValue}
-          onChange={(e) => {
-            const v = Number(e.target.value);
-            if (v === 0) chain().setParagraph().run();
-            else chain().setHeading({ level: v as 1 | 2 | 3 | 4 }).run();
-          }}>
-          <option value="0">Paragrafo</option>
-          <option value="1">Titolo 1</option>
-          <option value="2">Titolo 2</option>
-          <option value="3">Titolo 3</option>
-          <option value="4">Titolo 4</option>
-        </select>
-        <select title="Carattere" className={`${smallSelect} w-36`} value={attrs.fontFamily || ""}
-          onChange={(e) => (e.target.value ? chain().setFontFamily(e.target.value).run() : chain().unsetFontFamily().run())}>
-          <option value="">Carattere predefinito</option>
-          {FONTS.map((f) => <option key={f} value={f} style={{ fontFamily: f }}>{f}</option>)}
-        </select>
-        <select title="Dimensione" className={`${smallSelect} w-20`} value={attrs.fontSize || ""}
-          onChange={(e) => (e.target.value ? chain().setFontSize(e.target.value).run() : chain().unsetFontSize().run())}>
-          <option value="">Dim.</option>
-          {SIZES.map((z) => <option key={z} value={z}>{z.replace("pt", "")}</option>)}
-        </select>
-        {sep}
-        <ToolButton title="Grassetto (Ctrl+B)" active={editor.isActive("bold")} onClick={() => chain().toggleBold().run()}><Bold size={15} /></ToolButton>
-        <ToolButton title="Corsivo (Ctrl+I)" active={editor.isActive("italic")} onClick={() => chain().toggleItalic().run()}><Italic size={15} /></ToolButton>
-        <ToolButton title="Sottolineato (Ctrl+U)" active={editor.isActive("underline")} onClick={() => chain().toggleUnderline().run()}><UnderlineIcon size={15} /></ToolButton>
-        <ToolButton title="Barrato" active={editor.isActive("strike")} onClick={() => chain().toggleStrike().run()}><Strikethrough size={15} /></ToolButton>
-        <ToolButton title="Pedice" active={editor.isActive("subscript")} onClick={() => chain().toggleSubscript().run()}><SubIcon size={15} /></ToolButton>
-        <ToolButton title="Apice" active={editor.isActive("superscript")} onClick={() => chain().toggleSuperscript().run()}><SuperIcon size={15} /></ToolButton>
-        <ColorTool title="Colore del testo" icon={<span className="text-sm font-bold leading-none">A</span>}
-          value={attrs.color || ""} onPick={(c) => chain().setColor(c).run()} onClear={() => chain().unsetColor().run()} />
-        <ColorTool title="Evidenziatore" icon={<Highlighter size={14} />}
-          value={editor.getAttributes("highlight").color || ""}
-          onPick={(c) => chain().setHighlight({ color: c }).run()} onClear={() => chain().unsetHighlight().run()} />
-        <ToolButton title="Cancella formattazione" onClick={() => chain().unsetAllMarks().clearNodes().run()}><RemoveFormatting size={15} /></ToolButton>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-1">
-        <ToolButton title="Allinea a sinistra" active={editor.isActive({ textAlign: "left" })} onClick={() => chain().setTextAlign("left").run()}><AlignLeft size={15} /></ToolButton>
-        <ToolButton title="Centra" active={editor.isActive({ textAlign: "center" })} onClick={() => chain().setTextAlign("center").run()}><AlignCenter size={15} /></ToolButton>
-        <ToolButton title="Allinea a destra" active={editor.isActive({ textAlign: "right" })} onClick={() => chain().setTextAlign("right").run()}><AlignRight size={15} /></ToolButton>
-        <ToolButton title="Giustifica" active={editor.isActive({ textAlign: "justify" })} onClick={() => chain().setTextAlign("justify").run()}><AlignJustify size={15} /></ToolButton>
-        {sep}
-        <ToolButton title="Elenco puntato" active={editor.isActive("bulletList")} onClick={() => chain().toggleBulletList().run()}><List size={15} /></ToolButton>
-        <ToolButton title="Elenco numerato" active={editor.isActive("orderedList")} onClick={() => chain().toggleOrderedList().run()}><ListOrdered size={15} /></ToolButton>
-        <ToolButton title="Riduci rientro" disabled={!inList} onClick={() => chain().liftListItem("listItem").run()}><IndentDecrease size={15} /></ToolButton>
-        <ToolButton title="Aumenta rientro" disabled={!inList} onClick={() => chain().sinkListItem("listItem").run()}><IndentIncrease size={15} /></ToolButton>
-        <ToolButton title="Citazione" active={editor.isActive("blockquote")} onClick={() => chain().toggleBlockquote().run()}><Quote size={15} /></ToolButton>
-        <ToolButton title="Linea divisoria" onClick={() => chain().setHorizontalRule().run()}><Minus size={15} /></ToolButton>
-        {sep}
-        <ToolButton title="Collegamento web" active={editor.isActive("link")} onClick={setLink}><LinkIcon size={15} /></ToolButton>
-        <Button type="button" size="sm" variant={inTable ? "default" : "outline"} className="h-8 gap-1.5 text-xs" onClick={onOpenTables}
-          title="Apre gli strumenti Tabelle: inserisci, righe, colonne, celle, larghezza, colori">
-          <TableIcon size={14} /> Tabelle
-        </Button>
-        {sep}
-        <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={onInsertFigure}>
-          <ImagePlus size={14} /> Figura WebMap
-        </Button>
-        <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={onInsertImage}
-          title="Importa un'immagine esterna o scegline una dalle Immagini progetto; apre gli strumenti Figure">
-          <ImageIcon size={14} /> Immagine
-        </Button>
-        <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={onGenerate}>
-          <Sparkles size={14} /> Da giornale
-        </Button>
-        <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 text-xs"
-          onClick={() => chain().insertContent({ type: "aiBlock", attrs: { prompt: "" }, content: [{ type: "paragraph" }] }).run()}>
-          <Sparkles size={14} className="text-violet-600" /> Blocco IA
-        </Button>
-        <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={onFillAll} disabled={filling}
-          title="Compila tutti i blocchi IA del documento, uno dopo l'altro">
-          {filling ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} Compila tutti
-        </Button>
-      </div>
-    </div>
-  );
 }
 
 // ─── Generazione del testo dal giornale di scavo ──────────────────────────────
@@ -537,7 +390,10 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
   const [genOpen, setGenOpen] = useState(false);
   const [imgOpen, setImgOpen] = useState(false);
   const [pickMode, setPickMode] = useState<"insert" | "replace">("insert");
-  const [sideTab, setSideTab] = useState<"doc" | "figure" | "table">("doc");
+  // Barra multifunzione in alto; pannello laterale solo su richiesta (icona di un gruppo, anteprima US)
+  const [ribbonTab, setRibbonTab] = useState<string>("home");
+  const [side, setSide] = useState<{ tab: SideTab; section?: string; nonce: number } | null>(null);
+  const [previewUsId, setPreviewUsId] = useState<number | null>(null);
   const [, setTick] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [placing, setPlacing] = useState(false);
@@ -565,8 +421,8 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [suggest, usList]);
   // Ref per i gestori dell'editor, creati una sola volta
-  const live = useRef({ suggest, suggestions, sugIndex, navigate, cantiereId });
-  live.current = { suggest, suggestions, sugIndex, navigate, cantiereId };
+  const live = useRef({ suggest, suggestions, sugIndex, openUs: (_id: number) => {} });
+  live.current = { suggest, suggestions, sugIndex, openUs: (id: number) => openUs(id) };
   const timer = useRef<ReturnType<typeof setTimeout>>();
   const latest = useRef<{ contenuto?: unknown; intestazione?: Intestazione; titolo?: string }>({});
 
@@ -608,6 +464,7 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
       TextAlign.configure({ types: ["heading", "paragraph"] }),
       Subscript,
       Superscript,
+      ParagraphFormat,
       TableKit.configure({ table: false, tableCell: false, tableHeader: false, tableRow: false }),
       RTable,
       RTableRow,
@@ -634,11 +491,10 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
         return false;
       },
       handleClick: (_view, _pos, event) => {
+        // Un clic su una US citata ne apre l'anteprima nel pannello laterale; il cursore si posiziona comunque
         const el = (event.target as HTMLElement).closest?.("[data-us-id]");
-        if (el && (event.ctrlKey || event.metaKey)) {
-          live.current.navigate(`/cantiere/${live.current.cantiereId}/us?openUsId=${el.getAttribute("data-us-id")}`);
-          return true;
-        }
+        const id = Number(el?.getAttribute("data-us-id"));
+        if (el && Number.isFinite(id)) live.current.openUs(id);
         return false;
       },
       // Immagini incollate (es. screenshot) o trascinate nel foglio diventano figure
@@ -670,15 +526,26 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
     onSelectionUpdate: ({ editor }) => { refreshOutline(editor, false); detectSuggest(editor); trackSelection(editor); },
   });
 
-  // I pannelli Figure e Tabelle si accendono quando si seleziona una figura o si entra in una tabella
+  // Come in Office, la scheda Figura o Tabella compare in alto quando si seleziona una figura o si entra in una tabella
   function trackSelection(ed: Editor) {
     setTick((t) => t + 1);
     const fig = !!selectedFigure(ed);
     const tbl = !fig && !!currentTable(ed);
-    if (fig && !wasFigure.current) { setSideHidden(false); setSideTab("figure"); }
-    else if (tbl && !wasTable.current) { setSideHidden(false); setSideTab("table"); }
+    if (fig && !wasFigure.current) setRibbonTab("figure");
+    else if (tbl && !wasTable.current) setRibbonTab("table");
+    else if (!fig && wasFigure.current) setRibbonTab((t) => (t === "figure" ? "home" : t));
+    else if (!tbl && wasTable.current) setRibbonTab((t) => (t === "table" ? "home" : t));
     wasFigure.current = fig;
     wasTable.current = tbl;
+  }
+
+  function openPanel(tab: SideTab, section?: string) {
+    setSide((cur) => ({ tab, section, nonce: (cur?.nonce ?? 0) + 1 }));
+  }
+
+  function openUs(id: number) {
+    setPreviewUsId(id);
+    openPanel("us");
   }
   const wasFigure = useRef(false);
   const wasTable = useRef(false);
@@ -810,6 +677,16 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
     setSuggest(null);
   }
 
+  // Inserisce nel testo, al cursore, il riferimento a una US scelta dall'anteprima
+  function insertUsRef(u: UsItem) {
+    if (!editor) return;
+    editor.chain().focus()
+      .insertContent({ type: "text", text: usLabel(u), marks: [{ type: "usLink", attrs: { usId: u.id } }] })
+      .unsetMark("usLink")
+      .insertContent(" ")
+      .run();
+  }
+
   // Salva le modifiche pendenti quando si lascia il documento
   useEffect(() => () => { void flush(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -846,7 +723,6 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
 
   // Compila tutti i blocchi IA, dall'ultimo al primo così le posizioni dei precedenti restano valide
   const [filling, setFilling] = useState(false);
-  const [sideHidden, setSideHidden] = usePersistedFlag("elaborati-side-hidden", false);
   const fillAll = async () => {
     if (!editor) return;
     const positions: number[] = [];
@@ -873,7 +749,26 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
     });
   };
 
+  const exportPdf = () => {
+    if (!editor) return;
+    if (!printAsPdf(applyTableStylesToHtml(editor.getHTML(), editor).replace(/<span[^>]*data-us-id[^>]*>([\s\S]*?)<\/span>/g, "$1"), header, titolo)) {
+      toast({ title: "Popup bloccato", description: "Consenti i popup per esportare il PDF.", variant: "destructive" });
+    }
+  };
+
   if (!editor) return null;
+
+  const inTable = !!currentTable(editor);
+  const inFigure = !!selectedFigure(editor);
+  const tabs: RibbonTabDef[] = [
+    { id: "home", label: "Home" },
+    { id: "insert", label: "Inserisci" },
+    { id: "document", label: "Documento" },
+    ...(inTable ? [{ id: "table", label: "Tabella", contextual: true }] : []),
+    ...(inFigure ? [{ id: "figure", label: "Figura", contextual: true }] : []),
+  ];
+  const activeTab = tabs.some((t) => t.id === ribbonTab) ? ribbonTab : "home";
+  const previewUs = usList.find((u) => u.id === previewUsId) || null;
 
   return (
     <div className="flex flex-col h-full min-h-0 gap-2">
@@ -919,10 +814,28 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
         )}
 
         <div className="flex-1 min-w-0 min-h-0 flex flex-col rounded border border-border overflow-hidden">
-          <Toolbar editor={editor} onInsertFigure={() => setPickerOpen(true)}
-            onInsertImage={() => { setSideHidden(false); setSideTab("figure"); }}
-            onOpenTables={() => { setSideHidden(false); setSideTab("table"); }}
-            onGenerate={() => setGenOpen(true)} onFillAll={fillAll} filling={filling} />
+          <div className="shrink-0">
+            <RibbonTabs tabs={tabs} active={activeTab} onChange={setRibbonTab} />
+            <RibbonBody>
+              {activeTab === "home" && <HomeRibbon editor={editor} onOpenPanel={openPanel} />}
+              {activeTab === "insert" && (
+                <InsertRibbon editor={editor} uploading={uploading} onUploadFiles={(files) => void insertImages(files)}
+                  onPickProject={() => { setPickMode("insert"); setImgOpen(true); }} onPickSnapshot={() => setPickerOpen(true)}
+                  onGenerate={() => setGenOpen(true)} onFillAll={fillAll} filling={filling} onOpenPanel={openPanel} />
+              )}
+              {activeTab === "document" && (
+                <DocumentRibbon numeroPagina={header.numeroPagina} usCount={usIds.length} allegatoUrl={doc.allegato?.url} generating={generate.isPending}
+                  onNumeroPagina={(v) => { const h = { ...header, numeroPagina: v }; setHeader(h); schedule({ intestazione: h }); }}
+                  onGenerateDocx={() => generate.mutate()} onPdf={exportPdf} onSaveModel={saveAsModel} onOpenPanel={openPanel} />
+              )}
+              {activeTab === "table" && <TableRibbon editor={editor} onOpenPanel={(section) => openPanel("table", section)} />}
+              {activeTab === "figure" && (
+                <FigureRibbon editor={editor} placing={placing} onMove={moveSelectedFigure} onCancelMove={() => stopPlacing(editor.view)}
+                  onReplaceProject={() => { setPickMode("replace"); setImgOpen(true); }} onReplaceUpload={(file) => void replaceWithUpload(file)}
+                  onOpenPanel={(section) => openPanel("figure", section)} />
+              )}
+            </RibbonBody>
+          </div>
           {placing && (
             <div className="shrink-0 flex items-center gap-2 border-b border-primary/30 bg-primary/10 px-3 py-1.5 text-xs text-primary">
               <span className="font-medium">Scegli il punto:</span>
@@ -948,31 +861,32 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
           </div>
         </div>
 
-        {sideHidden ? (
-          <div className="shrink-0">
-            <Button type="button" variant="outline" size="icon" className="h-8 w-8" title="Mostra intestazione, esporta e collegamenti"
-              onClick={() => setSideHidden(false)}>
-              <PanelRightOpen size={15} />
-            </Button>
-          </div>
-        ) : (
-          <aside className="w-72 shrink-0 min-h-0 overflow-y-auto space-y-2">
+        {/* Pannello laterale: si apre solo dall'icona di un gruppo del ribbon o dal clic su una US citata */}
+        {side && (
+          <aside className="w-72 shrink-0 min-h-0 overflow-y-auto space-y-2" data-testid="relazione-side-panel">
             <div className="flex items-center gap-1 rounded border border-border bg-background p-1">
-              {([["doc", "Documento"], ["figure", "Figure"], ["table", "Tabelle"]] as const).map(([id, label]) => (
-                <button key={id} type="button" onClick={() => setSideTab(id)}
-                  className={`flex-1 rounded px-2 py-1 text-xs font-medium ${sideTab === id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}>
+              {([["paragraph", "Paragrafo"], ["figure", "Figura"], ["table", "Tabella"], ["us", "US"], ["doc", "Pagina"]] as const).map(([id, label]) => (
+                <button key={id} type="button" onClick={() => openPanel(id)}
+                  className={`flex-1 rounded px-1.5 py-1 text-xs font-medium ${side.tab === id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}>
                   {label}
                 </button>
               ))}
-              <button type="button" title="Nascondi il pannello" aria-label="Nascondi il pannello" onClick={() => setSideHidden(true)}
+              <button type="button" title="Chiudi il pannello" aria-label="Chiudi il pannello" onClick={() => setSide(null)}
                 className="h-6 w-6 shrink-0 inline-flex items-center justify-center rounded text-muted-foreground hover:bg-muted">
                 <PanelRightClose size={14} />
               </button>
             </div>
-            {sideTab === "figure" && (
+            {side.tab === "paragraph" && (
+              <div className="rounded border border-border bg-background p-3">
+                <ParagraphPanel editor={editor} section={side.section} nonce={side.nonce} />
+              </div>
+            )}
+            {side.tab === "figure" && (
               <div className="rounded border border-border bg-background p-3">
                 <FigurePanel
                   editor={editor}
+                  section={side.section}
+                  nonce={side.nonce}
                   uploading={uploading}
                   placing={placing}
                   askWhere={askWhere}
@@ -987,91 +901,74 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
                 />
               </div>
             )}
-            {sideTab === "table" && (
+            {side.tab === "table" && (
               <div className="rounded border border-border bg-background p-3">
-                <TablePanel editor={editor} />
+                <TablePanel editor={editor} section={side.section} nonce={side.nonce} />
               </div>
             )}
-            {sideTab === "doc" && (
-    <div className="space-y-3 rounded border border-border bg-background p-3">
-          <div className="text-sm font-medium">Intestazione e piè di pagina</div>
-          <div>
-            <Label className="text-xs">Intestazione (es. dicitura da cantiere)</Label>
-            <Input
-              value={header.intestazione}
-              onChange={(e) => { const h = { ...header, intestazione: e.target.value }; setHeader(h); schedule({ intestazione: h }); }}
-              placeholder="Cantiere … – Committente …"
-            />
-          </div>
-          <div>
-            <Label className="text-xs">Piè di pagina</Label>
-            <Input
-              value={header.piePagina}
-              onChange={(e) => { const h = { ...header, piePagina: e.target.value }; setHeader(h); schedule({ intestazione: h }); }}
-              placeholder="Es. Relazione archeologica"
-            />
-          </div>
-          <label className="flex items-center gap-2 text-xs">
-            <input
-              type="checkbox"
-              checked={header.numeroPagina}
-              onChange={(e) => { const h = { ...header, numeroPagina: e.target.checked }; setHeader(h); schedule({ intestazione: h }); }}
-            />
-            Numero di pagina
-          </label>
-    
-          <div className="pt-3 border-t border-border space-y-1.5">
-            <div className="text-sm font-medium flex items-center gap-1.5"><Link2 size={13} /> US collegate ({usIds.length})</div>
-            <p className="text-xs text-muted-foreground">
-              Scrivi <code className="bg-muted px-1 rounded">[[</code> per collegare una scheda US. Il link non compare nell'export.
-            </p>
-            <div className="flex flex-wrap gap-1">
-              {usIds.map((id) => {
-                const u = usList.find((x) => x.id === id);
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => navigate(`/cantiere/${cantiereId}/us?openUsId=${id}`)}
-                    className="text-xs font-mono rounded bg-primary/10 text-primary px-1.5 py-0.5 hover:bg-primary/20"
-                    title="Apri scheda US"
-                  >
-                    {u ? usLabel(u) : `US #${id}`}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-    
-          <div className="pt-3 border-t border-border space-y-2">
-            <div className="text-sm font-medium">Esporta</div>
-            <Button className="w-full gap-2" onClick={() => generate.mutate()} disabled={generate.isPending}>
-              {generate.isPending ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
-              Genera DOCX
-            </Button>
-            <Button
-              variant="outline"
-              className="w-full gap-2"
-              onClick={() => {
-                if (!printAsPdf(applyTableStylesToHtml(editor.getHTML(), editor).replace(/<span[^>]*data-us-id[^>]*>([\s\S]*?)<\/span>/g, "$1"), header, titolo)) {
-                  toast({ title: "Popup bloccato", description: "Consenti i popup per esportare il PDF.", variant: "destructive" });
-                }
-              }}
-            >
-              <Printer size={14} /> PDF (stampa)
-            </Button>
-            {doc.allegato?.url && (
-              <a href={doc.allegato.url} target="_blank" rel="noreferrer"
-                className="flex items-center justify-center gap-1 text-xs rounded border border-border px-2 py-1.5 hover:bg-muted">
-                <Download size={12} /> Ultimo DOCX
-              </a>
+            {side.tab === "us" && (
+              <div className="space-y-3 rounded border border-border bg-background p-3">
+                <UsPreviewPanel
+                  us={previewUs}
+                  usList={usList}
+                  tombaStyle={codeSettings.tombaStyle}
+                  linked={previewUs ? usIds.includes(previewUs.id) : false}
+                  onSelect={setPreviewUsId}
+                  onOpenFull={(id) => navigate(`/cantiere/${cantiereId}/us?openUsId=${id}`)}
+                  onInsert={insertUsRef}
+                  onClose={() => setPreviewUsId(null)}
+                />
+                <div className="pt-3 border-t border-border space-y-1.5">
+                  <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5"><Link2 size={12} /> US citate nel documento ({usIds.length})</div>
+                  {usIds.length === 0 && <p className="text-xs text-muted-foreground">Nessuna ancora.</p>}
+                  <div className="flex flex-wrap gap-1">
+                    {usIds.map((id) => {
+                      const u = usList.find((x) => x.id === id);
+                      return (
+                        <button key={id} type="button" onClick={() => setPreviewUsId(id)}
+                          className={`text-xs font-mono rounded px-1.5 py-0.5 ${previewUsId === id ? "bg-primary text-primary-foreground" : "bg-primary/10 text-primary hover:bg-primary/20"}`}
+                          title="Mostra l'anteprima della scheda">
+                          {u ? usLabel(u) : `US #${id}`}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Scrivi <code className="bg-muted px-1 rounded">[[</code> per citare una scheda US. Il collegamento non compare nell'export.
+                  </p>
+                </div>
+              </div>
             )}
-            <Button variant="outline" className="w-full gap-2" onClick={saveAsModel} title="Salva la struttura di questo documento come modello riusabile">
-              <LayoutTemplate size={14} /> Salva come modello
-            </Button>
-          </div>
-        </div>
-        )}
+            {side.tab === "doc" && (
+              <div className="space-y-3 rounded border border-border bg-background p-3">
+                <div className="text-sm font-medium">Intestazione e piè di pagina</div>
+                <div>
+                  <Label className="text-xs">Intestazione (es. dicitura da cantiere)</Label>
+                  <Input
+                    value={header.intestazione}
+                    onChange={(e) => { const h = { ...header, intestazione: e.target.value }; setHeader(h); schedule({ intestazione: h }); }}
+                    placeholder="Cantiere … – Committente …"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Piè di pagina</Label>
+                  <Input
+                    value={header.piePagina}
+                    onChange={(e) => { const h = { ...header, piePagina: e.target.value }; setHeader(h); schedule({ intestazione: h }); }}
+                    placeholder="Es. Relazione archeologica"
+                  />
+                </div>
+                <label className="flex items-center gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={header.numeroPagina}
+                    onChange={(e) => { const h = { ...header, numeroPagina: e.target.checked }; setHeader(h); schedule({ intestazione: h }); }}
+                  />
+                  Numero di pagina
+                </label>
+                <p className="text-xs text-muted-foreground">Esporta in Word o PDF dalla scheda «Documento» in alto.</p>
+              </div>
+            )}
           </aside>
         )}
       </div>

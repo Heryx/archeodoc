@@ -123,3 +123,20 @@ test("export: figura con testo a fianco = tabella mobile ancorata al testo", asy
   const inline = await documentXml({ type: "doc", content: [{ type: "projectImage", attrs: { name: "a.png", widthPct: 50, align: "left", wrap: "none" } }] });
   assert.doesNotMatch(inline, /w:tblpPr/);
 });
+
+test("export: rientri, spaziatura e flusso del paragrafo", async () => {
+  const xml = await documentXml({
+    type: "doc",
+    content: [
+      { type: "paragraph", attrs: { indentLeft: 2, indentFirst: -1, spaceBefore: 6, spaceAfter: 12, lineHeight: 1.5, pageBreakBefore: true }, content: [{ type: "text", text: "a" }] },
+      { type: "heading", attrs: { level: 1, keepNext: false }, content: [{ type: "text", text: "b" }] },
+    ],
+  });
+  assert.match(xml, /<w:ind [^>]*w:left="1134"[^>]*w:hanging="567"|<w:ind [^>]*w:hanging="567"[^>]*w:left="1134"/);
+  assert.match(xml, /<w:spacing [^>]*w:before="120"/);
+  assert.match(xml, /<w:spacing [^>]*w:after="240"/);
+  assert.match(xml, /<w:spacing [^>]*w:line="360"/);
+  assert.match(xml, /<w:pageBreakBefore\/>/);
+  // il titolo con «mantieni con il successivo» disattivato non lo porta
+  assert.match(xml, /<w:pStyle w:val="Heading1"\/><w:keepNext w:val="false"\/>/);
+});
