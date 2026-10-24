@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useParams } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
@@ -10,7 +10,7 @@ import {
   type AIFillSource,
   type AiFillResult,
 } from "@/lib/api";
-import { extractSearchFromLocation } from "@/lib/location";
+import { extractSearchFromLocation, readReturnTo } from "@/lib/location";
 import { invalidateUsRelatedQueries } from "@/lib/usCache";
 import { useAiAssistant } from "@/components/ai/AiAssistantContext";
 import { Button } from "@/components/ui/button";
@@ -337,12 +337,22 @@ export function USPage() {
     [availableModels],
   );
 
+  // Se la scheda è stata aperta da un'altra pagina (es. Matrix), alla chiusura si torna lì.
+  const returnToRef = useRef<string | null>(null);
+  const returnToOrigin = () => {
+    const target = returnToRef.current;
+    if (!target) return;
+    returnToRef.current = null;
+    navigate(target);
+  };
+
   useEffect(() => {
     const search = extractSearchFromLocation(location);
     const openUsId = new URLSearchParams(search).get("openUsId");
     if (!openUsId) return;
     const target = usListAll.find((item: any) => Number(item.id) === Number(openUsId));
     if (!target) return;
+    returnToRef.current = readReturnTo(search);
     openEditDialog(target);
     navigate(`/cantiere/${cid}/us`, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -562,6 +572,7 @@ export function USPage() {
       qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", "all", activeProjectId] });
       setOpenEdit(false);
       setEditingId(null);
+      returnToOrigin();
       toast({
         title: variables.saveMode === "draft" ? "Bozza US aggiornata" : "US aggiornata come completa",
         description: describeSchemaWarnings(result?.schemaWarnings),
@@ -1163,7 +1174,10 @@ export function USPage() {
         open={openEdit}
         onOpenChange={(value) => {
           setOpenEdit(value);
-          if (!value) setEditingId(null);
+          if (!value) {
+            setEditingId(null);
+            returnToOrigin();
+          }
         }}
         title="Modifica Unita Stratigrafica"
         form={editForm}

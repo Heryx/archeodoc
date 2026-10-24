@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
+import { withReturnTo } from "@/lib/location";
 import { formatUsCode } from "@shared/us_code";
 import { useProjectCodeSettings } from "@/hooks/useProjectCodeSettings";
 import { EditorContent, Mark, Node, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type Editor } from "@tiptap/react";
@@ -914,7 +915,9 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
                   tombaStyle={codeSettings.tombaStyle}
                   linked={previewUs ? usIds.includes(previewUs.id) : false}
                   onSelect={setPreviewUsId}
-                  onOpenFull={(id) => navigate(`/cantiere/${cantiereId}/us?openUsId=${id}`)}
+                  onOpenFull={(id) =>
+                    navigate(withReturnTo(`/cantiere/${cantiereId}/us?openUsId=${id}`, `/cantiere/${cantiereId}/documentazioni?openDocId=${doc.id}`))
+                  }
                   onInsert={insertUsRef}
                   onClose={() => setPreviewUsId(null)}
                 />

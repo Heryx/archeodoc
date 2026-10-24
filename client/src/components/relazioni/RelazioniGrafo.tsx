@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
+import { withReturnTo } from "@/lib/location";
 import { Loader2 } from "lucide-react";
 
 type GNode = { id: string; kind: "doc" | "us"; label: string; sub?: string | null; ref: number };
@@ -119,8 +120,8 @@ export function RelazioniGrafo({ cantiereId }: { cantiereId: number }) {
   };
 
   const open = (s: Sim) => {
-    if (s.kind === "doc") navigate(`/cantiere/${cantiereId}/documentazioni?openDocId=${s.ref}`);
-    else navigate(`/cantiere/${cantiereId}/us?openUsId=${s.ref}`);
+    if (s.kind === "doc") navigate(withReturnTo(`/cantiere/${cantiereId}/documentazioni?openDocId=${s.ref}`));
+    else navigate(withReturnTo(`/cantiere/${cantiereId}/us?openUsId=${s.ref}`));
   };
 
   const nodes = sim.current;

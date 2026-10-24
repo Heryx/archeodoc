@@ -1,4 +1,4 @@
-import { Suspense, lazy, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useParams } from "wouter";
 import { Download, FileSpreadsheet, GitBranch, Layers, Layers3, Upload } from "lucide-react";
@@ -19,7 +19,23 @@ export function MatrixPage() {
   const { cid } = useParams<{ cid: string }>();
   const activeProjectId = getCurrentProjectId();
   const [, navigate] = useLocation();
-  const [mode, setMode] = useState<HarrisMatrixMode>("all");
+  // La modalità resta scelta anche tornando dalla scheda US aperta dal matrix.
+  const [mode, setMode] = useState<HarrisMatrixMode>(() => {
+    try {
+      const saved = sessionStorage.getItem("matrix-mode");
+      if (saved === "all" || saved === "fisica" || saved === "stratigrafica") return saved;
+    } catch {
+      /* sessionStorage non disponibile */
+    }
+    return "all";
+  });
+  useEffect(() => {
+    try {
+      sessionStorage.setItem("matrix-mode", mode);
+    } catch {
+      /* sessionStorage non disponibile */
+    }
+  }, [mode]);
   const [downloadKind, setDownloadKind] = useState<"docx" | "pdf" | "em.json" | null>(null);
   const [pdfPage, setPdfPage] = useState<"libero" | "a4-portrait" | "a4-landscape">("libero");
   const { toast } = useToast();

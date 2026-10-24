@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useParams } from "wouter";
-import { extractSearchFromLocation } from "@/lib/location";
+import { extractSearchFromLocation, readReturnTo } from "@/lib/location";
 import {
   Plus, FileText, Loader2, Network,
   Trash2, Download, Image, Upload, FolderOpen, X, Stethoscope, CheckCircle2, AlertCircle,
@@ -984,9 +984,10 @@ export function DocumentazioniPage() {
     }
   }, [openDocId]);
 
+  const returnTo = readReturnTo(extractSearchFromLocation(location));
   const closeEditor = () => {
     setEditingId(null);
-    if (openDocId) navigate(`/cantiere/${cid}/documentazioni`, { replace: true });
+    if (openDocId) navigate(returnTo ?? `/cantiere/${cid}/documentazioni`, { replace: true });
   };
 
   // Modifica a tutta pagina: intestazione e barra strumenti restano fisse, scorre solo il foglio

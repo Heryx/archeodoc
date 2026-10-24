@@ -91,6 +91,27 @@ export function buildPanelHref(location: string, panel: string): string {
   return `#${cleanPath}${query ? `?${query}` : ""}`;
 }
 
+// Link "apri scheda" (es. ?openUsId=3) che ricorda la pagina di partenza: chi apre la scheda
+// da un'altra pagina (Matrix, grafo, relazioni...) ci torna alla chiusura, vedi readReturnTo().
+// Il valore è codificato due volte perché extractSearchFromLocation() decodifica l'hash.
+// `returnPath` (es. "/cantiere/1/documentazioni?openDocId=5") sostituisce la pagina corrente
+// quando questa da sola non basterebbe a ritrovare lo stato di partenza.
+export function withReturnTo(href: string, returnPath?: string): string {
+  if (typeof window === "undefined") return href;
+  const current = returnPath ?? (window.location.hash || "").replace(/^#/, "");
+  if (!current) return href;
+  const sep = href.includes("?") ? "&" : "?";
+  return `${href}${sep}returnTo=${encodeURIComponent(encodeURIComponent(current))}`;
+}
+
+// Pagina a cui tornare, se il link di apertura ne indicava una (solo percorsi interni all'app).
+export function readReturnTo(search: string): string | null {
+  const raw = new URLSearchParams(search).get("returnTo");
+  if (!raw) return null;
+  const value = safeDecode(raw);
+  return value.startsWith("/") && !value.startsWith("//") ? value : null;
+}
+
 // Hash router hook that exposes only the path to wouter route-matching.
 // Query params in hash (e.g. #/cantiere/1/giornata/3?panel=qc) stay available
 // through extractSearchFromLocation(), but do not pollute route params like :gid.

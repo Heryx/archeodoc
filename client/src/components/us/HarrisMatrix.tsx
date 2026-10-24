@@ -18,6 +18,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { formatUsCode, type TombaCodeStyle } from "@shared/us_code";
 import { useProjectCodeSettings } from "@/hooks/useProjectCodeSettings";
+import { withReturnTo } from "@/lib/location";
 import { layoutHarrisMatrix } from "@shared/matrix_layout";
 
 export type HarrisMatrixMode = "all" | "fisica" | "stratigrafica";
@@ -620,7 +621,7 @@ export function HarrisMatrix({
   // La navigazione avviene via hash (#/path?query) per restare compatibile con
   // l'helper extractSearchFromLocation usato dalla pagina Schede US.
   const schedaHref = (node: GraphNode) =>
-    canOpen(node) ? `#/cantiere/${cantiereId}/us?openUsId=${node.usId}` : undefined;
+    canOpen(node) ? withReturnTo(`#/cantiere/${cantiereId}/us?openUsId=${node.usId}`) : undefined;
 
   const activeKey = hoverKey ?? pinnedKey;
   const activeNodes = activeKey ? relatedTo(activeKey) : null;

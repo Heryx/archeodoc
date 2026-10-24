@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
+import { withReturnTo } from "@/lib/location";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -344,7 +345,7 @@ export function AiAssistantPanel({ cid, pageContext }: { cid?: string; pageConte
                         <button
                           type="button"
                           className="ml-auto inline-flex items-center gap-1 text-primary hover:underline"
-                          onClick={() => navigate(`/cantiere/${cid}/us?openUsId=${s.id}`)}
+                          onClick={() => navigate(withReturnTo(`/cantiere/${cid}/us?openUsId=${s.id}`))}
                         >
                           <ExternalLink size={11} /> Apri
                         </button>
