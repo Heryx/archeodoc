@@ -31,12 +31,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { NuovoDocumentoForm } from "@/components/relazioni/NuovoDocumentoForm";
 import { RelazioniGrafo } from "@/components/relazioni/RelazioniGrafo";
 import { RelazioneEditorPanel } from "@/components/relazioni/RelazioneEditor";
 
-type DocumentazioneTipo = "giornaliera" | "settimanale" | "mensile" | "fine_scavo";
+type DocumentazioneTipo = "libero" | "giornaliera" | "settimanale" | "mensile" | "fine_scavo";
 
 type DocumentazioneRecord = {
   id: number;
@@ -147,6 +148,7 @@ function ExportZipTab({ cantiereId }: { cantiereId: number }) {
 }
 
 function tipoLabel(tipo: DocumentazioneTipo): string {
+  if (tipo === "libero") return "Documento libero";
   if (tipo === "giornaliera") return "Giornaliera";
   if (tipo === "settimanale") return "Settimanale";
   if (tipo === "mensile") return "Mensile";
@@ -682,127 +684,90 @@ function TemplateTab({ cantiereId }: { cantiereId: number }) {
 
 // ─── TAB: Relazioni (editor documento) ────────────────────────────────────
 
-function DocumentazioniTab({ cantiereId }: { cantiereId: number }) {
+function periodoLabel(doc: DocumentazioneRecord): string {
+  const f = (iso: string) => iso.split("-").reverse().join("/");
+  if (doc.dataInizio && doc.dataFine && doc.dataInizio !== doc.dataFine) return `${f(doc.dataInizio)} → ${f(doc.dataFine)}`;
+  if (doc.dataInizio) return f(doc.dataInizio);
+  return "";
+}
+
+// Elenco dei documenti: l'editing avviene a tutta pagina, fuori da questa vista
+function DocumentazioniTab({ cantiereId, onOpen }: { cantiereId: number; onOpen: (id: number) => void }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [newOpen, setNewOpen] = useState(false);
 
   const docsQuery = useQuery<{ documentazioni: DocumentazioneRecord[] }>({
     queryKey: ["/api/cantieri", String(cantiereId), "documentazioni"],
     queryFn: async () => (await apiRequest("GET", `/api/cantieri/${cantiereId}/documentazioni`)).json(),
     enabled: Number.isFinite(cantiereId),
   });
-
-  const detailQuery = useQuery<DocumentazioneDetailResponse>({
-    queryKey: ["/api/cantieri", String(cantiereId), "documentazioni", String(selectedId)],
-    queryFn: async () => (await apiRequest("GET", `/api/cantieri/${cantiereId}/documentazioni/${selectedId}`)).json(),
-    enabled: Number.isFinite(cantiereId) && !!selectedId,
-  });
-
   const documentazioni = docsQuery.data?.documentazioni || [];
-
-  const [location] = useLocation();
-  const openDocId = Number(new URLSearchParams(extractSearchFromLocation(location)).get("openDocId"));
-  useEffect(() => {
-    if (Number.isFinite(openDocId) && openDocId > 0 && documentazioni.some((d) => d.id === openDocId)) {
-      setSelectedId(openDocId);
-    } else if (!selectedId && documentazioni.length > 0) setSelectedId(documentazioni[0].id);
-  }, [documentazioni, selectedId, openDocId]);
-
-  const invalidateAll = async (docId?: number | null) => {
-    const id = docId !== undefined ? docId : selectedId;
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["/api/cantieri", String(cantiereId), "documentazioni"] }),
-      ...(id != null
-        ? [queryClient.invalidateQueries({ queryKey: ["/api/cantieri", String(cantiereId), "documentazioni", String(id)] })]
-        : []),
-    ]);
-  };
 
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => { await apiRequest("DELETE", `/api/cantieri/${cantiereId}/documentazioni/${id}`); },
-    onSuccess: async (_data, id) => {
-      await invalidateAll(id);
-      if (selectedId === id) setSelectedId(null);
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["/api/cantieri", String(cantiereId), "documentazioni"] });
       toast({ title: "Documento eliminato" });
     },
     onError: (e: any) => toast({ title: "Errore eliminazione", description: e?.message, variant: "destructive" }),
   });
 
-  const selectedDetail = detailQuery.data?.documentazione;
-  const [listHidden, setListHidden] = usePersistedFlag("elaborati-list-hidden", false);
-
   return (
-    <div className={`grid ${listHidden ? "grid-cols-[auto_1fr]" : "grid-cols-[300px_1fr]"} gap-4 min-h-[60vh]`}>
-      {/* Colonna sinistra */}
-      {listHidden ? (
-        <div>
-          <Button type="button" variant="outline" size="icon" className="h-8 w-8" title="Mostra l'elenco dei documenti"
-            onClick={() => setListHidden(false)}>
-            <PanelLeftOpen size={15} />
-          </Button>
-        </div>
-      ) : (
-      <Card className="h-full">
-        <CardHeader className="pb-3 flex-row items-center justify-between space-y-0">
-          <CardTitle className="text-base">Nuovo documento</CardTitle>
-          <Button type="button" variant="ghost" size="icon" className="h-7 w-7" title="Nascondi l'elenco dei documenti"
-            onClick={() => setListHidden(true)}>
-            <PanelLeftClose size={15} />
-          </Button>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <NuovoDocumentoForm cantiereId={cantiereId} onCreated={(id) => setSelectedId(id)} />
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground max-w-2xl">
+          Relazioni e documenti per la committenza. Si possono scrivere liberamente, partire da un modello, oppure collegare un periodo del giornale di scavo come aggiunta.
+        </p>
+        <Button className="gap-2 shrink-0" onClick={() => setNewOpen(true)}>
+          <Plus size={14} /> Nuovo documento
+        </Button>
+      </div>
 
-          <div className="pt-3 border-t border-border space-y-1 max-h-[320px] overflow-y-auto">
-            <div className="text-xs font-medium text-muted-foreground mb-2">Documenti del cantiere</div>
-            {documentazioni.map((doc) => (
-              <button
-                key={doc.id}
-                type="button"
-                onClick={() => setSelectedId(doc.id)}
-                className={`w-full text-left rounded border px-2 py-2 text-sm ${
-                  selectedId === doc.id ? "border-primary bg-primary/10" : "border-border hover:bg-muted"
-                }`}
-              >
-                <div className="font-medium truncate">{doc.titolo}</div>
-                <div className="text-xs text-muted-foreground flex items-center justify-between mt-0.5">
-                  <span>{tipoLabel(doc.tipo)}</span>
-                  <span>{doc.stato}</span>
+      {docsQuery.isLoading ? (
+        <div className="text-sm text-muted-foreground">Caricamento...</div>
+      ) : documentazioni.length === 0 ? (
+        <Card>
+          <CardContent className="py-8 text-center text-sm text-muted-foreground space-y-3">
+            <p>Nessun documento ancora.</p>
+            <Button variant="outline" className="gap-2" onClick={() => setNewOpen(true)}><Plus size={14} /> Crea il primo documento</Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {documentazioni.map((doc) => (
+            <div key={doc.id} className="rounded-lg border border-border bg-card p-3 flex flex-col gap-2 hover:border-primary/60 transition-colors">
+              <button type="button" onClick={() => onOpen(doc.id)} className="text-left flex-1 space-y-1">
+                <div className="font-medium leading-snug line-clamp-2">{doc.titolo}</div>
+                <div className="text-xs text-muted-foreground">
+                  {tipoLabel(doc.tipo)}{periodoLabel(doc) ? ` · ${periodoLabel(doc)}` : ""}
                 </div>
               </button>
-            ))}
-            {!docsQuery.isLoading && documentazioni.length === 0 && (
-              <div className="text-xs text-muted-foreground">Nessun documento disponibile.</div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+              <div className="flex items-center justify-between">
+                <Badge variant={doc.stato === "completata" ? "default" : "outline"}>{doc.stato}</Badge>
+                <div className="flex items-center gap-1">
+                  <Button size="sm" variant="outline" className="h-7" onClick={() => onOpen(doc.id)}>Apri</Button>
+                  <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive" title="Elimina"
+                    disabled={deleteMutation.isPending}
+                    onClick={() => { if (confirm(`Eliminare definitivamente «${doc.titolo}»?`)) deleteMutation.mutate(doc.id); }}>
+                    <Trash2 size={13} />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       )}
 
-      {/* Colonna destra: editor */}
-      <div className="min-w-0">
-        {!selectedId ? (
-          <Card>
-            <CardContent className="py-6 text-sm text-muted-foreground">
-              Seleziona o crea un documento dalla lista a sinistra.
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="space-y-2">
-            <div className="flex justify-end">
-              <Button variant="destructive" size="sm" className="gap-1"
-                onClick={() => { if (confirm("Eliminare definitivamente questo documento?")) deleteMutation.mutate(selectedId); }}
-                disabled={deleteMutation.isPending}
-              >
-                <Trash2 size={12} /> Elimina
-              </Button>
-            </div>
-            <RelazioneEditorPanel cantiereId={cantiereId} docId={selectedId} />
-          </div>
-        )}
-      </div>
+      <Dialog open={newOpen} onOpenChange={setNewOpen}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Nuovo documento</DialogTitle></DialogHeader>
+          <NuovoDocumentoForm
+            cantiereId={cantiereId}
+            onCreated={(id) => { setNewOpen(false); onOpen(id); }}
+          />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -993,6 +958,31 @@ export function DocumentazioniPage() {
   const { cid } = useParams<{ cid: string }>();
   const cantiereId = Number(cid);
   const [activeTab, setActiveTab] = useState<Tab>("documentazioni");
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [location, navigate] = useLocation();
+
+  // Link dall'esterno (backlink dalle schede US, grafo): apre direttamente il documento
+  const openDocId = Number(new URLSearchParams(extractSearchFromLocation(location)).get("openDocId"));
+  useEffect(() => {
+    if (Number.isFinite(openDocId) && openDocId > 0) {
+      setActiveTab("documentazioni");
+      setEditingId(openDocId);
+    }
+  }, [openDocId]);
+
+  const closeEditor = () => {
+    setEditingId(null);
+    if (openDocId) navigate(`/cantiere/${cid}/documentazioni`, { replace: true });
+  };
+
+  // Modifica a tutta pagina: intestazione e barra strumenti restano fisse, scorre solo il foglio
+  if (activeTab === "documentazioni" && editingId) {
+    return (
+      <div className="h-full flex flex-col p-4">
+        <RelazioneEditorPanel cantiereId={cantiereId} docId={editingId} onBack={closeEditor} />
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-5">
@@ -1022,7 +1012,7 @@ export function DocumentazioniPage() {
       </div>
 
       {/* Tab content */}
-      {activeTab === "documentazioni" && <DocumentazioniTab cantiereId={cantiereId} />}
+      {activeTab === "documentazioni" && <DocumentazioniTab cantiereId={cantiereId} onOpen={setEditingId} />}
       {activeTab === "grafo" && <RelazioniGrafo cantiereId={cantiereId} />}
       {activeTab === "google" && <GoogleDriveTab cantiereId={cantiereId} />}
       {activeTab === "immagini" && <ImmaginiTab />}

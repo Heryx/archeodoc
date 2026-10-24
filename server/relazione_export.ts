@@ -49,6 +49,8 @@ export type RelazioneExportInput = {
   intestazione: RelazioneIntestazione | null;
   // Risolve l'immagine di uno snapshot WebMap; null se mancante/non supportata
   loadSnapshot: (snapshotId: number) => SnapshotImage | null;
+  // Immagine della cartella "Immagini progetto" (logo, stemma, ecc.), per nome file
+  loadProjectImage?: (name: string) => SnapshotImage | null;
 };
 
 const ORDERED_REF = "relazione-ordered";
@@ -113,13 +115,19 @@ function textRuns(node: PmNode): ParagraphChild[] {
 function figure(node: PmNode, input: RelazioneExportInput, warnings: string[]): Paragraph[] {
   const snapshotId = Number(node.attrs?.snapshotId);
   const caption = String(node.attrs?.didascalia || "").trim();
-  const img = Number.isFinite(snapshotId) ? input.loadSnapshot(snapshotId) : null;
+  const isProject = node.type === "projectImage";
+  const img = isProject
+    ? input.loadProjectImage?.(String(node.attrs?.name || "")) ?? null
+    : Number.isFinite(snapshotId) ? input.loadSnapshot(snapshotId) : null;
   if (!img) {
-    warnings.push(`Figura mancante o non supportata (snapshot ${node.attrs?.snapshotId ?? "?"})`);
+    warnings.push(isProject
+      ? `Immagine di progetto mancante o non supportata (${node.attrs?.name ?? "?"}): usa PNG o JPEG`
+      : `Figura mancante o non supportata (snapshot ${node.attrs?.snapshotId ?? "?"})`);
     return [];
   }
   const ratio = img.width && img.height && img.width > 0 && img.height > 0 ? img.width / img.height : 16 / 9;
-  const width = MAX_IMAGE_WIDTH_PX;
+  const wanted = Number(node.attrs?.width);
+  const width = Number.isFinite(wanted) && wanted > 20 ? Math.min(wanted, MAX_IMAGE_WIDTH_PX) : MAX_IMAGE_WIDTH_PX;
   const height = Math.round(Math.min(width / ratio, 760));
   const paragraphs = [
     new Paragraph({
@@ -232,6 +240,7 @@ function blocks(
         break;
       }
       case "snapshotFigure":
+      case "projectImage":
         out.push(...figure(node, input, warnings));
         break;
       default:

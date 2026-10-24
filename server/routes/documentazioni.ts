@@ -9,7 +9,7 @@ import { MODELLI_BUILTIN, applyPlaceholders, clearAiBlocks, findBuiltin, placeho
 import { buildRelazioneDocx, type PmNode, type RelazioneIntestazione } from "../relazione_export";
 import type { WithProject } from "./types";
 
-type DocumentazioneTipo = "giornaliera" | "settimanale" | "mensile" | "fine_scavo";
+type DocumentazioneTipo = "libero" | "giornaliera" | "settimanale" | "mensile" | "fine_scavo";
 
 type RegisterDocumentazioniHelpers = {
   withProject: WithProject;
@@ -19,7 +19,7 @@ type RegisterDocumentazioniHelpers = {
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 function parseDocumentazioneTipo(value: unknown): DocumentazioneTipo | null {
-  if (value === "giornaliera" || value === "settimanale" || value === "mensile" || value === "fine_scavo") return value;
+  if (value === "libero" || value === "giornaliera" || value === "settimanale" || value === "mensile" || value === "fine_scavo") return value;
   return null;
 }
 
@@ -39,6 +39,35 @@ function sanitizeSlug(value: string): string {
     .slice(0, 60) || "documentazione";
 }
 
+// Dimensioni da intestazione PNG/JPEG, per mantenere le proporzioni nel DOCX
+function imageSize(buf: Buffer): { width: number; height: number } | null {
+  if (buf.length > 24 && buf.readUInt32BE(0) === 0x89504e47) {
+    return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+  }
+  if (buf.length > 4 && buf[0] === 0xff && buf[1] === 0xd8) {
+    let i = 2;
+    while (i + 9 < buf.length) {
+      if (buf[i] !== 0xff) { i++; continue; }
+      const marker = buf[i + 1];
+      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+        return { height: buf.readUInt16BE(i + 5), width: buf.readUInt16BE(i + 7) };
+      }
+      i += 2 + buf.readUInt16BE(i + 2);
+    }
+  }
+  return null;
+}
+
+const IMG_NAME_RE = /\.(png|jpe?g|gif|webp|svg)$/i;
+
+// Nomi delle immagini di progetto richiamate in un documento ProseMirror
+function collectProjectImages(node: PmNode | null | undefined, out = new Set<string>()): Set<string> {
+  if (!node) return out;
+  if (node.type === "projectImage" && node.attrs?.name) out.add(path.basename(String(node.attrs.name)));
+  (node.content || []).forEach((c) => collectProjectImages(c, out));
+  return out;
+}
+
 function encodeUploadPath(relativePath: string): string {
   return relativePath
     .split(/[\\/]+/)
@@ -48,6 +77,7 @@ function encodeUploadPath(relativePath: string): string {
 }
 
 function documentazioneTipoLabel(tipo: DocumentazioneTipo): string {
+  if (tipo === "libero") return "Documento";
   if (tipo === "giornaliera") return "Documentazione giornaliera";
   if (tipo === "settimanale") return "Documentazione settimanale";
   if (tipo === "mensile") return "Documentazione mensile";
@@ -55,6 +85,7 @@ function documentazioneTipoLabel(tipo: DocumentazioneTipo): string {
 }
 
 function defaultTitolo(tipo: DocumentazioneTipo, dataInizio: string | null, dataFine: string | null): string {
+  if (tipo === "libero") return "Nuovo documento";
   if (tipo === "giornaliera") {
     return dataInizio ? `Giornata ${dataInizio}` : "Giornata";
   }
@@ -180,12 +211,20 @@ export function registerDocumentazioniRoutes(app: Express, helpers: RegisterDocu
     const dataInizio = parseOptionalDate(req.body?.dataInizio);
     const dataFine = parseOptionalDate(req.body?.dataFine);
     const titoloRaw = String(req.body?.titolo || "").trim();
-    const titolo = titoloRaw || defaultTitolo(tipo, dataInizio, dataFine);
+    const modelloId = String(req.body?.modello ?? "").trim();
+    const modelloSalvato = modelloId && !modelloId.startsWith("builtin:") ? ctx.storage.getModelloElaborato(Number(modelloId)) : undefined;
+    // Senza titolo scelto, vale quello del modello (con segnaposto), poi quello standard del tipo
+    const titoloModello = modelloSalvato?.titolo
+      ? Object.entries(placeholderValues(cantiere, "")).reduce(
+          (t, [k, v]) => t.replace(new RegExp(`\\{\\{\\s*${k}\\s*\\}\\}`, "g"), v),
+          modelloSalvato.titolo,
+        ).trim()
+      : "";
+    const titolo = titoloRaw || titoloModello || defaultTitolo(tipo, dataInizio, dataFine);
 
     // Con un modello il documento nasce già strutturato (titoli, testo fisso, blocchi IA da compilare)
     let contenuto: string | null = null;
     let intestazione: string | null = null;
-    const modelloId = String(req.body?.modello ?? "").trim();
     if (modelloId) {
       let struttura: PmNode | null = null;
       if (modelloId.startsWith("builtin:")) {
@@ -330,7 +369,7 @@ export function registerDocumentazioniRoutes(app: Express, helpers: RegisterDocu
   app.get("/api/modelli-elaborato", withProject((ctx, _req, res) => {
     res.json({
       builtin: MODELLI_BUILTIN.map(({ id, nome, descrizione }) => ({ id, nome, descrizione })),
-      custom: ctx.storage.getModelliElaborato().map(({ id, nome, descrizione }) => ({ id: String(id), nome, descrizione })),
+      custom: ctx.storage.getModelliElaborato().map(({ id, nome, descrizione, titolo }) => ({ id: String(id), nome, descrizione, titolo })),
     });
   }));
 
@@ -340,14 +379,65 @@ export function registerDocumentazioniRoutes(app: Express, helpers: RegisterDocu
     const contenuto = req.body?.contenuto as PmNode | undefined;
     if (!contenuto || contenuto.type !== "doc") return res.status(400).json({ error: "Contenuto del modello non valido" });
     const descrizione = String(req.body?.descrizione || "").trim() || null;
+    const titoloModello = String(req.body?.titolo || "").trim() || null;
     const intestazione = req.body?.intestazione == null ? null : JSON.stringify(req.body.intestazione);
     const created = ctx.storage.createModelloElaborato({
       nome,
       descrizione,
+      titolo: titoloModello,
       contenuto: JSON.stringify(clearAiBlocks(contenuto)),
       intestazione,
     });
     res.json({ modello: { id: String(created.id), nome: created.nome, descrizione: created.descrizione } });
+  }));
+
+  // Esporta un modello come file .json, con le immagini di progetto che usa incorporate
+  app.get("/api/modelli-elaborato/:id/esporta", withProject((ctx, req, res) => {
+    const modello = ctx.storage.getModelloElaborato(Number(req.params.id));
+    if (!modello) return res.status(404).json({ error: "Modello non trovato" });
+    let contenuto: PmNode | null = null;
+    try { contenuto = JSON.parse(modello.contenuto); } catch { /* contenuto non valido */ }
+    const immagini = Array.from(collectProjectImages(contenuto))
+      .map((name) => {
+        const filePath = path.join(ctx.project.imgDir, name);
+        return fs.existsSync(filePath) ? { name, dati: fs.readFileSync(filePath).toString("base64") } : null;
+      })
+      .filter(Boolean);
+    res.setHeader("Content-Disposition", `attachment; filename="modello_${sanitizeSlug(modello.nome)}.archeodoc-modello.json"`);
+    res.json({
+      formato: "archeodoc-modello",
+      versione: 1,
+      nome: modello.nome,
+      descrizione: modello.descrizione,
+      titolo: modello.titolo,
+      contenuto,
+      intestazione: modello.intestazione ? JSON.parse(modello.intestazione) : null,
+      immagini,
+    });
+  }));
+
+  app.post("/api/modelli-elaborato/importa", withProject((ctx, req, res) => {
+    const body = req.body || {};
+    if (body.formato !== "archeodoc-modello" || !body.contenuto || body.contenuto.type !== "doc") {
+      return res.status(400).json({ error: "Il file non è un modello ArcheoDoc valido" });
+    }
+    const warnings: string[] = [];
+    fs.mkdirSync(ctx.project.imgDir, { recursive: true });
+    for (const img of Array.isArray(body.immagini) ? body.immagini : []) {
+      const name = path.basename(String(img?.name || ""));
+      if (!IMG_NAME_RE.test(name) || typeof img?.dati !== "string") continue;
+      const dest = path.join(ctx.project.imgDir, name);
+      if (fs.existsSync(dest)) { warnings.push(`L'immagine «${name}» esiste già nel progetto: usata quella esistente.`); continue; }
+      fs.writeFileSync(dest, Buffer.from(img.dati, "base64"));
+    }
+    const created = ctx.storage.createModelloElaborato({
+      nome: String(body.nome || "Modello importato").trim() || "Modello importato",
+      descrizione: String(body.descrizione || "").trim() || null,
+      titolo: String(body.titolo || "").trim() || null,
+      contenuto: JSON.stringify(clearAiBlocks(body.contenuto as PmNode)),
+      intestazione: body.intestazione == null ? null : JSON.stringify(body.intestazione),
+    });
+    res.json({ modello: { id: String(created.id), nome: created.nome, descrizione: created.descrizione, titolo: created.titolo }, warnings });
   }));
 
   app.delete("/api/modelli-elaborato/:id", withProject((ctx, req, res) => {
@@ -557,6 +647,14 @@ export function registerDocumentazioniRoutes(app: Express, helpers: RegisterDocu
         titolo: doc.titolo,
         contenuto,
         intestazione,
+        loadProjectImage: (name) => {
+          const filePath = path.join(ctx.project.imgDir, path.basename(name));
+          const type = /\.png$/i.test(name) ? "png" : /\.jpe?g$/i.test(name) ? "jpg" : null;
+          if (!type || !fs.existsSync(filePath)) return null;
+          const buffer = fs.readFileSync(filePath);
+          const size = imageSize(buffer);
+          return { buffer, type, width: size?.width ?? null, height: size?.height ?? null };
+        },
         loadSnapshot: (snapshotId) => {
           const snapshot = ctx.storage.getMapSnapshot(snapshotId);
           if (!snapshot || snapshot.cantiereId !== doc.cantiereId) return null;

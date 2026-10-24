@@ -74,12 +74,12 @@ function ensureColumn(sqlite: Database.Database, tableName: string, columnName: 
   cols.add(columnName);
 }
 
-// Il vincolo CHECK su "tipo" non ammetteva "mensile": ricostruisce la tabella (procedura SQLite a 12 passi)
-function allowMensileDocumentazioni(sqlite: Database.Database) {
+// Il vincolo CHECK su "tipo" non ammetteva "mensile" e "libero": ricostruisce la tabella (procedura SQLite a 12 passi)
+function allowTipiDocumentazioni(sqlite: Database.Database) {
   const row = sqlite
     .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'documentazioni'")
     .get() as { sql?: string } | undefined;
-  if (!row?.sql || row.sql.includes("'mensile'")) return;
+  if (!row?.sql || row.sql.includes("'libero'")) return;
 
   sqlite.pragma("foreign_keys = OFF");
   try {
@@ -88,7 +88,7 @@ function allowMensileDocumentazioni(sqlite: Database.Database) {
         CREATE TABLE documentazioni_new (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           cantiere_id INTEGER NOT NULL,
-          tipo TEXT NOT NULL CHECK(tipo IN ('giornaliera','settimanale','mensile','fine_scavo')),
+          tipo TEXT NOT NULL CHECK(tipo IN ('libero','giornaliera','settimanale','mensile','fine_scavo')),
           titolo TEXT NOT NULL,
           data_inizio TEXT,
           data_fine TEXT,
@@ -426,7 +426,7 @@ function migrate(sqlite: Database.Database) {
     CREATE TABLE IF NOT EXISTS documentazioni (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       cantiere_id INTEGER NOT NULL,
-      tipo TEXT NOT NULL CHECK(tipo IN ('giornaliera','settimanale','mensile','fine_scavo')),
+      tipo TEXT NOT NULL CHECK(tipo IN ('libero','giornaliera','settimanale','mensile','fine_scavo')),
       titolo TEXT NOT NULL,
       data_inizio TEXT,
       data_fine TEXT,
@@ -457,6 +457,7 @@ function migrate(sqlite: Database.Database) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       nome TEXT NOT NULL,
       descrizione TEXT,
+      titolo TEXT,
       contenuto TEXT NOT NULL,
       intestazione TEXT,
       created_at TEXT NOT NULL
@@ -615,7 +616,8 @@ function migrate(sqlite: Database.Database) {
   ensureColumn(sqlite, "documentazioni", "updated_at", "updated_at TEXT");
   ensureColumn(sqlite, "documentazioni", "contenuto", "contenuto TEXT");
   ensureColumn(sqlite, "documentazioni", "intestazione", "intestazione TEXT");
-  allowMensileDocumentazioni(sqlite);
+  ensureColumn(sqlite, "modelli_elaborato", "titolo", "titolo TEXT");
+  allowTipiDocumentazioni(sqlite);
   ensureColumn(sqlite, "sas_records", "data", "data TEXT");
   ensureColumn(sqlite, "ra_records", "data", "data TEXT");
   ensureColumn(sqlite, "allegati", "sas_id", "sas_id INTEGER");
@@ -744,7 +746,7 @@ export interface IStorage {
   // Modelli di elaborato
   getModelliElaborato(): ModelloElaborato[];
   getModelloElaborato(id: number): ModelloElaborato | undefined;
-  createModelloElaborato(data: { nome: string; descrizione: string | null; contenuto: string; intestazione: string | null }): ModelloElaborato;
+  createModelloElaborato(data: { nome: string; descrizione: string | null; titolo?: string | null; contenuto: string; intestazione: string | null }): ModelloElaborato;
   deleteModelloElaborato(id: number): boolean;
 
   // Documentazioni
@@ -1126,7 +1128,7 @@ class SQLiteStorage implements IStorage {
     return this.db.select().from(modelliElaborato).where(eq(modelliElaborato.id, id)).get();
   }
 
-  createModelloElaborato(data: { nome: string; descrizione: string | null; contenuto: string; intestazione: string | null }) {
+  createModelloElaborato(data: { nome: string; descrizione: string | null; titolo?: string | null; contenuto: string; intestazione: string | null }) {
     return this.db.insert(modelliElaborato).values({ ...data, createdAt: now() }).returning().get();
   }
 

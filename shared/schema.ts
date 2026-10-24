@@ -342,7 +342,7 @@ export type MapSnapshot = typeof mapSnapshots.$inferSelect;
 export const documentazioni = sqliteTable("documentazioni", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   cantiereId: integer("cantiere_id").notNull(),
-  tipo: text("tipo", { enum: ["giornaliera", "settimanale", "mensile", "fine_scavo"] }).notNull(),
+  tipo: text("tipo", { enum: ["libero", "giornaliera", "settimanale", "mensile", "fine_scavo"] }).notNull(),
   titolo: text("titolo").notNull(),
   dataInizio: text("data_inizio"),
   dataFine: text("data_fine"),
@@ -386,6 +386,8 @@ export const modelliElaborato = sqliteTable("modelli_elaborato", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   nome: text("nome").notNull(),
   descrizione: text("descrizione"),
+  // Titolo predefinito dei documenti creati dal modello (accetta i segnaposto {{cantiere}} ecc.)
+  titolo: text("titolo"),
   contenuto: text("contenuto").notNull(),
   intestazione: text("intestazione"),
   createdAt: text("created_at").notNull(),

@@ -17,6 +17,7 @@ import {
   Quote, Minus, Undo2, Redo2, ImagePlus, FileText, Printer, Loader2, Download, Trash2, Check, Link2, Sparkles, BookOpen,
   Strikethrough, AlignLeft, AlignCenter, AlignRight, AlignJustify, Subscript as SubIcon, Superscript as SuperIcon,
   Highlighter, Table as TableIcon, RemoveFormatting, Link as LinkIcon, IndentIncrease, IndentDecrease, PanelRightClose, PanelRightOpen, LayoutTemplate,
+  ArrowLeft, PanelLeftClose, PanelLeftOpen, ListTree, Image as ImageIcon, Upload,
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
@@ -99,6 +100,124 @@ const SnapshotFigure = Node.create({
     return ReactNodeViewRenderer(FigureView);
   },
 });
+
+// ─── Nodo "immagine di progetto" (logo, stemma, ecc. dalle Immagini progetto) ──
+
+const IMG_WIDTHS = [
+  { value: 160, label: "Piccola" },
+  { value: 320, label: "Media" },
+  { value: 560, label: "Larga" },
+];
+
+function ProjectImageView({ node, updateAttributes, deleteNode, selected }: any) {
+  const width = Number(node.attrs.width) || 560;
+  return (
+    <NodeViewWrapper className={`my-3 text-center ${selected ? "ring-2 ring-primary rounded" : ""}`} data-drag-handle>
+      <div className="relative inline-block max-w-full group">
+        <img src={node.attrs.src} alt={node.attrs.name} style={{ width }} className="max-w-full" />
+        <div className="absolute top-1 right-1 hidden group-hover:flex items-center gap-1 bg-background/95 border border-border rounded p-0.5">
+          <select value={width} onChange={(e) => updateAttributes({ width: Number(e.target.value) })}
+            className="text-xs bg-transparent outline-none" title="Dimensione">
+            {IMG_WIDTHS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
+          </select>
+          <button type="button" onClick={() => deleteNode()} className="p-1 text-destructive" title="Rimuovi immagine"><Trash2 size={13} /></button>
+        </div>
+      </div>
+      <input
+        value={node.attrs.didascalia || ""}
+        onChange={(e) => updateAttributes({ didascalia: e.target.value })}
+        placeholder="Didascalia (facoltativa)"
+        className="block mx-auto mt-1 w-full max-w-md text-center text-sm italic bg-transparent border-0 border-b border-transparent focus:border-border outline-none"
+      />
+    </NodeViewWrapper>
+  );
+}
+
+const ProjectImage = Node.create({
+  name: "projectImage",
+  group: "block",
+  atom: true,
+  draggable: true,
+  addAttributes() {
+    return { name: { default: "" }, src: { default: "" }, didascalia: { default: "" }, width: { default: 560 } };
+  },
+  parseHTML() {
+    return [{ tag: "figure[data-project-image]" }];
+  },
+  renderHTML({ node }) {
+    return [
+      "figure",
+      { "data-project-image": node.attrs.name, style: "text-align:center" },
+      ["img", { src: node.attrs.src, style: `width:${node.attrs.width}px;max-width:100%` }],
+      ["figcaption", {}, node.attrs.didascalia || ""],
+    ];
+  },
+  addNodeView() {
+    return ReactNodeViewRenderer(ProjectImageView);
+  },
+});
+
+function ProjectImagePicker({ open, onOpenChange, onPick }: {
+  open: boolean; onOpenChange: (v: boolean) => void; onPick: (img: { name: string; url: string }) => void;
+}) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const { data, isLoading } = useQuery<any>({
+    queryKey: ["/api/project/img"],
+    queryFn: async () => (await apiRequest("GET", "/api/project/img")).json(),
+    enabled: open,
+  });
+  const files: { name: string; url: string }[] = data?.files || data?.images || [];
+
+  const upload = useMutation({
+    mutationFn: async (file: File) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/project/img", { method: "POST", body: fd });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+    onSuccess: (img: { name: string; url: string }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/project/img"] });
+      if (fileRef.current) fileRef.current.value = "";
+      onPick(img);
+      onOpenChange(false);
+    },
+    onError: (e: any) => toast({ title: "Caricamento non riuscito", description: e?.message, variant: "destructive" }),
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader><DialogTitle>Inserisci un'immagine del progetto</DialogTitle></DialogHeader>
+        <p className="text-xs text-muted-foreground -mt-2">
+          Logo, stemma o altre immagini fisse. Nell'export Word servono PNG o JPEG.
+        </p>
+        <div className="flex items-center gap-2">
+          <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" className="text-sm"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f); }} />
+          {upload.isPending && <Loader2 size={14} className="animate-spin" />}
+        </div>
+        {isLoading ? (
+          <div className="text-sm text-muted-foreground">Caricamento...</div>
+        ) : files.length === 0 ? (
+          <div className="text-sm text-muted-foreground">Nessuna immagine nel progetto: caricane una qui sopra.</div>
+        ) : (
+          <div className="grid grid-cols-4 gap-3 max-h-[50vh] overflow-y-auto">
+            {files.map((f) => (
+              <button key={f.name} type="button" onClick={() => { onPick(f); onOpenChange(false); }}
+                className="rounded border border-border overflow-hidden text-left hover:border-primary">
+                <img src={f.url} alt={f.name} className="w-full h-24 object-contain bg-white" />
+                <div className="px-2 py-1 text-xs truncate">{f.name}</div>
+              </button>
+            ))}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 // ─── Mark "usLink": collegamento [[US]] (visibile solo nell'editor) ────────────
 
@@ -186,8 +305,8 @@ function ColorTool({ title, icon, value, onPick, onClear }: {
   );
 }
 
-function Toolbar({ editor, onInsertFigure, onGenerate, onFillAll, filling }: {
-  editor: Editor; onInsertFigure: () => void; onGenerate: () => void; onFillAll: () => void; filling: boolean;
+function Toolbar({ editor, onInsertFigure, onInsertImage, onGenerate, onFillAll, filling }: {
+  editor: Editor; onInsertFigure: () => void; onInsertImage: () => void; onGenerate: () => void; onFillAll: () => void; filling: boolean;
 }) {
   const chain = () => editor.chain().focus();
   const sep = <span className="w-px h-5 bg-border mx-1" />;
@@ -220,7 +339,7 @@ function Toolbar({ editor, onInsertFigure, onGenerate, onFillAll, filling }: {
   };
 
   return (
-    <div className="border-b border-border bg-muted/30 px-2 py-1 space-y-0.5">
+    <div className="shrink-0 border-b border-border bg-muted/30 px-2 py-1 space-y-0.5">
       <div className="flex flex-wrap items-center gap-1">
         <ToolButton title="Annulla" onClick={() => chain().undo().run()} disabled={!editor.can().undo()}><Undo2 size={15} /></ToolButton>
         <ToolButton title="Ripeti" onClick={() => chain().redo().run()} disabled={!editor.can().redo()}><Redo2 size={15} /></ToolButton>
@@ -294,6 +413,10 @@ function Toolbar({ editor, onInsertFigure, onGenerate, onFillAll, filling }: {
         {sep}
         <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={onInsertFigure}>
           <ImagePlus size={14} /> Figura WebMap
+        </Button>
+        <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={onInsertImage}
+          title="Logo o altra immagine fissa dalle Immagini progetto">
+          <ImageIcon size={14} /> Immagine
         </Button>
         <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={onGenerate}>
           <Sparkles size={14} /> Da giornale
@@ -465,9 +588,57 @@ ${header.piePagina ? `<div class="ft">${esc(header.piePagina)}</div>` : ""}
   return true;
 }
 
+// ─── Indice dei capitoli ──────────────────────────────────────────────────────
+
+type HeadingItem = { pos: number; level: number; text: string; num: string };
+
+function scanHeadings(ed: Editor): HeadingItem[] {
+  const out: HeadingItem[] = [];
+  const counters = [0, 0, 0, 0];
+  ed.state.doc.descendants((node, pos) => {
+    if (node.type.name === "heading") {
+      const level = Math.min(Math.max(Number(node.attrs.level) || 1, 1), 4);
+      counters[level - 1]++;
+      for (let i = level; i < 4; i++) counters[i] = 0;
+      out.push({ pos, level, text: node.textContent.trim(), num: counters.slice(0, level).filter((n) => n > 0).join(".") });
+      return false;
+    }
+  });
+  return out;
+}
+
+function Outline({ headings, activePos, onJump }: { headings: HeadingItem[]; activePos: number | null; onJump: (pos: number) => void }) {
+  if (!headings.length) {
+    return (
+      <p className="p-3 text-xs text-muted-foreground">
+        L'indice si compone dai titoli del documento. Usa «Titolo 1», «Titolo 2»… dalla barra degli strumenti per creare capitoli e sottoparagrafi.
+      </p>
+    );
+  }
+  const minLevel = Math.min(...headings.map((h) => h.level));
+  return (
+    <nav className="py-1">
+      {headings.map((h) => (
+        <button
+          key={h.pos}
+          type="button"
+          onClick={() => onJump(h.pos)}
+          style={{ paddingLeft: 8 + (h.level - minLevel) * 14 }}
+          className={`w-full text-left pr-2 py-1 text-xs leading-snug flex gap-1.5 hover:bg-muted ${
+            activePos === h.pos ? "bg-primary/10 text-primary font-medium" : h.level === minLevel ? "font-semibold" : "text-muted-foreground"
+          }`}
+        >
+          <span className="shrink-0 tabular-nums opacity-70">{h.num}</span>
+          <span className="truncate">{h.text || "(senza titolo)"}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
 // ─── Pannello principale ──────────────────────────────────────────────────────
 
-export function RelazioneEditorPanel({ cantiereId, docId }: { cantiereId: number; docId: number }) {
+export function RelazioneEditorPanel({ cantiereId, docId, onBack }: { cantiereId: number; docId: number; onBack: () => void }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const detailKey = ["/api/cantieri", String(cantiereId), "documentazioni", String(docId)];
@@ -479,11 +650,11 @@ export function RelazioneEditorPanel({ cantiereId, docId }: { cantiereId: number
 
   if (isLoading || !data) return <div className="text-sm text-muted-foreground">Caricamento...</div>;
   // Il key rimonta l'editor quando si cambia documento
-  return <EditorBody key={docId} cantiereId={cantiereId} doc={data.documentazione} linked={data.snapshots} detailKey={detailKey} queryClient={queryClient} toast={toast} />;
+  return <EditorBody key={docId} onBack={onBack} cantiereId={cantiereId} doc={data.documentazione} linked={data.snapshots} detailKey={detailKey} queryClient={queryClient} toast={toast} />;
 }
 
-function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast }: {
-  cantiereId: number; doc: RelazioneDoc; linked: LinkedSnapshot[];
+function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, onBack }: {
+  onBack: () => void; cantiereId: number; doc: RelazioneDoc; linked: LinkedSnapshot[];
   detailKey: (string | number)[]; queryClient: ReturnType<typeof useQueryClient>; toast: ReturnType<typeof useToast>["toast"];
 }) {
   const [titolo, setTitolo] = useState(doc.titolo);
@@ -491,6 +662,10 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast }: 
   const [save, setSave] = useState<"idle" | "dirty" | "saving" | "saved">("idle");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [genOpen, setGenOpen] = useState(false);
+  const [imgOpen, setImgOpen] = useState(false);
+  const [headings, setHeadings] = useState<HeadingItem[]>([]);
+  const [activeHeading, setActiveHeading] = useState<number | null>(null);
+  const [outlineHidden, setOutlineHidden] = usePersistedFlag("elaborati-outline-hidden", false);
   const [, navigate] = useLocation();
   const { settings: codeSettings } = useProjectCodeSettings();
   const [suggest, setSuggest] = useState<Suggest | null>(null);
@@ -556,13 +731,14 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast }: 
       Superscript,
       TableKit.configure({ table: { resizable: false } }),
       SnapshotFigure,
+      ProjectImage,
       UsLink,
       AiBlock.configure({ cantiereId, docId: doc.id }),
       Placeholder.configure({ placeholder: "Scrivi la relazione, inserisci una figura dalla WebMap, oppure un blocco IA con «[# istruzione]»…" }),
     ],
     content: initialContent,
     editorProps: {
-      attributes: { class: "prose prose-sm max-w-none focus:outline-none min-h-[60vh] px-10 py-8 bg-white text-neutral-900 [--tw-prose-body:#171717] [--tw-prose-headings:#171717] [--tw-prose-bold:#171717] [--tw-prose-quotes:#171717] [--tw-prose-bullets:#525252] [--tw-prose-counters:#525252] [&_.us-link]:text-primary [&_.us-link]:border-b [&_.us-link]:border-dotted [&_.us-link]:border-primary [&_.us-link]:cursor-pointer [&_table]:border-collapse [&_table]:w-full [&_td]:border [&_th]:border [&_td]:border-neutral-300 [&_th]:border-neutral-300 [&_td]:p-1.5 [&_th]:p-1.5 [&_th]:bg-neutral-100 [&_td]:align-top [&_a]:text-blue-700 [&_a]:underline" },
+      attributes: { class: "prose prose-sm max-w-none focus:outline-none min-h-[70vh] px-10 py-8 bg-white text-neutral-900 [--tw-prose-body:#171717] [--tw-prose-headings:#171717] [--tw-prose-bold:#171717] [--tw-prose-quotes:#171717] [--tw-prose-bullets:#525252] [--tw-prose-counters:#525252] [&_.us-link]:text-primary [&_.us-link]:border-b [&_.us-link]:border-dotted [&_.us-link]:border-primary [&_.us-link]:cursor-pointer [&_table]:border-collapse [&_table]:w-full [&_td]:border [&_th]:border [&_td]:border-neutral-300 [&_th]:border-neutral-300 [&_td]:p-1.5 [&_th]:p-1.5 [&_th]:bg-neutral-100 [&_td]:align-top [&_a]:text-blue-700 [&_a]:underline" },
       handleKeyDown: (_view, event) => {
         const { suggest: sg, suggestions: list, sugIndex: idx } = live.current;
         if (!sg) return false;
@@ -585,10 +761,29 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast }: 
       const json = editor.getJSON();
       schedule({ contenuto: json });
       setUsIds(Array.from(collectUsIds(json)));
+      refreshOutline(editor);
       detectSuggest(editor);
     },
-    onSelectionUpdate: ({ editor }) => detectSuggest(editor),
+    onSelectionUpdate: ({ editor }) => { refreshOutline(editor, false); detectSuggest(editor); },
   });
+
+  // Indice dei capitoli e capitolo in cui si trova il cursore
+  function refreshOutline(ed: Editor, rescan = true) {
+    const list = rescan ? scanHeadings(ed) : (outlineRef.current);
+    if (rescan) { outlineRef.current = list; setHeadings(list); }
+    const from = ed.state.selection.from;
+    const current = [...list].reverse().find((h) => h.pos < from);
+    setActiveHeading(current ? current.pos : null);
+  }
+  const outlineRef = useRef<HeadingItem[]>([]);
+  useEffect(() => { if (editor) refreshOutline(editor); }, [editor]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const jumpTo = (pos: number) => {
+    if (!editor) return;
+    editor.chain().focus().setTextSelection(pos + 1).run();
+    const dom = editor.view.nodeDOM(pos) as HTMLElement | null;
+    dom?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   // Riconosce "[[testo" prima del cursore e apre il suggeritore US
   function detectSuggest(ed: Editor) {
@@ -627,7 +822,7 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast }: 
     const nome = window.prompt("Nome del modello? Restano titoli, testo fisso e prompt dei blocchi IA; il testo già generato non viene salvato.", doc.titolo);
     if (!nome?.trim()) return;
     try {
-      await apiRequest("POST", "/api/modelli-elaborato", { nome: nome.trim(), contenuto: editor?.getJSON(), intestazione: header });
+      await apiRequest("POST", "/api/modelli-elaborato", { nome: nome.trim(), titolo, contenuto: editor?.getJSON(), intestazione: header });
       queryClient.invalidateQueries({ queryKey: ["/api/modelli-elaborato"] });
       toast({ title: "Modello salvato", description: "Lo trovi in «Modello» quando crei un nuovo documento." });
     } catch (e: any) {
@@ -681,8 +876,11 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast }: 
   if (!editor) return null;
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-3">
+    <div className="flex flex-col h-full min-h-0 gap-2">
+      <div className="shrink-0 flex items-center gap-3">
+        <Button type="button" variant="ghost" size="sm" className="gap-1.5 shrink-0" onClick={onBack} title="Torna all'elenco dei documenti">
+          <ArrowLeft size={15} /> Documenti
+        </Button>
         <Input
           value={titolo}
           onChange={(e) => { setTitolo(e.target.value); if (e.target.value.trim()) schedule({ titolo: e.target.value }); }}
@@ -696,29 +894,60 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast }: 
         </span>
       </div>
 
-      <div className="grid grid-cols-[1fr_auto] gap-3 items-start">
-        <div className="rounded border border-border bg-background overflow-hidden">
-          {header.intestazione && (
-            <div className="text-center text-xs text-muted-foreground border-b border-dashed border-border py-1.5 bg-muted/20">
-              {header.intestazione}
+      {/* Tre colonne fisse: scorre solo il foglio */}
+      <div className="flex-1 min-h-0 flex gap-3">
+        {outlineHidden ? (
+          <div className="shrink-0">
+            <Button type="button" variant="outline" size="icon" className="h-8 w-8" title="Mostra l'indice dei capitoli"
+              onClick={() => setOutlineHidden(false)}>
+              <PanelLeftOpen size={15} />
+            </Button>
+          </div>
+        ) : (
+          <aside className="w-56 shrink-0 min-h-0 flex flex-col rounded border border-border bg-background">
+            <div className="shrink-0 flex items-center justify-between px-2 py-1.5 border-b border-border">
+              <span className="text-xs font-semibold flex items-center gap-1.5"><ListTree size={13} /> Indice</span>
+              <button type="button" title="Nascondi l'indice" aria-label="Nascondi l'indice" onClick={() => setOutlineHidden(true)}
+                className="h-6 w-6 inline-flex items-center justify-center rounded text-muted-foreground hover:bg-muted">
+                <PanelLeftClose size={14} />
+              </button>
             </div>
-          )}
-          <Toolbar editor={editor} onInsertFigure={() => setPickerOpen(true)} onGenerate={() => setGenOpen(true)} onFillAll={fillAll} filling={filling} />
-          <EditorContent editor={editor} />
-          {(header.piePagina || header.numeroPagina) && (
-            <div className="text-center text-xs text-muted-foreground border-t border-dashed border-border py-1.5 bg-muted/20">
-              {header.piePagina}{header.piePagina && header.numeroPagina ? " · " : ""}{header.numeroPagina ? "Pagina n. di N" : ""}
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              <Outline headings={headings} activePos={activeHeading} onJump={jumpTo} />
             </div>
-          )}
+          </aside>
+        )}
+
+        <div className="flex-1 min-w-0 min-h-0 flex flex-col rounded border border-border overflow-hidden">
+          <Toolbar editor={editor} onInsertFigure={() => setPickerOpen(true)} onInsertImage={() => setImgOpen(true)}
+            onGenerate={() => setGenOpen(true)} onFillAll={fillAll} filling={filling} />
+          <div className="flex-1 min-h-0 overflow-y-auto bg-muted/50 p-4">
+            <div className="mx-auto max-w-[820px] bg-white text-neutral-900 shadow-md">
+              {header.intestazione && (
+                <div className="text-center text-xs text-neutral-500 border-b border-dashed border-neutral-300 py-1.5 mx-10">
+                  {header.intestazione}
+                </div>
+              )}
+              <EditorContent editor={editor} />
+              {(header.piePagina || header.numeroPagina) && (
+                <div className="text-center text-xs text-neutral-500 border-t border-dashed border-neutral-300 py-1.5 mx-10">
+                  {header.piePagina}{header.piePagina && header.numeroPagina ? " · " : ""}{header.numeroPagina ? "Pagina n. di N" : ""}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         {sideHidden ? (
-          <Button type="button" variant="outline" size="icon" className="h-8 w-8" title="Mostra intestazione, esporta e collegamenti"
-            onClick={() => setSideHidden(false)}>
-            <PanelRightOpen size={15} />
-          </Button>
+          <div className="shrink-0">
+            <Button type="button" variant="outline" size="icon" className="h-8 w-8" title="Mostra intestazione, esporta e collegamenti"
+              onClick={() => setSideHidden(false)}>
+              <PanelRightOpen size={15} />
+            </Button>
+          </div>
         ) : (
-        <div className="w-64 space-y-3 rounded border border-border p-3">
+          <aside className="w-64 shrink-0 min-h-0 overflow-y-auto">
+    <div className="space-y-3 rounded border border-border bg-background p-3">
           <div className="flex items-center justify-between">
             <div className="text-sm font-medium">Intestazione e piè di pagina</div>
             <button type="button" title="Nascondi il pannello" aria-label="Nascondi il pannello" onClick={() => setSideHidden(true)}
@@ -750,7 +979,7 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast }: 
             />
             Numero di pagina
           </label>
-
+    
           <div className="pt-3 border-t border-border space-y-1.5">
             <div className="text-sm font-medium flex items-center gap-1.5"><Link2 size={13} /> US collegate ({usIds.length})</div>
             <p className="text-xs text-muted-foreground">
@@ -773,7 +1002,7 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast }: 
               })}
             </div>
           </div>
-
+    
           <div className="pt-3 border-t border-border space-y-2">
             <div className="text-sm font-medium">Esporta</div>
             <Button className="w-full gap-2" onClick={() => generate.mutate()} disabled={generate.isPending}>
@@ -802,6 +1031,7 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast }: 
             </Button>
           </div>
         </div>
+          </aside>
         )}
       </div>
 
@@ -832,6 +1062,14 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast }: 
         defaultFrom={doc.dataInizio}
         defaultTo={doc.dataFine}
         onInsert={(nodes) => editor.chain().focus("end").insertContent(nodes).run()}
+      />
+
+      <ProjectImagePicker
+        open={imgOpen}
+        onOpenChange={setImgOpen}
+        onPick={(img) =>
+          editor.chain().focus().insertContent({ type: "projectImage", attrs: { name: img.name, src: img.url, didascalia: "", width: 320 } }).run()
+        }
       />
 
       <FigurePicker
