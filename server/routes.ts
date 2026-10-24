@@ -24,6 +24,7 @@ import { registerQFieldRoutes } from "./routes/qfield";
 import syncRouter from "./routes/sync";
 import { registerWebMapRoutes } from "./routes/webmap_routes";
 import { registerDocumentazioniRoutes } from "./routes/documentazioni";
+import { registerDocumentazioniImportRoutes } from "./routes/documentazioni_import";
 import type { ProjectContext, ProjectHandler } from "./routes/types";
 import {
   buildTargetAttachmentRelativePath,
@@ -707,6 +708,7 @@ export async function registerRoutes(_httpServer: Server, app: Express): Promise
     withProject,
     resolvePathInside,
   });
+  registerDocumentazioniImportRoutes(app, withProject);
 
   registerSettingsRoutes(app, withProject);
 

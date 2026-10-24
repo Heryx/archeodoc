@@ -34,6 +34,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { NuovoDocumentoForm } from "@/components/relazioni/NuovoDocumentoForm";
+import { RelazioneImportDialog } from "@/components/relazioni/RelazioneImportDialog";
 import { RelazioniGrafo } from "@/components/relazioni/RelazioniGrafo";
 import { RelazioneEditorPanel } from "@/components/relazioni/RelazioneEditor";
 
@@ -696,6 +697,7 @@ function DocumentazioniTab({ cantiereId, onOpen }: { cantiereId: number; onOpen:
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [newOpen, setNewOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   const docsQuery = useQuery<{ documentazioni: DocumentazioneRecord[] }>({
     queryKey: ["/api/cantieri", String(cantiereId), "documentazioni"],
@@ -719,9 +721,14 @@ function DocumentazioniTab({ cantiereId, onOpen }: { cantiereId: number; onOpen:
         <p className="text-sm text-muted-foreground max-w-2xl">
           Relazioni e documenti per la committenza. Si possono scrivere liberamente, partire da un modello, oppure collegare un periodo del giornale di scavo come aggiunta.
         </p>
-        <Button className="gap-2 shrink-0" onClick={() => setNewOpen(true)}>
-          <Plus size={14} /> Nuovo documento
-        </Button>
+        <div className="flex items-center gap-2 shrink-0">
+          <Button variant="outline" className="gap-2" onClick={() => setImportOpen(true)}>
+            <Upload size={14} /> Importa da Word
+          </Button>
+          <Button className="gap-2" onClick={() => setNewOpen(true)}>
+            <Plus size={14} /> Nuovo documento
+          </Button>
+        </div>
       </div>
 
       {docsQuery.isLoading ? (
@@ -758,6 +765,13 @@ function DocumentazioniTab({ cantiereId, onOpen }: { cantiereId: number; onOpen:
           ))}
         </div>
       )}
+
+      <RelazioneImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        cantiereId={cantiereId}
+        onCreated={(id) => { if (id != null) onOpen(id); }}
+      />
 
       <Dialog open={newOpen} onOpenChange={setNewOpen}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
