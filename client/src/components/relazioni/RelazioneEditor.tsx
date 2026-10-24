@@ -13,9 +13,12 @@ import Subscript from "@tiptap/extension-subscript";
 import Superscript from "@tiptap/extension-superscript";
 import { TableKit } from "@tiptap/extension-table";
 import {
-  FigurePanel, ProjectImage, SnapshotFigure, figureNodeFor, isFigureName, isImageFile, selectedFigure, uploadProjectImage,
+  FigurePanel, FigurePlacement, ProjectImage, SnapshotFigure, figureNodeFor, isFigureName, isImageFile, moveFigureTo, selectedFigure,
+  startPlacing, stopPlacing, uploadProjectImage,
 } from "@/components/relazioni/FigureTools";
-import { RTable, RTableCell, RTableHeader, TablePanel, currentTable } from "@/components/relazioni/TableTools";
+import {
+  RTable, RTableCell, RTableHeader, RTableRow, TableBorderStyles, TablePanel, applyTableStylesToHtml, currentTable,
+} from "@/components/relazioni/TableTools";
 import {
   Bold, Italic, Underline as UnderlineIcon, Heading1, Heading2, Heading3, List, ListOrdered,
   Quote, Minus, Undo2, Redo2, ImagePlus, FileText, Printer, Loader2, Download, Trash2, Check, Link2, Sparkles, BookOpen,
@@ -441,7 +444,7 @@ figure { margin: 12px 0; text-align: center; break-inside: avoid; } figure img {
 figcaption { font-style: italic; font-size: 10pt; }
 blockquote { margin-left: 18px; padding-left: 10px; border-left: 3px solid #ccc; }
 p { margin: 0 0 8px; }
-table { border-collapse: collapse; width: 100%; margin: 8px 0; } td, th { border: 1px solid #888; padding: 4px 6px; vertical-align: top; } th { background: #eee; }
+table { border-collapse: collapse; width: 100%; margin: 8px 0; } td, th { padding: var(--cp, 4px 6px); vertical-align: top; } th { background: #eee; }
 mark { padding: 0 1px; }
 </style></head><body>
 ${header.intestazione ? `<div class="hd">${esc(header.intestazione)}</div>` : ""}
@@ -537,6 +540,8 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
   const [sideTab, setSideTab] = useState<"doc" | "figure" | "table">("doc");
   const [, setTick] = useState(0);
   const [uploading, setUploading] = useState(false);
+  const [placing, setPlacing] = useState(false);
+  const [askWhere, setAskWhere] = usePersistedFlag("elaborati-fig-ask-where", false);
   const [headings, setHeadings] = useState<HeadingItem[]>([]);
   const [activeHeading, setActiveHeading] = useState<number | null>(null);
   const [outlineHidden, setOutlineHidden] = usePersistedFlag("elaborati-outline-hidden", false);
@@ -603,19 +608,22 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
       TextAlign.configure({ types: ["heading", "paragraph"] }),
       Subscript,
       Superscript,
-      TableKit.configure({ table: false, tableCell: false, tableHeader: false }),
+      TableKit.configure({ table: false, tableCell: false, tableHeader: false, tableRow: false }),
       RTable,
+      RTableRow,
       RTableCell,
       RTableHeader,
+      TableBorderStyles,
       SnapshotFigure,
       ProjectImage,
+      FigurePlacement,
       UsLink,
       AiBlock.configure({ cantiereId, docId: doc.id }),
       Placeholder.configure({ placeholder: "Scrivi la relazione, inserisci una figura dalla WebMap, oppure un blocco IA con «[# istruzione]»…" }),
     ],
     content: initialContent,
     editorProps: {
-      attributes: { class: "relazione-doc prose prose-sm max-w-none focus:outline-none min-h-[70vh] px-10 py-8 bg-white text-neutral-900 [--tw-prose-body:#171717] [--tw-prose-headings:#171717] [--tw-prose-bold:#171717] [--tw-prose-quotes:#171717] [--tw-prose-bullets:#525252] [--tw-prose-counters:#525252] [&_.us-link]:text-primary [&_.us-link]:border-b [&_.us-link]:border-dotted [&_.us-link]:border-primary [&_.us-link]:cursor-pointer [&_table]:border-collapse [&_table]:w-full [&_td]:border [&_th]:border [&_td]:border-neutral-300 [&_th]:border-neutral-300 [&_td]:p-1.5 [&_th]:p-1.5 [&_th]:bg-neutral-100 [&_td]:align-top [&_a]:text-blue-700 [&_a]:underline" },
+      attributes: { class: "relazione-doc prose prose-sm max-w-none focus:outline-none min-h-[70vh] px-10 py-8 bg-white text-neutral-900 [--tw-prose-body:#171717] [--tw-prose-headings:#171717] [--tw-prose-bold:#171717] [--tw-prose-quotes:#171717] [--tw-prose-bullets:#525252] [--tw-prose-counters:#525252] [&_.us-link]:text-primary [&_.us-link]:border-b [&_.us-link]:border-dotted [&_.us-link]:border-primary [&_.us-link]:cursor-pointer [&_a]:text-blue-700 [&_a]:underline" },
       handleKeyDown: (_view, event) => {
         const { suggest: sg, suggestions: list, sugIndex: idx } = live.current;
         if (!sg) return false;
@@ -676,15 +684,42 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
   const wasTable = useRef(false);
 
   // Inserisce figure nel punto indicato, altrimenti al cursore; con una figura selezionata vanno dopo di essa
-  // (inserire sopra una selezione di nodo la sostituirebbe)
+  // (inserire sopra una selezione di nodo la sostituirebbe). Con «scegli dove» attivo si indica il punto nel documento.
   function insertFigureNodes(nodes: any[], at?: number) {
     if (!editor) return;
+    if (at == null && askWhere) {
+      beginPlacing(null, (pos) => editor.chain().focus().insertContentAt(pos, nodes).run());
+      return;
+    }
     const sel = selectedFigure(editor);
     const chain = editor.chain().focus();
     if (at != null) chain.insertContentAt(at, nodes);
     else if (sel) chain.insertContentAt(sel.pos + sel.node.nodeSize, nodes);
     else chain.insertContent(nodes);
     chain.run();
+  }
+
+  // Mostra le icone «Metti qui» tra i blocchi del documento; il clic su una di esse esegue onPick
+  function beginPlacing(skip: import("@tiptap/pm/model").Node | null, onPick: (pos: number) => void) {
+    if (!editor) return;
+    setPlacing(true);
+    startPlacing(editor, { skip, onPick, onEnd: () => setPlacing(false) });
+  }
+
+  function moveSelectedFigure() {
+    if (!editor) return;
+    const sel = selectedFigure(editor);
+    if (!sel) return;
+    beginPlacing(sel.node, (pos) => {
+      const cur = selectedFigure(editor);
+      // la figura può essere stata deselezionata nel frattempo: la ritroviamo per identità
+      const ref = cur && cur.node === sel.node ? cur : (() => {
+        let found: { pos: number; node: import("@tiptap/pm/model").Node } | null = null;
+        editor.state.doc.descendants((n, p) => { if (n === sel.node) { found = { pos: p, node: n }; return false; } });
+        return found;
+      })();
+      if (ref) moveFigureTo(editor, ref, pos);
+    });
   }
 
   // Carica immagini esterne e le inserisce come figure (nel punto indicato, altrimenti al cursore)
@@ -714,7 +749,7 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
       type: "projectImage",
       attrs: {
         name: img.name, src: img.url, didascalia: sel.node.attrs.didascalia || "",
-        widthPct: sel.node.attrs.widthPct ?? null, width: sel.node.attrs.width ?? null, align: sel.node.attrs.align || "center",
+        widthPct: sel.node.attrs.widthPct ?? null, width: sel.node.attrs.width ?? null, align: sel.node.attrs.align || "center", wrap: sel.node.attrs.wrap || "none",
       },
     }).run();
   }
@@ -888,6 +923,13 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
             onInsertImage={() => { setSideHidden(false); setSideTab("figure"); }}
             onOpenTables={() => { setSideHidden(false); setSideTab("table"); }}
             onGenerate={() => setGenOpen(true)} onFillAll={fillAll} filling={filling} />
+          {placing && (
+            <div className="shrink-0 flex items-center gap-2 border-b border-primary/30 bg-primary/10 px-3 py-1.5 text-xs text-primary">
+              <span className="font-medium">Scegli il punto:</span>
+              <span>clicca una delle icone «Metti qui» tra i blocchi del documento.</span>
+              <Button type="button" size="sm" variant="outline" className="ml-auto h-6 px-2 text-xs" onClick={() => stopPlacing(editor.view)}>Annulla</Button>
+            </div>
+          )}
           <div className="flex-1 min-h-0 overflow-auto bg-muted/50 p-4">
             {/* Foglio a larghezza fissa (testo = 740 px): figure e tabelle si misurano su questa base, come nell'export */}
             <div className="mx-auto w-[820px] shrink-0 bg-white text-neutral-900 shadow-md">
@@ -932,6 +974,11 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
                 <FigurePanel
                   editor={editor}
                   uploading={uploading}
+                  placing={placing}
+                  askWhere={askWhere}
+                  onAskWhere={setAskWhere}
+                  onMove={moveSelectedFigure}
+                  onCancelMove={() => stopPlacing(editor.view)}
                   onUploadFiles={(files) => void insertImages(files)}
                   onPickProject={() => { setPickMode("insert"); setImgOpen(true); }}
                   onPickSnapshot={() => setPickerOpen(true)}
@@ -1006,7 +1053,7 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
               variant="outline"
               className="w-full gap-2"
               onClick={() => {
-                if (!printAsPdf(editor.getHTML().replace(/<span[^>]*data-us-id[^>]*>([\s\S]*?)<\/span>/g, "$1"), header, titolo)) {
+                if (!printAsPdf(applyTableStylesToHtml(editor.getHTML(), editor).replace(/<span[^>]*data-us-id[^>]*>([\s\S]*?)<\/span>/g, "$1"), header, titolo)) {
                   toast({ title: "Popup bloccato", description: "Consenti i popup per esportare il PDF.", variant: "destructive" });
                 }
               }}
@@ -1075,7 +1122,7 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
         onPick={(s) =>
           insertFigureNodes([{
             type: "snapshotFigure",
-            attrs: { snapshotId: s.id, src: s.url, didascalia: s.didascalia || s.titolo, widthPct: 100, align: "center" },
+            attrs: { snapshotId: s.id, src: s.url, didascalia: s.didascalia || s.titolo, widthPct: 100, align: "center", wrap: "none" },
           }])
         }
       />

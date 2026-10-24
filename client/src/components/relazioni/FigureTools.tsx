@@ -1,10 +1,14 @@
-import { useRef } from "react";
-import { Node, NodeViewWrapper, ReactNodeViewRenderer, type Editor } from "@tiptap/react";
-import { NodeSelection } from "@tiptap/pm/state";
+import { useEffect, useRef } from "react";
+import { Extension, Node, NodeViewWrapper, ReactNodeViewRenderer, type Editor } from "@tiptap/react";
+import { NodeSelection, Plugin, PluginKey } from "@tiptap/pm/state";
+import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
+import type { Node as PmNode } from "@tiptap/pm/model";
 import {
-  AlignCenter, AlignLeft, AlignRight, ArrowDown, ArrowUp, Copy, Folder, ImagePlus, Map as MapIcon, RefreshCw, Trash2, Upload,
+  ArrowDown, ArrowUp, Copy, Crosshair, Folder, GripVertical, ImagePlus, Map as MapIcon, RefreshCw, Trash2, Upload, X,
 } from "lucide-react";
-import { RELAZIONE_EXPORT_WIDTH_PX, RELAZIONE_TEXT_WIDTH_PX, figureWidthPct, type FigureAlign } from "@shared/relazione_layout";
+import {
+  RELAZIONE_EXPORT_WIDTH_PX, RELAZIONE_TEXT_WIDTH_PX, figureFloatSide, figureWidthPct, figureWrap, type FigureAlign, type FigureWrap,
+} from "@shared/relazione_layout";
 import { buildProjectUrl } from "@/lib/project";
 import { Button } from "@/components/ui/button";
 
@@ -18,6 +22,8 @@ const snapStep = (n: number) => Math.min(100, Math.max(10, Math.round(n / 5) * 5
 function FigureView({ node, updateAttributes, deleteNode, selected }: any) {
   const pct = figureWidthPct(node.attrs);
   const align: FigureAlign = node.attrs.align || "center";
+  const floated = figureWrap(node.attrs) === "square";
+  const side = figureFloatSide(node.attrs);
   const wrapRef = useRef<HTMLDivElement>(null);
 
   // Trascinando l'angolo la larghezza cambia in % del foglio (a scatti di 5)
@@ -28,9 +34,10 @@ function FigureView({ node, updateAttributes, deleteNode, selected }: any) {
     handle.setPointerCapture(e.pointerId);
     const startX = e.clientX;
     const startPct = pct;
-    const full = wrapRef.current?.clientWidth || RELAZIONE_TEXT_WIDTH_PX;
-    const factor = align === "center" ? 2 : 1;
-    const move = (ev: PointerEvent) => updateAttributes({ widthPct: snapStep(startPct + ((ev.clientX - startX) / full) * 100 * factor) });
+    const full = floated ? RELAZIONE_TEXT_WIDTH_PX : wrapRef.current?.clientWidth || RELAZIONE_TEXT_WIDTH_PX;
+    const factor = !floated && align === "center" ? 2 : 1;
+    const sign = align === "right" ? -1 : 1;
+    const move = (ev: PointerEvent) => updateAttributes({ widthPct: snapStep(startPct + (sign * (ev.clientX - startX) / full) * 100 * factor) });
     const up = () => {
       handle.removeEventListener("pointermove", move);
       handle.removeEventListener("pointerup", up);
@@ -40,10 +47,26 @@ function FigureView({ node, updateAttributes, deleteNode, selected }: any) {
   };
 
   return (
-    <NodeViewWrapper className="my-4" data-drag-handle style={{ textAlign: align }}>
+    <NodeViewWrapper
+      className={floated ? "relazione-float" : "my-4"}
+      data-wrap={floated ? "square" : "none"}
+      style={floated
+        ? { float: side, width: `${pct}%`, margin: side === "left" ? "4px 18px 8px 0" : "4px 0 8px 18px" }
+        : { textAlign: align }}
+    >
       <div ref={wrapRef} className="w-full">
-        <div className={`relative inline-block max-w-full group align-top ${selected ? "ring-2 ring-primary rounded-sm" : ""}`} style={{ width: `${pct}%` }}>
-          <img src={node.attrs.src} alt={node.attrs.didascalia || ""} draggable={false} className="block w-full h-auto" />
+        <div
+          className={`relative group align-top ${floated ? "block" : "inline-block max-w-full"} ${selected ? "ring-2 ring-primary rounded-sm" : ""}`}
+          style={{ width: floated ? "100%" : `${pct}%` }}
+        >
+          <img src={node.attrs.src} alt={node.attrs.didascalia || ""} draggable={false} data-drag-handle className="block w-full h-auto cursor-grab" />
+          <span
+            data-drag-handle
+            title="Trascina per spostare la figura in un altro punto del documento"
+            className={`absolute left-1 top-1 h-6 w-5 items-center justify-center rounded bg-background/90 border border-border text-muted-foreground cursor-grab ${selected ? "flex" : "hidden group-hover:flex"}`}
+          >
+            <GripVertical size={14} />
+          </span>
           <button
             type="button"
             onClick={() => deleteNode()}
@@ -56,18 +79,18 @@ function FigureView({ node, updateAttributes, deleteNode, selected }: any) {
             <span
               onPointerDown={startResize}
               title="Trascina per ridimensionare"
-              className="absolute -bottom-1.5 -right-1.5 h-3.5 w-3.5 rounded-sm bg-primary border-2 border-white cursor-nwse-resize touch-none"
+              className={`absolute -bottom-1.5 h-3.5 w-3.5 rounded-sm bg-primary border-2 border-white touch-none ${align === "right" ? "-left-1.5 cursor-nesw-resize" : "-right-1.5 cursor-nwse-resize"}`}
             />
           )}
           {selected && (
-            <span className="absolute left-1 top-1 rounded bg-primary px-1.5 py-0.5 text-[10px] font-medium text-primary-foreground pointer-events-none">{pct}%</span>
+            <span className="absolute left-8 top-1 rounded bg-primary px-1.5 py-0.5 text-[10px] font-medium text-primary-foreground pointer-events-none">{pct}%</span>
           )}
         </div>
         <input
           value={node.attrs.didascalia || ""}
           onChange={(e) => updateAttributes({ didascalia: e.target.value })}
           placeholder="Didascalia della figura"
-          style={{ width: `${Math.max(pct, 40)}%` }}
+          style={{ width: floated ? "100%" : `${Math.max(pct, 40)}%` }}
           className="block mt-1 mx-auto text-center text-sm italic bg-transparent border-0 border-b border-transparent focus:border-border outline-none max-w-full"
         />
       </div>
@@ -81,15 +104,21 @@ const figureAttrs = {
   // % del testo; null = ricavata dal vecchio attributo "width" o 100
   widthPct: { default: null as number | null, parseHTML: (el: HTMLElement) => Number(el.getAttribute("data-width-pct")) || null },
   align: { default: "center", parseHTML: (el: HTMLElement) => el.getAttribute("data-align") || "center" },
+  wrap: { default: "none", parseHTML: (el: HTMLElement) => (el.getAttribute("data-wrap") === "square" ? "square" : "none") },
 };
 
 function renderFigure(name: string, dataKey: string, node: any) {
   const pct = figureWidthPct(node.attrs);
   const align = node.attrs.align || "center";
+  const floated = figureWrap(node.attrs) === "square";
+  const side = figureFloatSide(node.attrs);
+  const style = floated
+    ? `float:${side};width:${pct}%;margin:4px ${side === "left" ? "18px 8px 0" : "0 8px 18px"};text-align:center`
+    : `text-align:${align}`;
   return [
     "figure",
-    { [dataKey]: name, "data-width-pct": pct, "data-align": align, style: `text-align:${align}` },
-    ["img", { src: node.attrs.src, style: `width:${pct}%;max-width:100%` }],
+    { [dataKey]: name, "data-width-pct": pct, "data-align": align, "data-wrap": floated ? "square" : "none", style },
+    ["img", { src: node.attrs.src, style: floated ? "width:100%" : `width:${pct}%;max-width:100%` }],
     ["figcaption", {}, node.attrs.didascalia || ""],
   ] as any;
 }
@@ -168,7 +197,7 @@ export async function uploadProjectImage(file: File, index = 0): Promise<Uploade
 }
 
 export function figureNodeFor(img: UploadedImage) {
-  return { type: "projectImage", attrs: { name: img.name, src: img.url, didascalia: "", widthPct: img.widthPct, align: "center" } };
+  return { type: "projectImage", attrs: { name: img.name, src: img.url, didascalia: "", widthPct: img.widthPct, align: "center", wrap: "none" } };
 }
 
 // ─── Operazioni sulla figura selezionata ──────────────────────────────────────
@@ -203,6 +232,97 @@ function moveBlock(editor: Editor, ref: FigureRef, dir: -1 | 1) {
   view.dispatch(tr.scrollIntoView());
 }
 
+// Sposta la figura nel punto indicato (posizione tra due blocchi del documento)
+export function moveFigureTo(editor: Editor, ref: FigureRef, pos: number) {
+  const { state, view } = editor;
+  const from = ref.pos;
+  const to = from + ref.node.nodeSize;
+  if (pos >= from && pos <= to) return;
+  const tr = state.tr.delete(from, to);
+  const at = tr.mapping.map(pos);
+  tr.insert(at, ref.node);
+  tr.setSelection(NodeSelection.create(tr.doc, at));
+  view.dispatch(tr.scrollIntoView());
+}
+
+// ─── Punti di inserimento ─────────────────────────────────────────────────────
+// Mentre si sceglie dove mettere una figura, tra un blocco e l'altro del documento compare
+// un'icona «Metti qui»: un clic su di essa conclude l'operazione.
+
+type PlaceState = { active: boolean; skip: PmNode | null; onPick: ((pos: number) => void) | null; onEnd: (() => void) | null };
+const IDLE: PlaceState = { active: false, skip: null, onPick: null, onEnd: null };
+const placeKey = new PluginKey<PlaceState>("figurePlacement");
+
+const SLOT_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/></svg>';
+
+function setPlacing(view: EditorView, next: PlaceState) {
+  view.dispatch(view.state.tr.setMeta(placeKey, next).setMeta("addToHistory", false));
+}
+
+export function stopPlacing(view: EditorView) {
+  const st = placeKey.getState(view.state);
+  if (!st?.active) return;
+  setPlacing(view, IDLE);
+  st.onEnd?.();
+}
+
+export function startPlacing(editor: Editor, opts: { skip?: PmNode | null; onPick: (pos: number) => void; onEnd?: () => void }) {
+  stopPlacing(editor.view);
+  setPlacing(editor.view, { active: true, skip: opts.skip ?? null, onPick: opts.onPick, onEnd: opts.onEnd ?? null });
+}
+
+export const FigurePlacement = Extension.create({
+  name: "figurePlacement",
+  addProseMirrorPlugins() {
+    return [
+      new Plugin<PlaceState>({
+        key: placeKey,
+        state: {
+          init: () => IDLE,
+          apply: (tr, prev) => tr.getMeta(placeKey) ?? prev,
+        },
+        props: {
+          decorations(state) {
+            const st = placeKey.getState(state);
+            if (!st?.active) return null;
+            const skipAt = new Set<number>();
+            const bounds: number[] = [];
+            state.doc.forEach((child, offset) => {
+              bounds.push(offset);
+              if (child === st.skip) { skipAt.add(offset); skipAt.add(offset + child.nodeSize); }
+            });
+            bounds.push(state.doc.content.size);
+            return DecorationSet.create(
+              state.doc,
+              bounds.filter((pos) => !skipAt.has(pos)).map((pos) =>
+                Decoration.widget(pos, (view) => {
+                  const el = document.createElement("div");
+                  el.className = "fig-slot";
+                  el.contentEditable = "false";
+                  el.innerHTML = `<span class="fig-slot-pill">${SLOT_ICON}Metti qui</span>`;
+                  el.addEventListener("mousedown", (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const cur = placeKey.getState(view.state);
+                    if (!cur?.active) return;
+                    stopPlacing(view);
+                    cur.onPick?.(pos);
+                  });
+                  return el;
+                }, { side: -1, key: `fig-slot-${pos}`, stopEvent: () => true, ignoreSelection: true }),
+              ),
+            );
+          },
+          handleKeyDown(view, event) {
+            if (event.key === "Escape" && placeKey.getState(view.state)?.active) { stopPlacing(view); return true; }
+            return false;
+          },
+        },
+      }),
+    ];
+  },
+});
+
 function selectFigure(editor: Editor, pos: number) {
   editor.chain().focus().setNodeSelection(pos).run();
   (editor.view.nodeDOM(pos) as HTMLElement | null)?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -211,11 +331,47 @@ function selectFigure(editor: Editor, pos: number) {
 // ─── Pannello Figure ──────────────────────────────────────────────────────────
 
 const PRESETS = [25, 33, 50, 75, 100];
-const ALIGNS: { value: FigureAlign; label: string; icon: React.ReactNode }[] = [
-  { value: "left", label: "A sinistra", icon: <AlignLeft size={15} /> },
-  { value: "center", label: "Al centro", icon: <AlignCenter size={15} /> },
-  { value: "right", label: "A destra", icon: <AlignRight size={15} /> },
+
+type LayoutId = "left" | "center" | "right" | "float-left" | "float-right";
+const LAYOUTS: { id: LayoutId; wrap: FigureWrap; align: FigureAlign; label: string }[] = [
+  { id: "left", wrap: "none", align: "left", label: "A sinistra, da sola sulla riga" },
+  { id: "center", wrap: "none", align: "center", label: "Al centro, da sola sulla riga" },
+  { id: "right", wrap: "none", align: "right", label: "A destra, da sola sulla riga" },
+  { id: "float-left", wrap: "square", align: "left", label: "Figura a sinistra, testo a fianco" },
+  { id: "float-right", wrap: "square", align: "right", label: "Figura a destra, testo a fianco" },
 ];
+
+// Schema della pagina: righe di testo in grigio e la figura in colore
+function LayoutIcon({ id }: { id: LayoutId }) {
+  const line = (x: number, y: number, w: number) => <rect key={`${x}-${y}`} x={x} y={y} width={w} height={1.8} rx={0.9} fill="currentColor" opacity={0.35} />;
+  const fig = (x: number, y: number, w: number, h: number) => <rect x={x} y={y} width={w} height={h} rx={1.5} fill="currentColor" />;
+  let body: React.ReactNode;
+  if (id === "float-left" || id === "float-right") {
+    const left = id === "float-left";
+    body = (
+      <>
+        {fig(left ? 4 : 17, 4, 11, 10)}
+        {[4, 7.5, 11].map((y) => line(left ? 18 : 4, y, 10))}
+        {[16.5, 20].map((y) => line(4, y, 24))}
+      </>
+    );
+  } else {
+    const x = id === "left" ? 4 : id === "right" ? 17 : 10.5;
+    body = (
+      <>
+        {line(4, 3, 24)}
+        {fig(x, 7, 11, 9)}
+        {line(4, 19.5, 24)}
+        {line(4, 23, 16)}
+      </>
+    );
+  }
+  return (
+    <svg width="34" height="28" viewBox="0 0 32 27" className="rounded-sm bg-background" aria-hidden>
+      {body}
+    </svg>
+  );
+}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -226,9 +382,17 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-export function FigurePanel({ editor, uploading, onUploadFiles, onPickProject, onPickSnapshot, onReplaceProject, onReplaceUpload }: {
+export function FigurePanel({
+  editor, uploading, placing, askWhere, onAskWhere, onMove, onCancelMove,
+  onUploadFiles, onPickProject, onPickSnapshot, onReplaceProject, onReplaceUpload,
+}: {
   editor: Editor;
   uploading: boolean;
+  placing: boolean;
+  askWhere: boolean;
+  onAskWhere: (v: boolean) => void;
+  onMove: () => void;
+  onCancelMove: () => void;
   onUploadFiles: (files: File[]) => void;
   onPickProject: () => void;
   onPickSnapshot: () => void;
@@ -242,14 +406,27 @@ export function FigurePanel({ editor, uploading, onUploadFiles, onPickProject, o
   const set = (attrs: Record<string, unknown>) => editor.chain().focus().updateAttributes(sel!.node.type.name, attrs).run();
   const pct = sel ? figureWidthPct(sel.node.attrs) : 100;
   const align = (sel?.node.attrs.align as FigureAlign) || "center";
+  const wrap = sel ? figureWrap(sel.node.attrs) : "none";
+  const layout: LayoutId = wrap === "square" ? (align === "right" ? "float-right" : "float-left") : align;
   const index = sel ? all.findIndex((f) => f.pos === sel.pos) : -1;
   const cm = ((pct / 100) * (RELAZIONE_EXPORT_WIDTH_PX / 96) * 2.54).toFixed(1);
+
+  // Con il testo a fianco una figura molto larga lascerebbe poco spazio alle parole
+  const applyLayout = (l: (typeof LAYOUTS)[number]) =>
+    set({ wrap: l.wrap, align: l.align, ...(l.wrap === "square" && pct > 60 ? { widthPct: 50 } : {}) });
+
+  useEffect(() => {
+    if (!placing) return;
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") onCancelMove(); };
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [placing, onCancelMove]);
 
   return (
     <div className="space-y-3">
       {!sel && (
         <p className="rounded bg-muted/60 px-2 py-1.5 text-xs text-muted-foreground">
-          Clicca su una figura nel documento per ridimensionarla, allinearla o cambiarne la didascalia. Gli strumenti si attivano qui.
+          Clicca su una figura nel documento per ridimensionarla, posizionarla o cambiarne la didascalia. Gli strumenti si attivano qui.
         </p>
       )}
 
@@ -279,20 +456,36 @@ export function FigurePanel({ editor, uploading, onUploadFiles, onPickProject, o
             <p className="text-xs text-muted-foreground">Circa {cm} cm di larghezza nel Word. Puoi anche trascinare l'angolo della figura.</p>
           </Section>
 
-          <Section title="Posizione">
-            <div className="flex gap-1">
-              {ALIGNS.map((a) => (
-                <button key={a.value} type="button" title={a.label} onMouseDown={(e) => e.preventDefault()} onClick={() => set({ align: a.value })}
-                  className={`h-8 w-9 inline-flex items-center justify-center rounded border ${align === a.value ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted"}`}>
-                  {a.icon}
+          <Section title="Disposizione">
+            <div className="grid grid-cols-5 gap-1">
+              {LAYOUTS.map((l) => (
+                <button key={l.id} type="button" title={l.label} aria-label={l.label} onMouseDown={(e) => e.preventDefault()} onClick={() => applyLayout(l)}
+                  className={`flex items-center justify-center rounded border p-1 ${layout === l.id ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted"}`}>
+                  <LayoutIcon id={l.id} />
                 </button>
               ))}
-              <span className="mx-1 w-px bg-border" />
-              <Button type="button" size="icon" variant="outline" className="h-8 w-8" title="Sposta su" disabled={index <= 0}
-                onClick={() => moveBlock(editor, sel, -1)}><ArrowUp size={14} /></Button>
-              <Button type="button" size="icon" variant="outline" className="h-8 w-8" title="Sposta giù" disabled={index < 0}
-                onClick={() => moveBlock(editor, sel, 1)}><ArrowDown size={14} /></Button>
             </div>
+            <p className="text-xs text-muted-foreground">
+              {wrap === "square"
+                ? `Il testo scorre a fianco: la figura sta ${align === "right" ? "a destra" : "a sinistra"} e si aggancia al paragrafo che la segue.`
+                : "Le prime tre tengono la figura da sola sulla riga; le ultime due la affiancano al testo."}
+            </p>
+          </Section>
+
+          <Section title="Posizione nel documento">
+            <Button type="button" size="sm" variant={placing ? "default" : "outline"} className="w-full h-8 gap-1.5 text-xs"
+              onClick={placing ? onCancelMove : onMove}>
+              {placing ? <><X size={13} /> Annulla spostamento</> : <><Crosshair size={13} /> Scegli dove metterla…</>}
+            </Button>
+            <div className="flex gap-1">
+              <Button type="button" size="sm" variant="outline" className="h-8 flex-1 gap-1 text-xs" disabled={index < 0}
+                onClick={() => moveBlock(editor, sel, -1)}><ArrowUp size={14} /> Su</Button>
+              <Button type="button" size="sm" variant="outline" className="h-8 flex-1 gap-1 text-xs" disabled={index < 0}
+                onClick={() => moveBlock(editor, sel, 1)}><ArrowDown size={14} /> Giù</Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              «Scegli dove metterla» mostra nel documento le icone <b>Metti qui</b> tra un blocco e l'altro. Oppure afferra la maniglia <GripVertical size={11} className="inline" /> in alto a sinistra della figura e trascinala.
+            </p>
           </Section>
 
           <Section title="Didascalia">
@@ -342,6 +535,10 @@ export function FigurePanel({ editor, uploading, onUploadFiles, onPickProject, o
             <MapIcon size={13} /> Da WebMap
           </Button>
         </div>
+        <label className="flex items-start gap-2 text-xs">
+          <input type="checkbox" className="mt-0.5" checked={askWhere} onChange={(e) => onAskWhere(e.target.checked)} />
+          <span>Fammi scegliere dove inserire ogni figura nuova (compaiono le icone «Metti qui» nel documento)</span>
+        </label>
         <p className="text-xs text-muted-foreground">Puoi anche incollare o trascinare immagini direttamente nel documento. Nell'export Word servono PNG o JPEG.</p>
       </Section>
 
@@ -356,7 +553,9 @@ export function FigurePanel({ editor, uploading, onUploadFiles, onPickProject, o
                 <img src={f.node.attrs.src} alt="" className="h-10 w-14 shrink-0 rounded-sm bg-white object-contain" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-xs font-medium">{f.node.attrs.didascalia || `Figura ${i + 1}`}</span>
-                  <span className="block text-[11px] text-muted-foreground">{figureWidthPct(f.node.attrs)}% · {f.node.type.name === "snapshotFigure" ? "WebMap" : "immagine"}</span>
+                  <span className="block text-[11px] text-muted-foreground">
+                    {figureWidthPct(f.node.attrs)}% · {figureWrap(f.node.attrs) === "square" ? "testo a fianco" : "da sola"} · {f.node.type.name === "snapshotFigure" ? "WebMap" : "immagine"}
+                  </span>
                 </span>
               </button>
             ))}

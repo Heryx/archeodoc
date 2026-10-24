@@ -1,16 +1,34 @@
-import { useState } from "react";
-import { findParentNode, type Editor } from "@tiptap/react";
+import { useEffect, useRef, useState } from "react";
+import { Extension, findParentNode, type Editor } from "@tiptap/react";
 import { Table, TableCell, TableHeader, TableRow, TableView } from "@tiptap/extension-table";
-import { CellSelection, TableMap } from "@tiptap/pm/tables";
+import { CellSelection, TableMap, selectedRect } from "@tiptap/pm/tables";
+import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { Node as PmNode } from "@tiptap/pm/model";
 import {
   AlignCenter, AlignJustify, AlignLeft, AlignRight, ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, ArrowUpToLine,
   Columns3, Merge, Plus, Rows3, Split, Table as TableIcon, Trash2,
 } from "lucide-react";
 import { RELAZIONE_TEXT_WIDTH_PX } from "@shared/relazione_layout";
+import {
+  BORDER_PRESETS, DEFAULT_PEN, PEN_STYLES, PEN_WIDTHS, PRESET_LABELS, PX_PER_CM, RELAZIONE_TEXT_WIDTH_CM,
+  bordersCss, cmToPx, normalizeCellBorders, normalizePen, pxToCm, resolveCellBorders, round1, round2, tableLook,
+  type BorderPreset, type CellBorders, type GridCell, type Pen, type PenStyle, type Side,
+} from "@shared/relazione_table";
 import { Button } from "@/components/ui/button";
 
-// ─── Estensioni: sfondo e allineamento verticale delle celle, bordi della tabella ──
+// ─── Estensioni: celle, righe e tabella ───────────────────────────────────────
+
+const jsonAttr = (name: string) => ({
+  default: null as Record<string, unknown> | null,
+  parseHTML: (el: HTMLElement) => {
+    try { return JSON.parse(el.getAttribute(name) || "null"); } catch { return null; }
+  },
+  renderHTML: (attrs: Record<string, any>) => {
+    const v = attrs.border;
+    return v && Object.keys(v).length ? { [name]: JSON.stringify(v) } : {};
+  },
+});
 
 const cellExtra = {
   background: {
@@ -23,6 +41,8 @@ const cellExtra = {
     parseHTML: (el: HTMLElement) => el.style.verticalAlign || null,
     renderHTML: (attrs: Record<string, any>) => (attrs.valign ? { style: `vertical-align:${attrs.valign}` } : {}),
   },
+  // Bordi propri della cella, per lato; ciò che manca segue la disposizione scelta per la tabella
+  border: jsonAttr("data-border"),
 };
 
 export const RTableCell = TableCell.extend({
@@ -34,6 +54,21 @@ export const RTableCell = TableCell.extend({
 export const RTableHeader = TableHeader.extend({
   addAttributes() {
     return { ...this.parent?.(), ...cellExtra };
+  },
+});
+
+// Altezza minima della riga, in cm (null = secondo il contenuto)
+export const RTableRow = TableRow.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      height: {
+        default: null as number | null,
+        parseHTML: (el: HTMLElement) => Number(el.getAttribute("data-height")) || null,
+        renderHTML: (attrs: Record<string, any>) =>
+          attrs.height > 0 ? { "data-height": attrs.height, style: `height:${round1(attrs.height * PX_PER_CM)}px` } : {},
+      },
+    };
   },
 });
 
@@ -49,28 +84,126 @@ class RTableView extends TableView {
     return ok;
   }
   private sync(node: PmNode) {
-    this.table.setAttribute("data-borders", node.attrs.borders || "all");
+    const { align, cellPadding } = node.attrs;
+    this.table.style.marginLeft = align === "center" || align === "right" ? "auto" : "";
+    this.table.style.marginRight = align === "center" ? "auto" : "";
+    if (Number(cellPadding) > 0) this.table.style.setProperty("--cp", `${cellPadding}mm`);
+    else this.table.style.removeProperty("--cp");
   }
 }
+
+const dataAttr = (name: string, key: string, def: unknown, num = false) => ({
+  default: def,
+  parseHTML: (el: HTMLElement) => {
+    const v = el.getAttribute(name);
+    return v == null || v === "" ? def : num ? Number(v) || def : v;
+  },
+  renderHTML: (attrs: Record<string, any>) => (attrs[key] != null && attrs[key] !== def ? { [name]: attrs[key] } : {}),
+});
 
 export const RTable = Table.extend({
   addAttributes() {
     return {
       ...this.parent?.(),
-      borders: {
-        default: "all",
-        parseHTML: (el: HTMLElement) => el.getAttribute("data-borders") || "all",
-        renderHTML: (attrs: Record<string, any>) => (attrs.borders && attrs.borders !== "all" ? { "data-borders": attrs.borders } : {}),
-      },
+      // disposizione delle linee (tutte, solo esterne, …) e penna di base
+      borders: dataAttr("data-borders", "borders", "all"),
+      lineStyle: dataAttr("data-line-style", "lineStyle", null),
+      lineWidth: dataAttr("data-line-width", "lineWidth", null, true),
+      lineColor: dataAttr("data-line-color", "lineColor", null),
+      align: dataAttr("data-align", "align", null),
+      // spaziatura interna delle celle, in mm
+      cellPadding: dataAttr("data-padding", "cellPadding", null, true),
     };
   },
 }).configure({ resizable: true, cellMinWidth: 40, View: RTableView as any });
 
-export { TableRow };
-
-// ─── Operazioni sulla tabella corrente ────────────────────────────────────────
+// ─── Griglia e bordi di ogni cella ────────────────────────────────────────────
 
 type TableRef = { pos: number; start: number; node: PmNode };
+
+function gridOf(table: PmNode) {
+  const map = TableMap.get(table);
+  const look = tableLook(table.attrs);
+  const cells: GridCell[] = [];
+  for (const offset of Array.from(new Set(map.map))) {
+    const cell = table.nodeAt(offset);
+    if (!cell) continue;
+    const r = map.findCell(offset);
+    cells.push({
+      key: offset, row: r.top, col: r.left, rowspan: r.bottom - r.top, colspan: r.right - r.left,
+      borders: normalizeCellBorders(cell.attrs.border, look.pen),
+    });
+  }
+  return { map, look, cells };
+}
+
+// CSS dei bordi di ogni cella (chiave: offset nella tabella). Le tabelle non modificate sono la stessa
+// istanza tra una transazione e l'altra, quindi il risultato si riutilizza.
+const cssCache = new WeakMap<PmNode, Map<number, string>>();
+
+function cellBorderCss(table: PmNode): Map<number, string> {
+  const hit = cssCache.get(table);
+  if (hit) return hit;
+  const { map, look, cells } = gridOf(table);
+  const resolved = resolveCellBorders(look, cells, map.height, map.width);
+  const out = new Map<number, string>();
+  resolved.forEach((b, key) => out.set(key, bordersCss(b)));
+  cssCache.set(table, out);
+  return out;
+}
+
+const bordersKey = new PluginKey("relazioneTableBorders");
+
+// Disegna i bordi calcolati sulle celle (sono derivati dalla tabella, non fanno parte del documento)
+export const TableBorderStyles = Extension.create({
+  name: "relazioneTableBorders",
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: bordersKey,
+        props: {
+          decorations(state) {
+            const decos: Decoration[] = [];
+            state.doc.descendants((node, pos) => {
+              if (node.type.name !== "table") return;
+              cellBorderCss(node).forEach((css, offset) => {
+                const cell = node.nodeAt(offset);
+                if (!cell) return;
+                const at = pos + 1 + offset;
+                decos.push(Decoration.node(at, at + cell.nodeSize, { style: css }));
+              });
+              return false;
+            });
+            return DecorationSet.create(state.doc, decos);
+          },
+        },
+      }),
+    ];
+  },
+});
+
+// Per la stampa PDF: porta nell'HTML i bordi, l'allineamento e la spaziatura calcolati
+export function applyTableStylesToHtml(html: string, editor: Editor): string {
+  const dom = new DOMParser().parseFromString(html, "text/html");
+  const tables = listTables(editor);
+  dom.querySelectorAll("table").forEach((el, i) => {
+    const t = tables[i];
+    if (!t) return;
+    const css = cellBorderCss(t.node);
+    const offsets = Array.from(css.keys());
+    Array.from(el.querySelectorAll("td, th")).forEach((cell, k) => {
+      const c = css.get(offsets[k]);
+      if (c) (cell as HTMLElement).style.cssText += `;${c}`;
+    });
+    const { align, cellPadding } = t.node.attrs;
+    if (align === "center" || align === "right") el.style.marginLeft = "auto";
+    if (align === "center") el.style.marginRight = "auto";
+    if (Number(cellPadding) > 0) el.style.setProperty("--cp", `${cellPadding}mm`);
+  });
+  return dom.body.innerHTML;
+}
+
+// ─── Operazioni sulla tabella corrente ────────────────────────────────────────
 
 export function currentTable(editor: Editor): TableRef | null {
   const found = findParentNode((n) => n.type.name === "table")(editor.state.selection);
@@ -83,6 +216,16 @@ export function listTables(editor: Editor): TableRef[] {
     if (node.type.name === "table") { out.push({ pos, start: pos + 1, node }); return false; }
   });
   return out;
+}
+
+// Celle selezionate (o quella col cursore) come rettangolo della griglia
+function selection(editor: Editor) {
+  try {
+    const r = selectedRect(editor.state);
+    return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, map: r.map, table: r.table, start: r.tableStart };
+  } catch {
+    return null;
+  }
 }
 
 // Larghezze (px) delle colonne: quelle salvate, altrimenti colonne uguali sul foglio intero
@@ -125,13 +268,35 @@ export function tableWidthPct(table: TableRef): number | null {
   return all ? Math.round((sum / RELAZIONE_TEXT_WIDTH_PX) * 100) : null;
 }
 
-function setTableWidthPct(editor: Editor, pct: number) {
+const MIN_COL_PX = 30;
+
+// Porta la tabella alla larghezza indicata (px del foglio), mantenendo le proporzioni tra le colonne
+function setTableWidthPx(editor: Editor, px: number) {
   const table = currentTable(editor);
   if (!table) return;
   const current = columnWidths(table);
   const sum = current.reduce((a, b) => a + b, 0) || 1;
-  const target = (RELAZIONE_TEXT_WIDTH_PX * pct) / 100;
-  writeColumnWidths(editor, table, current.map((w) => Math.max(30, Math.round((w / sum) * target))));
+  const target = Math.min(RELAZIONE_TEXT_WIDTH_PX, Math.max(MIN_COL_PX * current.length, px));
+  writeColumnWidths(editor, table, current.map((w) => Math.max(MIN_COL_PX, Math.round((w / sum) * target))));
+}
+
+// Larghezza di una colonna in cm. Con «mantieni il totale» la differenza passa alla colonna accanto,
+// come in LibreOffice; altrimenti cambia la larghezza della tabella (entro il foglio).
+function setColumnWidthCm(editor: Editor, col: number, cm: number, keepTotal: boolean) {
+  const table = currentTable(editor);
+  if (!table) return;
+  const widths = columnWidths(table);
+  const total = widths.reduce((a, b) => a + b, 0);
+  let next = Math.max(MIN_COL_PX, Math.round(cmToPx(cm)));
+  if (keepTotal && widths.length > 1) {
+    const other = col + 1 < widths.length ? col + 1 : col - 1;
+    next = Math.min(next, widths[col] + widths[other] - MIN_COL_PX);
+    widths[other] = widths[col] + widths[other] - next;
+  } else {
+    next = Math.min(next, RELAZIONE_TEXT_WIDTH_PX - (total - widths[col]));
+  }
+  widths[col] = Math.max(MIN_COL_PX, next);
+  writeColumnWidths(editor, table, widths);
 }
 
 // Dopo aver aggiunto righe o colonne alcune celle non hanno larghezza: la completa, altrimenti la tabella
@@ -155,7 +320,7 @@ function ensureWidths(editor: Editor) {
   const avg = Math.round(values.reduce((a, b) => a + b, 0) / values.length);
   let widths = known.map((w) => w || avg);
   const total = widths.reduce((a, b) => a + b, 0);
-  if (total > RELAZIONE_TEXT_WIDTH_PX) widths = widths.map((w) => Math.max(30, Math.round((w * RELAZIONE_TEXT_WIDTH_PX) / total)));
+  if (total > RELAZIONE_TEXT_WIDTH_PX) widths = widths.map((w) => Math.max(MIN_COL_PX, Math.round((w * RELAZIONE_TEXT_WIDTH_PX) / total)));
   writeColumnWidths(editor, table, widths);
 }
 
@@ -164,7 +329,133 @@ function equalColumns(editor: Editor) {
   if (!table) return;
   const map = TableMap.get(table.node);
   const sum = columnWidths(table).reduce((a, b) => a + b, 0);
-  writeColumnWidths(editor, table, Array(map.width).fill(Math.max(30, Math.round(sum / map.width))));
+  writeColumnWidths(editor, table, Array(map.width).fill(Math.max(MIN_COL_PX, Math.round(sum / map.width))));
+}
+
+function rowPositions(table: TableRef): number[] {
+  const out: number[] = [];
+  table.node.forEach((_row, offset) => out.push(table.start + offset));
+  return out;
+}
+
+// Altezza minima (cm) delle righe indicate; null = automatica
+function setRowHeights(editor: Editor, rows: number[], cm: number | null) {
+  const table = currentTable(editor);
+  if (!table) return;
+  const pos = rowPositions(table);
+  const tr = editor.state.tr;
+  for (const r of rows) {
+    const row = table.node.child(r);
+    tr.setNodeMarkup(pos[r], undefined, { ...row.attrs, height: cm && cm > 0 ? round2(cm) : null });
+  }
+  editor.view.dispatch(tr);
+}
+
+// Tutte le righe alla stessa altezza (la media di quelle attuali)
+function equalRows(editor: Editor) {
+  const table = currentTable(editor);
+  if (!table) return;
+  const pos = rowPositions(table);
+  const heights = pos.map((p) => (editor.view.nodeDOM(p) as HTMLElement | null)?.offsetHeight || 0);
+  if (!heights.some(Boolean)) return;
+  const avg = heights.reduce((a, b) => a + b, 0) / heights.length;
+  setRowHeights(editor, pos.map((_, i) => i), pxToCm(avg));
+}
+
+function setTableAttrs(editor: Editor, attrs: Record<string, unknown>) {
+  editor.chain().focus().updateAttributes("table", attrs).run();
+}
+
+// ─── Bordi delle celle selezionate ────────────────────────────────────────────
+
+export type CellBorderOp = "all" | "outer" | "inner-h" | "inner-v" | "top" | "bottom" | "left" | "right" | "none";
+
+const FACING: Record<Side, Side> = { top: "bottom", bottom: "top", left: "right", right: "left" };
+
+// Applica una penna (o «nessuna linea», o il ripristino con `null`) ai lati scelti delle celle selezionate.
+// La linea in comune con la cella accanto vale per entrambe: il lato opposto della vicina viene azzerato.
+function applyCellBorders(editor: Editor, op: CellBorderOp, pen: Pen | "none" | null) {
+  const sel = selection(editor);
+  if (!sel) return;
+  const { map, table, start } = sel;
+  const rect = { left: sel.left, right: sel.right, top: sel.top, bottom: sel.bottom };
+  const look = tableLook(table.attrs);
+  const offsets = map.cellsInRect(rect);
+  const value = pen; // Pen | "none" | null (ripristino)
+  const next = new Map<number, CellBorders>();
+  const bordersOf = (offset: number): CellBorders => {
+    let b = next.get(offset);
+    if (!b) {
+      b = { ...normalizeCellBorders(table.nodeAt(offset)?.attrs.border, look.pen) };
+      next.set(offset, b);
+    }
+    return b;
+  };
+  const clearFacing = (offset: number, side: Side) => {
+    const r = map.findCell(offset);
+    const around: number[] = [];
+    if (side === "top" && r.top > 0) for (let c = r.left; c < r.right; c++) around.push(map.map[(r.top - 1) * map.width + c]);
+    if (side === "bottom" && r.bottom < map.height) for (let c = r.left; c < r.right; c++) around.push(map.map[r.bottom * map.width + c]);
+    if (side === "left" && r.left > 0) for (let k = r.top; k < r.bottom; k++) around.push(map.map[k * map.width + r.left - 1]);
+    if (side === "right" && r.right < map.width) for (let k = r.top; k < r.bottom; k++) around.push(map.map[k * map.width + r.right]);
+    for (const n of Array.from(new Set(around))) {
+      if (n === offset) continue;
+      delete bordersOf(n)[FACING[side]];
+    }
+  };
+  const put = (offset: number, side: Side) => {
+    const b = bordersOf(offset);
+    if (value === null) delete b[side];
+    else b[side] = value;
+    clearFacing(offset, side);
+  };
+
+  for (const offset of offsets) {
+    const r = map.findCell(offset);
+    const top = r.top === rect.top;
+    const bottom = r.bottom === rect.bottom;
+    const left = r.left === rect.left;
+    const right = r.right === rect.right;
+    switch (op) {
+      case "all": case "none": SIDES_ALL.forEach((s) => put(offset, s)); break;
+      case "outer":
+        if (top) put(offset, "top");
+        if (bottom) put(offset, "bottom");
+        if (left) put(offset, "left");
+        if (right) put(offset, "right");
+        break;
+      case "top": if (top) put(offset, "top"); break;
+      case "bottom": if (bottom) put(offset, "bottom"); break;
+      case "left": if (left) put(offset, "left"); break;
+      case "right": if (right) put(offset, "right"); break;
+      case "inner-h": if (!bottom) put(offset, "bottom"); break;
+      case "inner-v": if (!right) put(offset, "right"); break;
+    }
+  }
+
+  const tr = editor.state.tr;
+  next.forEach((b, offset) => {
+    const cell = table.nodeAt(offset);
+    if (!cell) return;
+    tr.setNodeMarkup(start + offset, undefined, { ...cell.attrs, border: Object.keys(b).length ? b : null });
+  });
+  editor.view.dispatch(tr);
+}
+
+const SIDES_ALL: Side[] = ["top", "right", "bottom", "left"];
+
+// Una disposizione scelta per la tabella sostituisce i bordi delle singole celle
+function setTablePreset(editor: Editor, preset: BorderPreset) {
+  const table = currentTable(editor);
+  if (!table) return;
+  const tr = editor.state.tr;
+  const map = TableMap.get(table.node);
+  tr.setNodeMarkup(table.pos, undefined, { ...table.node.attrs, borders: preset });
+  for (const offset of Array.from(new Set(map.map))) {
+    const cell = table.node.nodeAt(offset);
+    if (cell?.attrs.border) tr.setNodeMarkup(table.start + offset, undefined, { ...cell.attrs, border: null });
+  }
+  editor.view.dispatch(tr);
 }
 
 // ─── Pannello Tabelle ─────────────────────────────────────────────────────────
@@ -200,19 +491,112 @@ function Tool({ label, icon, onClick, active, disabled, danger }: {
   );
 }
 
+// Campo numerico che si conferma con Invio o uscendo dal campo; vuoto = nessun valore
+function NumField({ value, onCommit, suffix, min = 0, max, placeholder, className = "w-16", title }: {
+  value: number | null; onCommit: (n: number | null) => void; suffix?: string; min?: number; max?: number;
+  placeholder?: string; className?: string; title?: string;
+}) {
+  const show = (v: number | null) => (v == null ? "" : String(v).replace(".", ","));
+  const [text, setText] = useState(show(value));
+  const focused = useRef(false);
+  useEffect(() => { if (!focused.current) setText(show(value)); }, [value]);
+  const commit = () => {
+    const raw = text.trim().replace(",", ".");
+    if (raw === "") return onCommit(null);
+    let n = Number(raw);
+    if (!Number.isFinite(n)) return setText(show(value));
+    n = Math.max(min, max != null ? Math.min(max, n) : n);
+    onCommit(Math.round(n * 100) / 100);
+  };
+  return (
+    <span className="inline-flex items-center gap-1">
+      <input
+        type="text"
+        inputMode="decimal"
+        value={text}
+        title={title}
+        placeholder={placeholder}
+        onChange={(e) => setText(e.target.value)}
+        onFocus={(e) => { focused.current = true; e.currentTarget.select(); }}
+        onBlur={() => { focused.current = false; commit(); }}
+        onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") { setText(show(value)); e.currentTarget.blur(); } }}
+        className={`h-7 rounded border border-input bg-background px-1.5 text-xs tabular-nums ${className}`}
+      />
+      {suffix && <span className="text-xs text-muted-foreground">{suffix}</span>}
+    </span>
+  );
+}
+
+// Schema 18×18: le linee sempre presenti in grigio, quelle attive in evidenza
+type Seg = "t" | "b" | "l" | "r" | "h" | "v" | "x";
+const SEG_LINE: Record<Seg, [number, number, number, number]> = {
+  t: [2, 2, 16, 2], b: [2, 16, 16, 16], l: [2, 2, 2, 16], r: [16, 2, 16, 16], h: [2, 9, 16, 9], v: [9, 2, 9, 16], x: [2, 6, 16, 6],
+};
+function LineIcon({ on }: { on: Seg[] }) {
+  const faint: Seg[] = ["t", "b", "l", "r", "h", "v"];
+  return (
+    <svg width="20" height="20" viewBox="0 0 18 18" aria-hidden>
+      {faint.map((s) => <line key={`f${s}`} x1={SEG_LINE[s][0]} y1={SEG_LINE[s][1]} x2={SEG_LINE[s][2]} y2={SEG_LINE[s][3]} stroke="currentColor" strokeOpacity={0.25} strokeWidth={1} strokeDasharray="1.5 1.5" />)}
+      {on.map((s) => <line key={s} x1={SEG_LINE[s][0]} y1={SEG_LINE[s][1]} x2={SEG_LINE[s][2]} y2={SEG_LINE[s][3]} stroke="currentColor" strokeWidth={2} strokeLinecap="square" />)}
+    </svg>
+  );
+}
+
+const PRESET_SEGS: Record<BorderPreset, Seg[]> = {
+  all: ["t", "b", "l", "r", "h", "v"], outer: ["t", "b", "l", "r"], inner: ["h", "v"], horizontal: ["t", "b", "h"],
+  vertical: ["l", "r", "v"], header: ["t", "b", "l", "r", "x"], none: [],
+};
+
+const CELL_OPS: { op: CellBorderOp; label: string; segs: Seg[] }[] = [
+  { op: "all", label: "Tutti i bordi", segs: ["t", "b", "l", "r", "h", "v"] },
+  { op: "outer", label: "Riquadro esterno", segs: ["t", "b", "l", "r"] },
+  { op: "inner-h", label: "Linee interne orizzontali", segs: ["h"] },
+  { op: "inner-v", label: "Linee interne verticali", segs: ["v"] },
+  { op: "top", label: "Bordo superiore", segs: ["t"] },
+  { op: "bottom", label: "Bordo inferiore", segs: ["b"] },
+  { op: "left", label: "Bordo sinistro", segs: ["l"] },
+  { op: "right", label: "Bordo destro", segs: ["r"] },
+];
+
+function PenControls({ pen, onChange }: { pen: Pen; onChange: (p: Pen) => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <select value={pen.s} onChange={(e) => onChange({ ...pen, s: e.target.value as PenStyle })} title="Stile della linea"
+        className="h-7 rounded border border-input bg-background px-1 text-xs">
+        {PEN_STYLES.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+      </select>
+      <select value={String(pen.w)} onChange={(e) => onChange({ ...pen, w: Number(e.target.value) })} title="Spessore (pt)"
+        className="h-7 rounded border border-input bg-background px-1 text-xs">
+        {Array.from(new Set([...PEN_WIDTHS, pen.w])).sort((a, b) => a - b).map((w) => <option key={w} value={w}>{String(w).replace(".", ",")} pt</option>)}
+      </select>
+      <label className="relative h-7 w-8 cursor-pointer rounded border border-input" title="Colore della linea" style={{ background: pen.c }}>
+        <input type="color" className="absolute inset-0 h-full w-full cursor-pointer opacity-0" value={pen.c} onChange={(e) => onChange({ ...pen, c: e.target.value })} />
+      </label>
+    </div>
+  );
+}
+
 export function TablePanel({ editor }: { editor: Editor }) {
   const table = currentTable(editor);
   const all = listTables(editor);
   const [rows, setRows] = useState(3);
   const [cols, setCols] = useState(3);
   const [header, setHeader] = useState(true);
+  const [keepTotal, setKeepTotal] = useState(true);
+  const [cellPen, setCellPen] = useState<Pen>(DEFAULT_PEN);
   const chain = () => editor.chain().focus();
   const cellSel = editor.state.selection instanceof CellSelection;
   const map = table ? TableMap.get(table.node) : null;
   const width = table ? tableWidthPct(table) : null;
+  const look = table ? tableLook(table.node.attrs) : null;
+  const sel = table ? selection(editor) : null;
+  const widthsPx = table ? columnWidths(table) : [];
+  const totalCm = pxToCm(widthsPx.reduce((a, b) => a + b, 0));
+  const selRows = sel ? Array.from({ length: sel.bottom - sel.top }, (_, i) => sel.top + i) : [];
+  const rowHeight = table && selRows.length ? (table.node.child(selRows[0]).attrs.height as number | null) ?? null : null;
+  const align = (table?.node.attrs.align as string) || "left";
   const cellBg = (editor.getAttributes("tableCell").background || editor.getAttributes("tableHeader").background || "") as string;
   const valign = (editor.getAttributes("tableCell").valign || editor.getAttributes("tableHeader").valign || "") as string;
-  const borders = (table?.node.attrs.borders as string) || "all";
   const setCell = (name: string, value: string | null) => chain().setCellAttribute(name, value).run();
 
   const jump = (pos: number) => {
@@ -224,11 +608,11 @@ export function TablePanel({ editor }: { editor: Editor }) {
     <div className="space-y-3">
       {!table && (
         <p className="rounded bg-muted/60 px-2 py-1.5 text-xs text-muted-foreground">
-          Clicca dentro una tabella per modificarla: righe, colonne, celle, larghezza e colori si gestiscono da qui.
+          Clicca dentro una tabella per modificarla: righe, colonne, celle, misure e bordi si gestiscono da qui.
         </p>
       )}
 
-      {table && map && (
+      {table && map && look && (
         <>
           <p className="text-xs text-muted-foreground">
             Tabella {map.height} righe × {map.width} colonne{cellSel ? " · celle selezionate" : ""}.
@@ -287,10 +671,14 @@ export function TablePanel({ editor }: { editor: Editor }) {
             </div>
           </Section>
 
-          <Section title="Larghezza">
-            <div className="flex flex-wrap gap-1">
+          <Section title="Larghezza delle colonne">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="text-xs">Tabella</span>
+              <NumField value={round1(totalCm)} suffix="cm" min={2} max={RELAZIONE_TEXT_WIDTH_CM}
+                title={`Larghezza totale (foglio: ${RELAZIONE_TEXT_WIDTH_CM} cm)`}
+                onCommit={(n) => { if (n) setTableWidthPx(editor, cmToPx(n)); }} />
               {WIDTH_PRESETS.map((p) => (
-                <button key={p} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => setTableWidthPct(editor, p)}
+                <button key={p} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => setTableWidthPx(editor, (RELAZIONE_TEXT_WIDTH_PX * p) / 100)}
                   className={`h-7 min-w-10 rounded border px-2 text-xs ${width === p ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted"}`}>
                   {p}%
                 </button>
@@ -300,23 +688,81 @@ export function TablePanel({ editor }: { editor: Editor }) {
                 Adatta al foglio
               </button>
             </div>
-            {width !== null && (
-              <div className="flex items-center gap-2">
-                <input type="range" min={20} max={100} step={5} value={Math.min(100, Math.max(20, width))} onChange={(e) => setTableWidthPct(editor, Number(e.target.value))} className="flex-1" />
-                <span className="w-9 text-right text-xs tabular-nums">{width}%</span>
-              </div>
-            )}
-            <Tool label="Colonne di uguale larghezza" icon={<Columns3 size={14} />} onClick={() => equalColumns(editor)} />
-            <p className="text-xs text-muted-foreground">Per regolare una colonna, trascina il suo bordo nella tabella.</p>
+            <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+              {widthsPx.map((px, c) => {
+                const inSel = sel ? c >= sel.left && c < sel.right : false;
+                return (
+                  <label key={c} className={`flex items-center justify-between gap-1 rounded px-1 text-xs ${inSel ? "bg-primary/10 text-primary" : ""}`}>
+                    <span>Col. {c + 1}</span>
+                    <NumField value={round2(pxToCm(px))} suffix="cm" min={0.5} className="w-14" onCommit={(n) => { if (n) setColumnWidthCm(editor, c, n, keepTotal); }} />
+                  </label>
+                );
+              })}
+            </div>
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={keepTotal} onChange={(e) => setKeepTotal(e.target.checked)} />
+              Mantieni la larghezza totale (la differenza va alla colonna accanto)
+            </label>
+            <div className="grid grid-cols-2 gap-1.5">
+              <Tool label="Colonne uguali" icon={<Columns3 size={14} />} onClick={() => equalColumns(editor)} />
+              <Tool label="Righe uguali" icon={<Rows3 size={14} />} onClick={() => equalRows(editor)} />
+            </div>
+            <p className="text-xs text-muted-foreground">Puoi anche trascinare il bordo di una colonna nella tabella.</p>
           </Section>
 
-          <Section title="Bordi">
-            <select value={borders} onChange={(e) => chain().updateAttributes("table", { borders: e.target.value }).run()}
-              className="h-8 w-full rounded border border-input bg-background px-1.5 text-xs">
-              <option value="all">Tutti i bordi</option>
-              <option value="horizontal">Solo righe orizzontali</option>
-              <option value="none">Nessun bordo</option>
-            </select>
+          <Section title="Altezza e margini">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+              <span className="text-xs">{selRows.length > 1 ? `Righe ${selRows[0] + 1}–${selRows[selRows.length - 1] + 1}` : `Riga ${(selRows[0] ?? 0) + 1}`}</span>
+              <NumField value={rowHeight} suffix="cm" min={0.3} max={25} placeholder="auto" title="Altezza minima della riga; vuoto = secondo il contenuto"
+                onCommit={(n) => setRowHeights(editor, selRows, n)} />
+              <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => setRowHeights(editor, selRows, null)}
+                className="text-xs text-muted-foreground underline">automatica</button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs">Spazio dentro le celle</span>
+              <NumField value={(table.node.attrs.cellPadding as number | null) ?? null} suffix="mm" min={0} max={10} className="w-12" placeholder="std"
+                onCommit={(n) => setTableAttrs(editor, { cellPadding: n })} />
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="mr-1 text-xs">Tabella sul foglio</span>
+              {([["left", "A sinistra", <AlignLeft size={14} />], ["center", "Al centro", <AlignCenter size={14} />], ["right", "A destra", <AlignRight size={14} />]] as const).map(([v, label, icon]) => (
+                <button key={v} type="button" title={label} onMouseDown={(e) => e.preventDefault()} onClick={() => setTableAttrs(editor, { align: v === "left" ? null : v })}
+                  className={`h-7 w-8 inline-flex items-center justify-center rounded border ${align === v ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted"}`}>
+                  {icon}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">L'allineamento si vede solo se la tabella è più stretta del foglio.</p>
+          </Section>
+
+          <Section title="Bordi della tabella">
+            <div className="grid grid-cols-4 gap-1">
+              {BORDER_PRESETS.map((p) => (
+                <button key={p} type="button" title={PRESET_LABELS[p]} aria-label={PRESET_LABELS[p]} onMouseDown={(e) => e.preventDefault()} onClick={() => setTablePreset(editor, p)}
+                  className={`flex items-center justify-center rounded border p-1.5 ${look.preset === p ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted"}`}>
+                  <LineIcon on={PRESET_SEGS[p]} />
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">{PRESET_LABELS[look.preset]}. Scegliere una disposizione azzera i bordi impostati sulle singole celle.</p>
+            <PenControls pen={look.pen} onChange={(p) => setTableAttrs(editor, { lineStyle: p.s, lineWidth: p.w, lineColor: p.c })} />
+          </Section>
+
+          <Section title="Bordi delle celle selezionate">
+            <PenControls pen={cellPen} onChange={(p) => setCellPen(normalizePen(p))} />
+            <div className="grid grid-cols-4 gap-1">
+              {CELL_OPS.map((o) => (
+                <button key={o.op} type="button" title={o.label} aria-label={o.label} onMouseDown={(e) => e.preventDefault()} onClick={() => applyCellBorders(editor, o.op, cellPen)}
+                  className="flex items-center justify-center rounded border border-border p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground">
+                  <LineIcon on={o.segs} />
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              <Tool label="Togli i bordi" icon={<LineIcon on={[]} />} onClick={() => applyCellBorders(editor, "none", "none")} />
+              <Tool label="Come la tabella" icon={<TableIcon size={14} />} onClick={() => applyCellBorders(editor, "all", null)} />
+            </div>
+            <p className="text-xs text-muted-foreground">Seleziona una o più celle (trascinando), scegli stile, spessore e colore, poi i lati a cui applicarli.</p>
           </Section>
 
           <Section title="Tabella">

@@ -7,6 +7,14 @@ export const RELAZIONE_EXPORT_WIDTH_PX = 560;
 
 export type FigureAlign = "left" | "center" | "right";
 
+// "none" = la figura sta da sola sulla riga (testo sopra e sotto); "square" = figura mobile con il testo a fianco,
+// dal lato indicato dall'allineamento (a destra se "right", altrimenti a sinistra)
+export type FigureWrap = "none" | "square";
+
+export const figureWrap = (attrs: { wrap?: unknown } | null | undefined): FigureWrap => (attrs?.wrap === "square" ? "square" : "none");
+
+export const figureFloatSide = (attrs: { align?: unknown } | null | undefined): "left" | "right" => (attrs?.align === "right" ? "right" : "left");
+
 // Larghezza di una figura in % del testo. Le immagini di progetto salvate prima dell'introduzione
 // del gestore figure avevano solo una larghezza in px (base 560).
 export function figureWidthPct(attrs: { widthPct?: unknown; width?: unknown } | null | undefined): number {

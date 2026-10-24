@@ -6,21 +6,29 @@ import {
   Footer,
   Header,
   HeadingLevel,
+  HeightRule,
   ImageRun,
   LevelFormat,
+  OverlapType,
   Packer,
   PageNumber,
   Paragraph,
+  RelativeHorizontalPosition,
   ShadingType,
   Table,
+  TableAnchorType,
   TableCell,
+  TableLayoutType,
   TableRow,
   TextRun,
   VerticalAlign,
   WidthType,
   type ParagraphChild,
 } from "docx";
-import { RELAZIONE_EXPORT_WIDTH_PX, RELAZIONE_TEXT_WIDTH_PX, figureWidthPct } from "@shared/relazione_layout";
+import { RELAZIONE_EXPORT_WIDTH_PX, RELAZIONE_TEXT_WIDTH_PX, figureFloatSide, figureWidthPct, figureWrap } from "@shared/relazione_layout";
+import {
+  TWIPS_PER_CM, normalizeCellBorders, resolveCellBorders, tableLook, type Edge, type GridCell,
+} from "@shared/relazione_table";
 
 type Block = Paragraph | Table;
 
@@ -137,16 +145,38 @@ function tableColumnWidths(rows: PmNode[], cols: number): number[] {
   return Array(cols).fill(Math.floor(TEXT_WIDTH_DXA / cols));
 }
 
-function tableBorders(mode: string) {
-  if (mode !== "none" && mode !== "horizontal") return null;
-  const none = { style: BorderStyle.NONE, size: 0, color: "FFFFFF" };
-  const line = { style: BorderStyle.SINGLE, size: 4, color: "888888" };
-  return mode === "none"
-    ? { top: none, bottom: none, left: none, right: none, insideHorizontal: none, insideVertical: none }
-    : { top: line, bottom: line, left: none, right: none, insideHorizontal: line, insideVertical: none };
+const BORDER_STYLE = { solid: BorderStyle.SINGLE, dashed: BorderStyle.DASHED, dotted: BorderStyle.DOTTED, double: BorderStyle.DOUBLE } as const;
+
+const NO_LINE = { style: BorderStyle.NONE, size: 0, color: "FFFFFF" };
+const NO_LINES = { top: NO_LINE, bottom: NO_LINE, left: NO_LINE, right: NO_LINE, insideHorizontal: NO_LINE, insideVertical: NO_LINE };
+
+// Word misura lo spessore in ottavi di punto
+const line = (e: Edge) => (e ? { style: BORDER_STYLE[e.s], size: Math.min(96, Math.max(2, Math.round(e.w * 8))), color: e.c.slice(1).toUpperCase() } : NO_LINE);
+
+// Posizione di ogni cella nella griglia, tenendo conto delle celle unite in verticale
+function gridCells(rows: PmNode[]): { cells: GridCell[]; cols: number } {
+  const cells: GridCell[] = [];
+  const occupied: number[] = [];
+  let cols = 0;
+  rows.forEach((row, r) => {
+    let col = 0;
+    (row.content || []).forEach((cell, idx) => {
+      while ((occupied[col] || 0) > 0) col++;
+      const colspan = Math.max(Number(cell.attrs?.colspan) || 1, 1);
+      const rowspan = Math.max(Number(cell.attrs?.rowspan) || 1, 1);
+      cells.push({ key: r * 1000 + idx, row: r, col, rowspan, colspan, borders: cell.attrs?.border });
+      if (rowspan > 1) for (let c = col; c < col + colspan; c++) occupied[c] = rowspan;
+      col += colspan;
+      cols = Math.max(cols, col);
+    });
+    for (let c = 0; c < occupied.length; c++) if ((occupied[c] || 0) > 0) occupied[c]--;
+  });
+  return { cells, cols };
 }
 
-function figure(node: PmNode, input: RelazioneExportInput, warnings: string[]): Paragraph[] {
+const mmToDxa = (mm: number) => Math.round((mm / 25.4) * 1440);
+
+function figure(node: PmNode, input: RelazioneExportInput, warnings: string[]): Block[] {
   const snapshotId = Number(node.attrs?.snapshotId);
   const caption = String(node.attrs?.didascalia || "").trim();
   const isProject = node.type === "projectImage";
@@ -168,7 +198,51 @@ function figure(node: PmNode, input: RelazioneExportInput, warnings: string[]): 
     width = Math.round(height * ratio);
   }
   const align = ALIGN[String(node.attrs?.align || "center")] ?? AlignmentType.CENTER;
-  const paragraphs = [
+
+  // Testo a fianco: la figura e la didascalia stanno in una tabella mobile senza bordi, ancorata al paragrafo
+  // successivo, che le scorre accanto (come «Disposizione testo: quadrato» di Word)
+  if (figureWrap(node.attrs) === "square") {
+    const side = figureFloatSide(node.attrs);
+    const widthDxa = width * 15;
+    const none = { top: NO_LINE, bottom: NO_LINE, left: NO_LINE, right: NO_LINE };
+    const inner = [
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        keepNext: !!caption,
+        children: [new ImageRun({ type: img.type, data: img.buffer, transformation: { width, height } })],
+      }),
+    ];
+    if (caption) {
+      inner.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 40 }, children: [new TextRun({ text: caption, italics: true, size: 20 })] }));
+    }
+    return [
+      new Table({
+        width: { size: widthDxa, type: WidthType.DXA },
+        columnWidths: [widthDxa],
+        layout: TableLayoutType.FIXED,
+        borders: NO_LINES,
+        float: {
+          horizontalAnchor: TableAnchorType.MARGIN,
+          relativeHorizontalPosition: side === "right" ? RelativeHorizontalPosition.RIGHT : RelativeHorizontalPosition.LEFT,
+          verticalAnchor: TableAnchorType.TEXT,
+          absoluteVerticalPosition: 0,
+          leftFromText: side === "right" ? 280 : 0,
+          rightFromText: side === "left" ? 280 : 0,
+          topFromText: 60,
+          bottomFromText: 140,
+          overlap: OverlapType.NEVER,
+        },
+        rows: [
+          new TableRow({
+            cantSplit: true,
+            children: [new TableCell({ width: { size: widthDxa, type: WidthType.DXA }, borders: none, margins: { top: 0, bottom: 0, left: 0, right: 0 }, children: inner })],
+          }),
+        ],
+      }),
+    ];
+  }
+
+  const paragraphs: Paragraph[] = [
     new Paragraph({
       alignment: align,
       keepNext: !!caption,
@@ -248,21 +322,37 @@ function blocks(
         break;
       case "table": {
         const rows = (node.content || []).filter((r) => r.type === "tableRow");
-        const cols = (rows[0]?.content || []).reduce((n, c) => n + (Number(c.attrs?.colspan) || 1), 0) || 1;
+        const grid = gridCells(rows);
+        const cols = grid.cols || 1;
         const colWidths = tableColumnWidths(rows, cols);
         const total = colWidths.reduce((a, b) => a + b, 0);
-        const borders = tableBorders(String(node.attrs?.borders || "all"));
+        const look = tableLook(node.attrs);
+        // Bordi di ogni cella: i propri, altrimenti la disposizione scelta per la tabella
+        const borders = resolveCellBorders(
+          look,
+          grid.cells.map((c) => ({ ...c, borders: normalizeCellBorders(c.borders, look.pen) })),
+          rows.length,
+          cols,
+        );
         const colOf = (row: PmNode, idx: number) =>
           (row.content || []).slice(0, idx).reduce((n, c) => n + (Number(c.attrs?.colspan) || 1), 0);
+        const pad = Number(node.attrs?.cellPadding) > 0 ? mmToDxa(Number(node.attrs?.cellPadding)) : null;
+        const margins = pad != null ? { top: pad, bottom: pad, left: pad, right: pad } : { top: 60, bottom: 60, left: 100, right: 100 };
+        const tableAlign = node.attrs?.align === "center" ? AlignmentType.CENTER : node.attrs?.align === "right" ? AlignmentType.RIGHT : undefined;
         out.push(
           new Table({
             width: { size: total, type: WidthType.DXA },
             columnWidths: colWidths,
-            ...(borders ? { borders } : {}),
+            layout: TableLayoutType.FIXED,
+            alignment: tableAlign,
+            borders: NO_LINES,
             rows: rows.map(
-              (row) =>
+              (row, r) =>
                 new TableRow({
                   tableHeader: (row.content || []).every((c) => c.type === "tableHeader"),
+                  height: Number(row.attrs?.height) > 0
+                    ? { value: Math.round(Number(row.attrs?.height) * TWIPS_PER_CM), rule: HeightRule.ATLEAST }
+                    : undefined,
                   children: (row.content || []).map((cell, idx) => {
                     const span = Number(cell.attrs?.colspan) || 1;
                     const isHeader = cell.type === "tableHeader";
@@ -271,13 +361,15 @@ function blocks(
                     const first = colOf(row, idx);
                     const width = colWidths.slice(first, first + span).reduce((a, b) => a + b, 0);
                     const valign = cell.attrs?.valign === "middle" ? VerticalAlign.CENTER : cell.attrs?.valign === "bottom" ? VerticalAlign.BOTTOM : undefined;
+                    const b = borders.get(r * 1000 + idx);
                     return new TableCell({
                       columnSpan: span > 1 ? span : undefined,
                       rowSpan: Number(cell.attrs?.rowspan) > 1 ? Number(cell.attrs?.rowspan) : undefined,
                       width: { size: width || Math.floor(total / cols) * span, type: WidthType.DXA },
                       shading: fill ? { type: ShadingType.CLEAR, fill, color: "auto" } : undefined,
                       verticalAlign: valign,
-                      margins: { top: 60, bottom: 60, left: 100, right: 100 },
+                      borders: b ? { top: line(b.top), right: line(b.right), bottom: line(b.bottom), left: line(b.left) } : undefined,
+                      margins,
                       children: inner.length ? inner : [new Paragraph({ text: "" })],
                     });
                   }),
@@ -304,7 +396,7 @@ export async function buildRelazioneDocx(
 ): Promise<{ buffer: Buffer; warnings: string[] }> {
   const warnings: string[] = [];
   const body = blocks(input.contenuto?.content || [], input, warnings);
-  if (body.length === 0) body.push(new Paragraph({ text: "" }));
+  if (body.length === 0 || body[body.length - 1] instanceof Table) body.push(new Paragraph({ text: "" }));
 
   const head = input.intestazione || {};
   const headerText = String(head.intestazione || "").trim();
