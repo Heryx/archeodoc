@@ -1,14 +1,18 @@
 import fs from "fs";
 import path from "path";
 import type { ProjectDefinition } from "./projects";
+import { buildModelFieldsFromTemplate } from "./docx_template_utils";
+import { resolveUSTemplatePath } from "./us_template_path";
 import {
   BASE_US_FIELD_KEYS,
   BASE_US_MODEL_KEY,
   BUILTIN_US_MODELS,
   type USModelDefinition,
   type USModelField,
+  checkboxGroupForKey,
   getBuiltinUSModel,
   isBuiltinUSModelKey,
+  isCheckboxPlaceholder,
 } from "@shared/us_models";
 
 type CustomModelInput = {
@@ -37,8 +41,12 @@ function normalizeKey(value: string): string {
 }
 
 export function normalizeFieldKey(value: string): string {
-  const asText = value
-    .trim()
+  // Un identificatore già valido (es. un placeholder del template: "chkIntatto", "uguale_a") va conservato
+  // com'è: abbassarlo di caso lo scollegherebbe dal {placeholder} del documento.
+  const trimmed = value.trim();
+  if (/^[a-z][A-Za-z0-9_]*$/.test(trimmed)) return trimmed;
+
+  const asText = trimmed
     .replace(/[^a-zA-Z0-9]+/g, " ")
     .split(" ")
     .filter(Boolean)
@@ -74,16 +82,21 @@ function parseCustomModels(filePath: string): USModelDefinition[] {
             if (!field || typeof field !== "object") return null;
             const f = field as USModelField;
             if (!f.key || !f.label) return null;
-            if (!["text", "textarea", "date", "select", "multiselect"].includes(f.type)) return null;
+            if (!["text", "textarea", "date", "select", "multiselect", "checkbox"].includes(f.type)) return null;
+
+            // Modelli creati prima del tipo "checkbox": i placeholder chkXxx erano salvati come testo.
+            const key = normalizeFieldKey(f.key);
+            const type = f.type === "text" && isCheckboxPlaceholder(key) ? "checkbox" : f.type;
 
             return {
-              key: normalizeFieldKey(f.key),
+              key,
               label: String(f.label).trim(),
-              type: f.type,
+              type,
               required: !!f.required,
               locked: false,
               options: Array.isArray(f.options) ? f.options.map((o) => String(o).trim()).filter(Boolean) : undefined,
               help: typeof f.help === "string" && f.help.trim() ? f.help.trim() : undefined,
+              group: type === "checkbox" ? (f.group || checkboxGroupForKey(key)) : undefined,
             };
           })
           .filter((field): field is USModelField => !!field),
@@ -123,7 +136,7 @@ function toFieldList(fields: unknown): USModelField[] {
 
     const typeRaw = String(item.type || "text").toLowerCase();
     const type = (
-      ["text", "textarea", "date", "select", "multiselect"].includes(typeRaw) ? typeRaw : "text"
+      ["text", "textarea", "date", "select", "multiselect", "checkbox"].includes(typeRaw) ? typeRaw : "text"
     ) as USModelField["type"];
     const key = normalizeFieldKey(String(item.key || label));
     if (BASE_US_FIELD_KEYS.has(key)) {
@@ -150,6 +163,10 @@ function toFieldList(fields: unknown): USModelField[] {
       locked: false,
       options,
       help: typeof item.help === "string" && item.help.trim() ? item.help.trim() : undefined,
+      group:
+        type === "checkbox"
+          ? (typeof item.group === "string" && item.group.trim()) || checkboxGroupForKey(key)
+          : undefined,
     });
   }
 
@@ -291,4 +308,33 @@ export function deleteCustomUSModel(project: ProjectDefinition, modelKey: string
     throw new Error("Modello personalizzato non trovato");
   }
   saveCustomModels(project, next);
+}
+
+/**
+ * Riallinea le voci di un modello personalizzato al suo template DOCX (quello specifico del modello,
+ * altrimenti il generico): la scheda mostra le stesse voci del documento, nello stesso ordine.
+ * Restituisce null se il modello non è personalizzato o non c'è nessun template.
+ */
+export async function syncModelFieldsWithTemplate(
+  project: ProjectDefinition,
+  modelKey: string,
+): Promise<{ model: USModelDefinition; added: string[]; removed: string[]; total: number } | null> {
+  const current = parseCustomModels(getCustomModelsPath(project)).find((m) => m.key === modelKey);
+  if (!current) return null;
+  const templatePath = resolveUSTemplatePath(project, modelKey);
+  if (!templatePath) return null;
+
+  const { fields: templateFields } = await buildModelFieldsFromTemplate(templatePath);
+  const previousByKey = new Map(current.fields.map((f) => [f.key, f]));
+  const fields = templateFields.map((f) => {
+    const prev = previousByKey.get(f.key);
+    return prev ? { ...f, required: prev.required, help: prev.help } : f;
+  });
+
+  const nextKeys = new Set(fields.map((f) => f.key));
+  const added = fields.filter((f) => !previousByKey.has(f.key)).map((f) => f.key);
+  const removed = current.fields.filter((f) => !nextKeys.has(f.key)).map((f) => f.key);
+
+  const model = updateCustomUSModel(project, modelKey, { fields });
+  return { model, added, removed, total: fields.length };
 }

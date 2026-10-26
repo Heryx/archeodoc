@@ -25,8 +25,9 @@ import { RibbonBody, RibbonTabs, type RibbonTabDef } from "@/components/relazion
 import { DocumentRibbon, HomeRibbon, InsertRibbon, type SideTab } from "@/components/relazioni/DocumentRibbon";
 import { UsPreviewPanel, type UsItem } from "@/components/relazioni/UsPreviewPanel";
 import {
-  Loader2, Check, Link2, BookOpen, PanelRightClose, ArrowLeft, PanelLeftClose, PanelLeftOpen, ListTree, X,
+  Loader2, Check, Link2, BookOpen, PanelRightClose, ArrowLeft, PanelLeftClose, PanelLeftOpen, ListTree, X, History,
 } from "lucide-react";
+import { StoricoDialog } from "@/components/storico/StoricoDialog";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -369,6 +370,12 @@ export function RelazioneEditorPanel({ cantiereId, docId, onBack }: { cantiereId
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const detailKey = ["/api/cantieri", String(cantiereId), "documentazioni", String(docId)];
+  // Dopo un ripristino dalla cronologia l'editor viene ricreato con il testo recuperato
+  const [reloadNonce, setReloadNonce] = useState(0);
+  const reload = async () => {
+    await queryClient.refetchQueries({ queryKey: detailKey, exact: true });
+    setReloadNonce((n) => n + 1);
+  };
 
   const { data, isLoading } = useQuery<{ documentazione: RelazioneDoc; snapshots: LinkedSnapshot[] }>({
     queryKey: detailKey,
@@ -377,16 +384,17 @@ export function RelazioneEditorPanel({ cantiereId, docId, onBack }: { cantiereId
 
   if (isLoading || !data) return <div className="text-sm text-muted-foreground">Caricamento...</div>;
   // Il key rimonta l'editor quando si cambia documento
-  return <EditorBody key={docId} onBack={onBack} cantiereId={cantiereId} doc={data.documentazione} linked={data.snapshots} detailKey={detailKey} queryClient={queryClient} toast={toast} />;
+  return <EditorBody key={`${docId}-${reloadNonce}`} onReload={reload} onBack={onBack} cantiereId={cantiereId} doc={data.documentazione} linked={data.snapshots} detailKey={detailKey} queryClient={queryClient} toast={toast} />;
 }
 
-function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, onBack }: {
-  onBack: () => void; cantiereId: number; doc: RelazioneDoc; linked: LinkedSnapshot[];
+function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, onBack, onReload }: {
+  onBack: () => void; onReload: () => void; cantiereId: number; doc: RelazioneDoc; linked: LinkedSnapshot[];
   detailKey: (string | number)[]; queryClient: ReturnType<typeof useQueryClient>; toast: ReturnType<typeof useToast>["toast"];
 }) {
   const [titolo, setTitolo] = useState(doc.titolo);
   const [header, setHeader] = useState<Intestazione>({ ...EMPTY_HEADER, ...(parseJson<Intestazione>(doc.intestazione) || {}) });
   const [save, setSave] = useState<"idle" | "dirty" | "saving" | "saved">("idle");
+  const [storicoOpen, setStoricoOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [genOpen, setGenOpen] = useState(false);
   const [imgOpen, setImgOpen] = useState(false);
@@ -783,6 +791,24 @@ function EditorBody({ cantiereId, doc, linked, detailKey, queryClient, toast, on
           className="text-lg font-semibold h-10"
         />
         <Badge variant={doc.stato === "completata" ? "default" : "outline"}>{doc.stato}</Badge>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="gap-1.5 shrink-0"
+          title="Cronologia: torna a una versione precedente del testo"
+          onClick={async () => { await flush(); setStoricoOpen(true); }}
+        >
+          <History size={15} /> Cronologia
+        </Button>
+        <StoricoDialog
+          open={storicoOpen}
+          onOpenChange={setStoricoOpen}
+          entityType="documentazione"
+          entityId={doc.id}
+          title={`Cronologia · ${titolo || doc.titolo}`}
+          onRestored={onReload}
+        />
         <span className="text-xs text-muted-foreground w-24 shrink-0 flex items-center gap-1">
           {save === "saving" && <><Loader2 size={12} className="animate-spin" /> Salvo…</>}
           {save === "saved" && <><Check size={12} /> Salvato</>}

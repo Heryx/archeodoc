@@ -1,4 +1,4 @@
-import { BASE_US_MODEL_KEY, type USModelDefinition, type USModelField } from "@shared/us_models";
+import { BASE_US_MODEL_KEY, isCheckedValue, type USModelDefinition, type USModelField } from "@shared/us_models";
 import {
   normalizeUsDefinizioneWithVocabulary,
   normalizeUsTipoWithVocabulary,
@@ -105,6 +105,11 @@ const SIMPLE_SCHEDE_KEYS: string[] = [
   "localita",
   "anno",
   "area",
+  "saggio",
+  "quadrati",
+  "soprintendenza",
+  "tabelleMaterialiRa",
+  "tabelleMaterialiN",
   "piante",
   "sezioni",
   "prospetti",
@@ -162,7 +167,61 @@ const ORGANIC_CHECKBOX_MAP: Array<{ option: string; key: string }> = [
   { option: "Tessuti", key: "compTessuti" },
 ];
 
-export function mapUsToForm(us: any): USForm {
+/** Colonna della US che corrisponde a ciascun checkbox `chkXxx` dei template (stessi confronti dell'export DOCX).
+ * `value` assente = colonna booleana; "*" = qualsiasi testo non vuoto. */
+const CHECKBOX_COLUMN_MAP: Record<string, { column: string; value?: string }> = {
+  chkArtificiale: { column: "modoFormazione", value: "artificiale" },
+  chkNaturale: { column: "modoFormazione", value: "naturale" },
+  chkMaterialeCostruzione: { column: "compMaterialeCostruzione" },
+  chkCeramica: { column: "compCeramica" },
+  chkMetalli: { column: "compMetalli" },
+  chkVetro: { column: "compVetro" },
+  chkCiottoli: { column: "compCiottoli" },
+  chkGhiaia: { column: "compGhiaia" },
+  chkDensitaInorgFitta: { column: "densitaInorganici", value: "fitta" },
+  chkDensitaInorgMedia: { column: "densitaInorganici", value: "media" },
+  chkDensitaInorgRada: { column: "densitaInorganici", value: "rada" },
+  chkFauna: { column: "compFauna" },
+  chkOsso: { column: "compOsso" },
+  chkCorno: { column: "compCorno" },
+  chkSemi: { column: "compSemi" },
+  chkFrutti: { column: "compFrutti" },
+  chkCarboni: { column: "compCarboni" },
+  chkLegno: { column: "compLegno" },
+  chkTessuti: { column: "compTessuti" },
+  chkDensitaOrgFitta: { column: "densitaOrganici", value: "fitta" },
+  chkDensitaOrgMedia: { column: "densitaOrganici", value: "media" },
+  chkDensitaOrgRada: { column: "densitaOrganici", value: "rada" },
+  chkIntatto: { column: "statoConservazione", value: "Intatto" },
+  chkBuono: { column: "statoConservazione", value: "Buono" },
+  chkDiscreto: { column: "statoConservazione", value: "Discreto" },
+  chkMediocre: { column: "statoConservazione", value: "Mediocre" },
+  chkPessimo: { column: "statoConservazione", value: "Pessimo" },
+  chkScavataIntegralmente: { column: "scavataIntegralmente" },
+  chkScavataParzialmente: { column: "scavataParzialmente" },
+  chkCorrispondeAltraUnita: { column: "corrispondeAltraUnita", value: "*" },
+  chkAsportataConAltriStrati: { column: "asportataConAltriStrati" },
+  chkAltroScavo: { column: "altroScavo", value: "*" },
+  chkSequenzaStratigrafica: { column: "elementiDatanti", value: "Sequenza stratigrafica" },
+  chkRepertiDiagnostici: { column: "elementiDatanti", value: "Reperti diagnostici" },
+  chkFlottazioneTutta: { column: "flottazioneTipo", value: "di tutta l'unità" },
+  chkFlottazioneParziale: { column: "flottazioneTipo", value: "parziale" },
+  chkSetacciaturaTutta: { column: "setacciaturaTipo", value: "di tutta l'unità" },
+  chkSetacciaturaParziale: { column: "setacciaturaTipo", value: "parziale" },
+  chkAffidNessuna: { column: "affidabilitaStratigrafica", value: "nessuna" },
+  chkAffidModesta: { column: "affidabilitaStratigrafica", value: "modesta" },
+  chkAffidBuona: { column: "affidabilitaStratigrafica", value: "buona" },
+};
+
+function isCheckboxColumnSet(us: any, spec: { column: string; value?: string }): boolean {
+  const raw = us[spec.column];
+  if (spec.value === undefined) return asBoolean(raw);
+  const text = String(raw ?? "").trim();
+  if (spec.value === "*") return text.length > 0;
+  return text.toLowerCase() === spec.value.toLowerCase();
+}
+
+export function mapUsToForm(us: any, model?: USModelDefinition): USForm {
   let schedaData: Record<string, string> = {};
   if (typeof us.schedaData === "string" && us.schedaData.trim()) {
     try {
@@ -232,6 +291,14 @@ export function mapUsToForm(us: any): USForm {
   }
   if (!schedaData.metodoScavoAltro && us.altroScavo) {
     schedaData.metodoScavoAltro = String(us.altroScavo);
+  }
+
+  // Checkbox del modello (da template DOCX): se la scheda non li ha ancora salvati, partono da quanto
+  // già registrato nelle colonne della US (es. compilata con un altro modello o importata).
+  for (const field of model?.fields ?? []) {
+    if (field.type !== "checkbox" || schedaData[field.key] !== undefined) continue;
+    const spec = CHECKBOX_COLUMN_MAP[field.key];
+    if (spec && isCheckboxColumnSet(us, spec)) schedaData[field.key] = "true";
   }
 
   return {
@@ -307,6 +374,22 @@ export function usPayload(form: USForm, thesaurus?: USThesaurusConfig) {
   structuredColumns.riempie = asNullable(schedaDataClean.riempie || "");
   structuredColumns.sequenzaFisica = asNullable(schedaDataClean.ugualeAStratigrafico || "");
 
+  // Checkbox del modello da template: tenuti allineati alle colonne della US, così Matrix, elenchi ed
+  // export vedono gli stessi valori. Si agisce solo sui checkbox toccati nella scheda (chiave presente).
+  for (const [key, spec] of Object.entries(CHECKBOX_COLUMN_MAP)) {
+    if (form.schedaData[key] === undefined) continue;
+    const checked = isCheckedValue(form.schedaData[key]);
+    if (spec.value === undefined) {
+      structuredColumns[spec.column] = checked;
+    } else if (spec.value === "*") {
+      if (spec.column === "corrispondeAltraUnita") structuredColumns[spec.column] = checked ? "si" : null;
+    } else if (checked) {
+      structuredColumns[spec.column] = spec.value;
+    } else if (String(structuredColumns[spec.column] ?? "").toLowerCase() === spec.value.toLowerCase()) {
+      structuredColumns[spec.column] = null;
+    }
+  }
+
   return {
     codiceUS: form.codiceUS.trim(),
     tipo: asNullable(tipoNormalized || ""),
@@ -331,7 +414,12 @@ export function usPayload(form: USForm, thesaurus?: USThesaurusConfig) {
   };
 }
 
+/** Voci del template che sono la quota s.l.m. della US ({quoteSlm}, {quotaSlm}, {quotaSml}): nella scheda
+ * si leggono e si scrivono sul campo `quota`, non su una copia in schedaData. */
+export const QUOTA_MODEL_FIELD_KEYS = new Set(["quoteSlm", "quotaSlm", "quotaSml"]);
+
 export function getModelFieldValue(form: USForm, field: USModelField): string {
+  if (QUOTA_MODEL_FIELD_KEYS.has(field.key)) return form.quota || "";
   return form.schedaData[field.key] || "";
 }
 

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "wouter";
 import { ChevronDown, Plus, Pencil, Trash2 } from "lucide-react";
+import { StoricoButton } from "@/components/storico/StoricoButton";
 import { apiRequest } from "@/lib/queryClient";
 import { getCurrentProjectId } from "@/lib/project";
 import { useToast } from "@/hooks/use-toast";
@@ -120,6 +121,7 @@ function SasCard({
             <Button size="sm" variant="outline" className="gap-1 text-xs" onClick={() => onEdit(sas)}>
               <Pencil size={12} /> Modifica
             </Button>
+            <StoricoButton entityType="sas" entityId={sas.id} title={`Cronologia · SAS ${sas.codice}`} />
             <Button
               size="sm"
               variant="ghost"

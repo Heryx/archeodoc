@@ -18,8 +18,11 @@ import { registerQCRoutes } from "./routes/qc";
 import { registerPeriodiRoutes } from "./routes/periodi";
 import { registerParadatiRoutes } from "./routes/paradati_nodi";
 import { registerAIAssistantRoutes } from "./routes/ai_assistant";
+import { registerUSAiReviewRoutes } from "./routes/us_ai_review";
+import { registerStoricoRoutes } from "./routes/storico";
 import { registerFieldworkRoutes } from "./routes/fieldwork";
 import { registerUSImportRoutes } from "./routes/us_import";
+import { registerUSCrosscheckRoutes } from "./routes/us_crosscheck";
 import { registerQFieldRoutes } from "./routes/qfield";
 import syncRouter from "./routes/sync";
 import { registerWebMapRoutes } from "./routes/webmap_routes";
@@ -701,6 +704,7 @@ export async function registerRoutes(_httpServer: Server, app: Express): Promise
     cleanupUploadedTempFiles,
   });
   registerUSImportRoutes(app, upload, withProject);
+  registerUSCrosscheckRoutes(app, upload, withProject);
   registerQCRoutes(app, withProject);
   registerPeriodiRoutes(app, withProject);
   registerParadatiRoutes(app, withProject);
@@ -714,6 +718,8 @@ export async function registerRoutes(_httpServer: Server, app: Express): Promise
 
   registerAIExportRoutes(app, withProject);
   registerAIAssistantRoutes(app, withProject);
+  registerUSAiReviewRoutes(app, withProject);
+  registerStoricoRoutes(app, withProject);
   registerQFieldRoutes(app, withProject);
 
   app.use("/api/sync", syncRouter);

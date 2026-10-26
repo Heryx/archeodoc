@@ -1,7 +1,7 @@
 ﻿import fs from "fs";
 import path from "path";
 import Database from "better-sqlite3";
-import { listProjects, type ProjectDefinition } from "./projects";
+import { getStorageForProject, listProjects, type ProjectDefinition } from "./projects";
 import { logger } from "./logger";
 
 export type BackupKind = "manual" | "daily-auto";
@@ -86,6 +86,7 @@ export async function runDailyBackupSweep(): Promise<void> {
   const projects = listProjects();
   for (const project of projects) {
     try {
+      getStorageForProject(project.id).history.pruneAll();
       const created = await ensureDailyBackupForProject(project);
       if (created) {
         logger.info("Backup giornaliero creato", {

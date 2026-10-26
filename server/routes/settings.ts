@@ -7,6 +7,8 @@ import multer from "multer";
 import Database from "better-sqlite3";
 import type { WithProject } from "./types";
 import { AI_AVAILABLE, AI_PROVIDER, reloadAIProvider } from "../ai";
+import { getAnthropicModel } from "../anthropic_model";
+import { isValidAnthropicModelId } from "@shared/anthropic_models";
 import { getAllSettings, setSetting, resetToDefault } from "../ai_settings";
 import { getQcUsConfig, setQcUsConfig, resetQcUsConfig } from "../qc_settings";
 import { QC_US_RULES } from "@shared/qc_us_rules";
@@ -90,6 +92,7 @@ export function registerSettingsRoutes(app: Express, withProject: WithProject) {
       anthropicKeyPreview: anthropicKey.length > 6 ? anthropicKey.slice(0, 8) + "..." + anthropicKey.slice(-4) : (anthropicKey.length > 0 ? "***" : ""),
       openaiKeyPreview: openaiKey.length > 6 ? openaiKey.slice(0, 4) + "..." + openaiKey.slice(-4) : (openaiKey.length > 0 ? "***" : ""),
       aiProvider: aiProvider || "auto",
+      anthropicModel: getAnthropicModel(),
       currentProvider: AI_PROVIDER,
       available: AI_AVAILABLE,
     });
@@ -97,12 +100,16 @@ export function registerSettingsRoutes(app: Express, withProject: WithProject) {
 
   // ─── Impostazioni AI: salvataggio chiavi nel .env ──────────────────────────
   app.post("/api/settings/ai", (req, res) => {
-    const { geminiKey, anthropicKey, openaiKey, aiProvider } = req.body as {
+    const { geminiKey, anthropicKey, openaiKey, aiProvider, anthropicModel } = req.body as {
       geminiKey?: string;
       anthropicKey?: string;
       openaiKey?: string;
       aiProvider?: string;
+      anthropicModel?: string;
     };
+    if (anthropicModel !== undefined && !isValidAnthropicModelId(anthropicModel.trim())) {
+      return res.status(400).json({ error: "ID modello Claude non valido" });
+    }
 
     // Percorso del file .env nella root del progetto (accanto a package.json)
     const envPath = path.join(process.cwd(), ".env");
@@ -134,6 +141,7 @@ export function registerSettingsRoutes(app: Express, withProject: WithProject) {
     if (geminiKey !== undefined) updated = setEnvVar(updated, "GEMINI_API_KEY", geminiKey);
     if (anthropicKey !== undefined) updated = setEnvVar(updated, "ANTHROPIC_API_KEY", anthropicKey);
     if (openaiKey !== undefined) updated = setEnvVar(updated, "OPENAI_API_KEY", openaiKey);
+    if (anthropicModel !== undefined) updated = setEnvVar(updated, "ANTHROPIC_MODEL", anthropicModel);
     if (aiProvider !== undefined) updated = setEnvVar(updated, "AI_PROVIDER", aiProvider === "auto" ? "" : aiProvider);
 
     try {
@@ -157,6 +165,11 @@ export function registerSettingsRoutes(app: Express, withProject: WithProject) {
       const v = openaiKey.trim();
       if (v) process.env.OPENAI_API_KEY = v;
       else delete process.env.OPENAI_API_KEY;
+    }
+    if (anthropicModel !== undefined) {
+      const v = anthropicModel.trim();
+      if (v) process.env.ANTHROPIC_MODEL = v;
+      else delete process.env.ANTHROPIC_MODEL;
     }
     if (aiProvider !== undefined) {
       if (aiProvider && aiProvider !== "auto") process.env.AI_PROVIDER = aiProvider.trim();
@@ -572,7 +585,9 @@ export function registerSettingsRoutes(app: Express, withProject: WithProject) {
     if (!Number.isFinite(id)) return res.status(400).json({ error: "ID non valido" });
     const db = openProjectDb(ctx.project);
     try {
-      const result = db.prepare(`DELETE FROM "${table}" WHERE id = ?`).run(id);
+      const result = ctx.storage.history.trackTable(table, id, "delete", () =>
+        db.prepare(`DELETE FROM "${table}" WHERE id = ?`).run(id),
+      );
       if (result.changes === 0) return res.status(404).json({ error: "Riga non trovata" });
       // Reload storage cache so ORM stays consistent
       getStorageForProject(ctx.project.id);
@@ -600,9 +615,11 @@ export function registerSettingsRoutes(app: Express, withProject: WithProject) {
       if (!col) return res.status(404).json({ error: "Colonna non trovata" });
       if (col.pk) return res.status(403).json({ error: "Impossibile modificare la chiave primaria" });
 
-      const result = db.prepare(`UPDATE "${table}" SET "${column}" = ? WHERE id = ?`).run(
-        value === "" || value === null ? null : value,
-        id,
+      const result = ctx.storage.history.trackTable(table, id, "update", () =>
+        db.prepare(`UPDATE "${table}" SET "${column}" = ? WHERE id = ?`).run(
+          value === "" || value === null ? null : value,
+          id,
+        ),
       );
       if (result.changes === 0) return res.status(404).json({ error: "Riga non trovata" });
 

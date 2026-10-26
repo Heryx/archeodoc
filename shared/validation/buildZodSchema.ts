@@ -9,6 +9,7 @@ function fieldToZodType(field: FieldDefinition): ZodTypeAny {
     case "textarea":
     case "text":
     case "date":
+    case "checkbox":
       base = z.string();
       break;
     case "number":

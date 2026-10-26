@@ -37,6 +37,7 @@ export function ImpostazioniPage({ embedded = false }: ImpostazioniPageProps = {
   const [anthropicKey, setAnthropicKey] = useState("");
   const [openaiKey, setOpenaiKey] = useState("");
   const [aiProvider, setAiProvider] = useState<"auto" | "gemini" | "claude" | "openai">("auto");
+  const [anthropicModel, setAnthropicModel] = useState("");
   const [showGemini, setShowGemini] = useState(false);
   const [showAnthropic, setShowAnthropic] = useState(false);
   const [showOpenai, setShowOpenai] = useState(false);
@@ -61,6 +62,7 @@ export function ImpostazioniPage({ embedded = false }: ImpostazioniPageProps = {
     }
 
     setAiProvider(settings.aiProvider || "auto");
+    setAnthropicModel(settings.anthropicModel || "");
     setInitialized(true);
   }, [settings, initialized]);
 
@@ -131,6 +133,9 @@ export function ImpostazioniPage({ embedded = false }: ImpostazioniPageProps = {
   const saveMutation = useMutation({
     mutationFn: async () => {
       const body: Record<string, string> = { aiProvider };
+      if (anthropicModel !== "") {
+        body.anthropicModel = anthropicModel;
+      }
       if (geminiKey !== "") {
         body.geminiKey = geminiKey;
       }
@@ -234,6 +239,8 @@ export function ImpostazioniPage({ embedded = false }: ImpostazioniPageProps = {
       settings,
       aiProvider,
       setAiProvider,
+      anthropicModel,
+      setAnthropicModel,
       geminiKey,
       setGeminiKey,
       anthropicKey,
@@ -254,6 +261,7 @@ export function ImpostazioniPage({ embedded = false }: ImpostazioniPageProps = {
     [
       settings,
       aiProvider,
+      anthropicModel,
       geminiKey,
       anthropicKey,
       openaiKey,

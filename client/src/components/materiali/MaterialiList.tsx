@@ -3,6 +3,7 @@ import { useProjectCodeSettings } from "@/hooks/useProjectCodeSettings";
 import { Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { StoricoButton } from "@/components/storico/StoricoButton";
 
 type MaterialiListProps = {
   materiali: any[];
@@ -62,6 +63,7 @@ export function MaterialiList({ materiali, usById, isLoading, onEdit, onDelete }
                   <Button size="sm" variant="ghost" className="gap-1 text-xs" onClick={() => onEdit(ra)}>
                     <Pencil size={12} /> Modifica
                   </Button>
+                  <StoricoButton entityType="ra" entityId={ra.id} title={`Cronologia · RA ${ra.codice}`} />
                   <Button
                     size="sm"
                     variant="ghost"

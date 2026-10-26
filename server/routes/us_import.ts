@@ -8,6 +8,7 @@ import type multer from "multer";
 import type { WithProject, ProjectContext } from "./types";
 import { extractTextFromDocxBuffer } from "../docx_extract";
 import { buildUSBatchExtractPrompt } from "../prompts/us_batch_extract_prompt";
+import { getAnthropicModel } from "../anthropic_model";
 import { usCodeKey } from "@shared/normalize_us_code";
 import { BASE_US_MODEL_KEY } from "@shared/us_models";
 import type { UnitaStratigrafica } from "@shared/schema";
@@ -116,7 +117,7 @@ async function callAIBatch(prompt: string): Promise<string> {
     const Anthropic = (await import("@anthropic-ai/sdk")).default;
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const response = await client.messages.create({
-      model: "claude-sonnet-4-5",
+      model: getAnthropicModel(),
       max_tokens: 8000,
       system: systemPrompt,
       messages: [{ role: "user", content: prompt }],

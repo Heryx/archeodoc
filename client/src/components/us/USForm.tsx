@@ -6,8 +6,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import type { USModelDefinition } from "@shared/us_models";
-import { getModelFieldValue, tipiUS, type USForm as USFormModel } from "@/components/us/types";
+import { isCheckedValue, type USModelDefinition, type USModelField } from "@shared/us_models";
+import {
+  getModelFieldValue,
+  QUOTA_MODEL_FIELD_KEYS,
+  tipiUS,
+  type USForm as USFormModel,
+} from "@/components/us/types";
 import { MANAGED_RELATION_MODEL_KEYS, USRelazioni } from "@/components/us/USRelazioni";
 import type { USThesaurusConfig } from "@shared/us_thesaurus";
 import { normalizeUsTipoWithVocabulary, usDefinizioneSuggestions } from "@shared/us_thesaurus";
@@ -108,6 +113,134 @@ function setMultiSelectValue(
 ) {
   const normalized = Array.from(new Set(values.map((v) => String(v || "").trim()).filter(Boolean)));
   setFieldValue(setForm, fieldKey, normalized.length > 0 ? JSON.stringify(normalized) : "");
+}
+
+type ModelFieldsProps = {
+  form: USFormModel;
+  setForm: Dispatch<SetStateAction<USFormModel>>;
+  fields: USModelField[];
+};
+
+type ModelFieldItem =
+  | { kind: "field"; field: USModelField }
+  | { kind: "group"; title: string; fields: USModelField[] };
+
+/** I checkbox con lo stesso gruppo (es. "Stato di conservazione") stanno insieme, come nel template. */
+function toModelFieldItems(fields: USModelField[]): ModelFieldItem[] {
+  const items: ModelFieldItem[] = [];
+  const groups = new Map<string, Extract<ModelFieldItem, { kind: "group" }>>();
+  for (const field of fields) {
+    if (field.type === "checkbox" && field.group) {
+      let group = groups.get(field.group);
+      if (!group) {
+        group = { kind: "group", title: field.group, fields: [] };
+        groups.set(field.group, group);
+        items.push(group);
+      }
+      group.fields.push(field);
+    } else {
+      items.push({ kind: "field", field });
+    }
+  }
+  return items;
+}
+
+function ModelFields({ form, setForm, fields }: ModelFieldsProps) {
+  const items = useMemo(() => toModelFieldItems(fields), [fields]);
+
+  const setValue = (field: USModelField, value: string) => {
+    if (QUOTA_MODEL_FIELD_KEYS.has(field.key)) {
+      setForm((prev) => ({ ...prev, quota: value }));
+      return;
+    }
+    setFieldValue(setForm, field.key, value);
+  };
+
+  const renderCheckbox = (field: USModelField) => (
+    <label key={field.key} className="flex cursor-pointer items-center gap-2 text-sm">
+      <Checkbox
+        data-testid={`checkbox-${field.key}`}
+        checked={isCheckedValue(getModelFieldValue(form, field))}
+        onCheckedChange={(checked) => setValue(field, checked === true ? "true" : "false")}
+      />
+      <span>{field.label}</span>
+    </label>
+  );
+
+  return (
+    <>
+      {items.map((item) => {
+        if (item.kind === "group") {
+          return (
+            <div key={`group-${item.title}`} className="rounded-md border border-border bg-muted/10 p-2 md:col-span-2">
+              <p className="mb-1.5 text-xs font-medium text-muted-foreground">{item.title}</p>
+              <div className="flex flex-wrap gap-x-5 gap-y-1.5">{item.fields.map(renderCheckbox)}</div>
+            </div>
+          );
+        }
+
+        const { field } = item;
+        if (field.type === "checkbox") {
+          return <div key={field.key}>{renderCheckbox(field)}</div>;
+        }
+
+        const value = getModelFieldValue(form, field);
+        const selectedValues = field.type === "multiselect" ? parseMultiSelectValue(value) : [];
+        const isWide = field.type === "textarea" || field.type === "multiselect";
+        return (
+          <div key={field.key} className={isWide ? "md:col-span-2" : ""}>
+            <Label>
+              {field.label}
+              {field.required ? " *" : ""}
+            </Label>
+            {field.type === "textarea" ? (
+              <Textarea rows={3} value={value} onChange={(e) => setValue(field, e.target.value)} />
+            ) : field.type === "select" ? (
+              <Select value={value} onValueChange={(next) => setValue(field, next)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleziona..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {(field.options || []).map((option) => (
+                    <SelectItem key={`${field.key}-${option}`} value={option}>
+                      {option}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : field.type === "multiselect" ? (
+              <div className="space-y-2 rounded-md border border-border bg-muted/10 p-2">
+                {(field.options || []).map((option) => {
+                  const selected = selectedValues.includes(option);
+                  return (
+                    <label key={`${field.key}-${option}`} className="flex cursor-pointer items-center gap-2 text-sm">
+                      <Checkbox
+                        checked={selected}
+                        onCheckedChange={(checked) => {
+                          const next = checked
+                            ? [...selectedValues, option]
+                            : selectedValues.filter((item) => item !== option);
+                          setMultiSelectValue(setForm, field.key, next);
+                        }}
+                      />
+                      <span>{option}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            ) : (
+              <Input
+                type={field.type === "date" ? "date" : "text"}
+                value={value}
+                onChange={(e) => setValue(field, e.target.value)}
+              />
+            )}
+            {field.help && <p className="mt-1 text-xs text-muted-foreground">{field.help}</p>}
+          </div>
+        );
+      })}
+    </>
+  );
 }
 
 export function USFormFields({
@@ -284,72 +417,13 @@ if (isCustomModel && activeModel) {
             </p>
           </div>
           <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-2">
-            {activeModel.fields
-              .filter((field) => !MANAGED_RELATION_MODEL_KEYS.has(field.key))
-              .filter((field) => !["definizione", "descrizione", "interpretazione"].includes(field.key))
-              .map((field) => {
-                const value = getModelFieldValue(form, field);
-                const selectedValues = field.type === "multiselect" ? parseMultiSelectValue(value) : [];
-                const isWide = field.type === "textarea" || field.type === "multiselect";
-                return (
-                  <div key={field.key} className={isWide ? "md:col-span-2" : ""}>
-                    <Label>
-                      {field.label}
-                      {field.required ? " *" : ""}
-                    </Label>
-                    {field.type === "textarea" ? (
-                      <Textarea
-                        rows={3}
-                        value={value}
-                        onChange={(e) => setFieldValue(setForm, field.key, e.target.value)}
-                      />
-                    ) : field.type === "select" ? (
-                      <Select value={value} onValueChange={(next) => setFieldValue(setForm, field.key, next)}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Seleziona..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {(field.options || []).map((option) => (
-                            <SelectItem key={`${field.key}-${option}`} value={option}>
-                              {option}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    ) : field.type === "multiselect" ? (
-                      <div className="space-y-2 rounded-md border border-border bg-muted/10 p-2">
-                        {(field.options || []).map((option) => {
-                          const selected = selectedValues.includes(option);
-                          return (
-                            <label
-                              key={`${field.key}-${option}`}
-                              className="flex cursor-pointer items-center gap-2 text-sm"
-                            >
-                              <Checkbox
-                                checked={selected}
-                                onCheckedChange={(checked) => {
-                                  const next = checked
-                                    ? [...selectedValues, option]
-                                    : selectedValues.filter((item) => item !== option);
-                                  setMultiSelectValue(setForm, field.key, next);
-                                }}
-                              />
-                              <span>{option}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <Input
-                        type={field.type === "date" ? "date" : "text"}
-                        value={value}
-                        onChange={(e) => setFieldValue(setForm, field.key, e.target.value)}
-                      />
-                    )}
-                    {field.help && <p className="mt-1 text-xs text-muted-foreground">{field.help}</p>}
-                  </div>
-                );
-              })}
+            <ModelFields
+              form={form}
+              setForm={setForm}
+              fields={activeModel.fields
+                .filter((field) => !MANAGED_RELATION_MODEL_KEYS.has(field.key))
+                .filter((field) => !["definizione", "descrizione", "interpretazione"].includes(field.key))}
+            />
           </div>
         </section>
 
@@ -571,72 +645,11 @@ if (isCustomModel && activeModel) {
             </p>
           </div>
           <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-2">
-            {activeModel.fields
-              .filter((field) => !MANAGED_RELATION_MODEL_KEYS.has(field.key))
-              .map((field) => {
-                const value = getModelFieldValue(form, field);
-                const selectedValues = field.type === "multiselect" ? parseMultiSelectValue(value) : [];
-                const isWide = field.type === "textarea" || field.type === "multiselect";
-
-                return (
-                  <div key={field.key} className={isWide ? "md:col-span-2" : ""}>
-                    <Label>
-                      {field.label}
-                      {field.required ? " *" : ""}
-                    </Label>
-                    {field.type === "textarea" ? (
-                      <Textarea
-                        rows={3}
-                        value={value}
-                        onChange={(e) => setFieldValue(setForm, field.key, e.target.value)}
-                      />
-                    ) : field.type === "select" ? (
-                      <Select value={value} onValueChange={(next) => setFieldValue(setForm, field.key, next)}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Seleziona..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {(field.options || []).map((option) => (
-                            <SelectItem key={`${field.key}-${option}`} value={option}>
-                              {option}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    ) : field.type === "multiselect" ? (
-                      <div className="space-y-2 rounded-md border border-border bg-muted/10 p-2">
-                        {(field.options || []).map((option) => {
-                          const selected = selectedValues.includes(option);
-                          return (
-                            <label
-                              key={`${field.key}-${option}`}
-                              className="flex cursor-pointer items-center gap-2 text-sm"
-                            >
-                              <Checkbox
-                                checked={selected}
-                                onCheckedChange={(checked) => {
-                                  const next = checked
-                                    ? [...selectedValues, option]
-                                    : selectedValues.filter((item) => item !== option);
-                                  setMultiSelectValue(setForm, field.key, next);
-                                }}
-                              />
-                              <span>{option}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <Input
-                        type={field.type === "date" ? "date" : "text"}
-                        value={value}
-                        onChange={(e) => setFieldValue(setForm, field.key, e.target.value)}
-                      />
-                    )}
-                    {field.help && <p className="mt-1 text-xs text-muted-foreground">{field.help}</p>}
-                  </div>
-                );
-              })}
+            <ModelFields
+              form={form}
+              setForm={setForm}
+              fields={activeModel.fields.filter((field) => !MANAGED_RELATION_MODEL_KEYS.has(field.key))}
+            />
           </div>
         </section>
       )}

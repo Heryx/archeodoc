@@ -6,6 +6,7 @@ import {
 import fs from "fs";
 import path from "path";
 import type { UnitaStratigrafica, Giornata, Cantiere } from "@shared/schema";
+import { isCheckboxPlaceholder, isCheckedValue } from "@shared/us_models";
 
 // ─── Costanti ────────────────────────────────────────────────────────────────
 const COLOR_HEADER_BG  = "2C4A7C";
@@ -742,6 +743,9 @@ function buildUSTemplateFields(us: UnitaStratigrafica, cantiere: Cantiere | unde
     saggio:                     str(us.saggio),
     quadrati:                   str(us.quadrati),
     quoteSlm:                   str(us.quoteSlm || (us.quota != null ? String(us.quota) : "")),
+    // Varianti di scrittura dello stesso campo: il template può usare {quotaSml}, {quotaSlm} o {quoteSlm}.
+    quotaSml:                   str(us.quoteSlm || (us.quota != null ? String(us.quota) : "")),
+    quotaSlm:                   str(us.quoteSlm || (us.quota != null ? String(us.quota) : "")),
     tabelleMaterialiRa:         str(us.tabelleMaterialiRa),
     tabelleMaterialiN:          str(us.tabelleMaterialiN),
     haFoto:                     us.haFoto ? String(us.haFoto) : "",
@@ -903,7 +907,12 @@ export function buildUSFlatFields(us: UnitaStratigrafica, cantiere: Cantiere | u
   } catch {
     extra = {};
   }
-  return { ...buildUSTemplateFields(us, cantiere), ...extra };
+  const fields = buildUSTemplateFields(us, cantiere);
+  for (const [key, value] of Object.entries(extra)) {
+    // I checkbox della scheda sono salvati come "true"/"false": nel documento diventano ☑/☐.
+    fields[key] = isCheckboxPlaceholder(key) ? (isCheckedValue(value) ? "☑" : "☐") : value;
+  }
+  return fields;
 }
 
 export async function exportSchedaUSDocxFromTemplate(
@@ -922,7 +931,8 @@ export async function exportSchedaUSDocxFromTemplate(
     nullGetter: () => "",
   });
 
-  doc.render(buildUSTemplateFields(us, cantiere));
+  // buildUSFlatFields (non le sole colonne fisse): include le voci del modello personalizzato in schedaData.
+  doc.render(buildUSFlatFields(us, cantiere));
 
   const out = doc.getZip().generate({ type: "nodebuffer", compression: "DEFLATE" });
   return Buffer.from(out);

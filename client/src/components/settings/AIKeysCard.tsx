@@ -4,12 +4,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ANTHROPIC_MODELS } from "@shared/anthropic_models";
 import type { AiSettings } from "@/components/settings/types";
 
 type AIKeysCardProps = {
   settings?: AiSettings;
   aiProvider: "auto" | "gemini" | "claude" | "openai";
   setAiProvider: (value: "auto" | "gemini" | "claude" | "openai") => void;
+  anthropicModel: string;
+  setAnthropicModel: (value: string) => void;
   geminiKey: string;
   setGeminiKey: (value: string) => void;
   anthropicKey: string;
@@ -32,6 +35,8 @@ export function AIKeysCard({
   settings,
   aiProvider,
   setAiProvider,
+  anthropicModel,
+  setAnthropicModel,
   geminiKey,
   setGeminiKey,
   anthropicKey,
@@ -155,6 +160,32 @@ export function AIKeysCard({
               console.anthropic.com
             </a>
           </p>
+          <div className="pt-2 space-y-1.5">
+            <Label>Modello Claude</Label>
+            <div className="flex gap-2 flex-wrap">
+              {ANTHROPIC_MODELS.map((model) => (
+                <button
+                  key={model.id}
+                  type="button"
+                  title={model.id}
+                  onClick={() => setAnthropicModel(model.id)}
+                  className={`px-3 py-1.5 rounded-md text-sm border transition-colors text-left ${
+                    anthropicModel === model.id
+                      ? "border-primary bg-primary/10 text-primary font-medium"
+                      : "border-border text-muted-foreground hover:border-primary/50"
+                  }`}
+                >
+                  {model.label}
+                  <span className="block text-[10px] font-normal text-muted-foreground">{model.hint}</span>
+                </button>
+              ))}
+            </div>
+            {anthropicModel && !ANTHROPIC_MODELS.some((model) => model.id === anthropicModel) && (
+              <p className="text-xs text-muted-foreground">
+                Modello personalizzato in uso: <code className="bg-muted px-1 rounded">{anthropicModel}</code>
+              </p>
+            )}
+          </div>
         </div>
 
         <div className="space-y-1.5">

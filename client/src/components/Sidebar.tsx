@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { StoricoDialog } from "@/components/storico/StoricoDialog";
 import { AiJobsBar } from "@/components/ai/AiJobsBar";
 import { Link, useLocation } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -35,6 +36,7 @@ import {
   Shovel,
   DatabaseZap,
   Table2,
+  History,
 } from "lucide-react";
 
 type NavItem = {
@@ -94,6 +96,7 @@ function panelFromValue(value: string | null): "settings" | "qc" | "stats" | "th
 export function Sidebar() {
   const [collapsed, setCollapsed] = usePersistedFlag("sidebar-collapsed", false);
   const [location] = useLocation();
+  const [storicoOpen, setStoricoOpen] = useState(false);
   const cleanLocation = extractPathFromLocation(location);
   const { theme, toggle } = useTheme();
   const { toast } = useToast();
@@ -556,10 +559,20 @@ export function Sidebar() {
       <div className="mt-auto">
         <AiJobsBar />
       </div>
+      <StoricoDialog open={storicoOpen} onOpenChange={setStoricoOpen} />
 
       <div className="px-3 pb-4 border-t border-border pt-3 flex items-center justify-between">
         <span className="text-xs text-muted-foreground">v1.0</span>
         <div className="flex items-center gap-1">
+          <button
+            onClick={() => setStoricoOpen(true)}
+            data-testid="button-storico"
+            className="p-1.5 rounded-md transition-colors text-muted-foreground hover:bg-muted hover:text-foreground"
+            aria-label="Cronologia modifiche"
+            title="Cronologia modifiche: torna indietro su modifiche, eliminazioni e interventi dell'AI"
+          >
+            <History size={15} />
+          </button>
           <button
             onClick={() => checkUpdates.mutate()}
             disabled={checkUpdates.isPending}

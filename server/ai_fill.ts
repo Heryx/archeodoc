@@ -3,6 +3,7 @@ import type { Cantiere, Giornata, InsertUS, UnitaStratigrafica } from "@shared/s
 import { getSetting } from "./ai_settings";
 import { generateWithGemini } from "./gemini";
 import { logger } from "./logger";
+import { getAnthropicModel } from "./anthropic_model";
 import { buildUsFillPrompt } from "./prompts/us_fill_prompt";
 
 export type AiFieldConfidence = "alta" | "media" | "bassa";
@@ -266,7 +267,7 @@ async function callAI(prompt: string, maxTokens = 2200, systemPrompt?: string): 
     const Anthropic = (await import("@anthropic-ai/sdk")).default;
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const response = await client.messages.create({
-      model: "claude-sonnet-4-5",
+      model: getAnthropicModel(),
       max_tokens: maxTokens,
       ...(systemPrompt ? { system: systemPrompt } : {}),
       messages: [{ role: "user", content: prompt }],
@@ -749,4 +750,135 @@ export function applyAiFieldsToUS(
   patch.schedaData = serializeSchedaData(normalizedSchedaData);
 
   return patch as Partial<InsertUS>;
+}
+
+// ─── Supporto al controllo incrociato scheda US ↔ documentazione esterna ─────────
+
+export type CrosscheckFieldKind = "boolean" | "number" | "select" | "multiselect" | "text";
+
+export function crosscheckFieldKind(key: string): CrosscheckFieldKind | null {
+  if (BOOLEAN_FIELD_KEYS.has(key)) return "boolean";
+  if (NUMBER_FIELD_KEYS.has(key)) return "number";
+  if (Object.prototype.hasOwnProperty.call(SELECT_FIELD_OPTIONS, key)) return "select";
+  if (Object.prototype.hasOwnProperty.call(MULTISELECT_FIELD_OPTIONS, key)) return "multiselect";
+  if (TEXT_FIELD_KEYS.has(key)) return "text";
+  return null;
+}
+
+/** Normalizza (alias + validazione + tipo) un valore proposto dall'AI per un campo scheda US. */
+export function normalizeCrosscheckEntry(rawKey: string, raw: unknown): { key: string; entry: AiFieldSuggestion } | null {
+  const key = normalizeIncomingKey(String(rawKey || "").trim());
+  if (!key || !ALL_ALLOWED_KEYS.has(key)) return null;
+  const entry = normalizeSuggestionEntry(key, raw);
+  return entry ? { key, entry } : null;
+}
+
+/** Valore attuale di un campo nella scheda US (colonna DB o schedaData), nel tipo del campo. */
+export function readUSFieldForCompare(us: UnitaStratigrafica, key: string): string | boolean | number | string[] | null {
+  const kind = crosscheckFieldKind(key);
+  const schedaData = parseSchedaData(us.schedaData);
+  const column = (us as unknown as Record<string, unknown>)[key];
+
+  if (kind === "boolean") {
+    if (column === true) return true;
+    const inorg = INORGANIC_BY_BOOLEAN_KEY[key];
+    if (inorg && parseMultiSelect(schedaData.componentiInorganici).includes(inorg)) return true;
+    const org = ORGANIC_BY_BOOLEAN_KEY[key];
+    if (org && parseMultiSelect(schedaData.componentiOrganici).includes(org)) return true;
+    return false;
+  }
+
+  if (kind === "multiselect") {
+    const values = new Set(parseMultiSelect(schedaData[key] ?? column));
+    if (key === "componentiInorganici") {
+      for (const [boolKey, option] of Object.entries(INORGANIC_BY_BOOLEAN_KEY)) {
+        if ((us as unknown as Record<string, unknown>)[boolKey] === true) values.add(option);
+      }
+    }
+    if (key === "componentiOrganici") {
+      for (const [boolKey, option] of Object.entries(ORGANIC_BY_BOOLEAN_KEY)) {
+        if ((us as unknown as Record<string, unknown>)[boolKey] === true) values.add(option);
+      }
+    }
+    return Array.from(values);
+  }
+
+  if (kind === "number") {
+    return typeof column === "number" ? column : normalizeNumberValue(schedaData[key]);
+  }
+
+  const text = normalizeTextValue(column) ?? normalizeTextValue(schedaData[key]);
+  return text;
+}
+
+/**
+ * Patch "chirurgico" per il controllo incrociato: modifica solo i campi accettati, senza
+ * ricalcolare le colonne derivate da schedaData (a differenza di applyAiFieldsToUS), così
+ * non azzera componenti o metodo di scavo già presenti solo nelle colonne della scheda.
+ */
+export function buildCrosscheckPatch(
+  us: UnitaStratigrafica,
+  fields: Record<string, unknown>,
+): Partial<InsertUS> {
+  const schedaData = parseSchedaData(us.schedaData);
+  const patch: Record<string, unknown> = {};
+  const columnOf = us as unknown as Record<string, unknown>;
+
+  // Allinea le liste multiselect a quanto già spuntato nelle colonne checkbox
+  for (const [boolKey, option] of Object.entries(INORGANIC_BY_BOOLEAN_KEY)) {
+    if (columnOf[boolKey] === true) setMultiSelectOption(schedaData, "componentiInorganici", option, true);
+  }
+  for (const [boolKey, option] of Object.entries(ORGANIC_BY_BOOLEAN_KEY)) {
+    if (columnOf[boolKey] === true) setMultiSelectOption(schedaData, "componentiOrganici", option, true);
+  }
+
+  const columnKeys = new Set<string>([...Array.from(TOP_LEVEL_KEYS), ...Array.from(DB_TEXT_MIRROR_KEYS)]);
+
+  for (const [rawKey, rawValue] of Object.entries(fields || {})) {
+    const key = normalizeIncomingKey(String(rawKey || "").trim());
+    if (!key || !ALL_ALLOWED_KEYS.has(key)) continue;
+    const value = normalizeSuggestionValue(key, rawValue);
+    if (value == null) continue;
+
+    if (BOOLEAN_FIELD_KEYS.has(key) && typeof value === "boolean") {
+      patch[key] = value;
+      const inorg = INORGANIC_BY_BOOLEAN_KEY[key];
+      if (inorg) setMultiSelectOption(schedaData, "componentiInorganici", inorg, value);
+      const org = ORGANIC_BY_BOOLEAN_KEY[key];
+      if (org) setMultiSelectOption(schedaData, "componentiOrganici", org, value);
+      continue;
+    }
+
+    if (Array.isArray(value)) {
+      schedaData[key] = stringifyMultiSelect(value);
+      const boolMap = key === "componentiInorganici" ? INORGANIC_BY_BOOLEAN_KEY
+        : key === "componentiOrganici" ? ORGANIC_BY_BOOLEAN_KEY : null;
+      if (boolMap) {
+        for (const [boolKey, option] of Object.entries(boolMap)) {
+          if (value.includes(option)) patch[boolKey] = true;
+        }
+      }
+      if (key === "elementiDatantiFonte") patch[key] = value.join(", ");
+      continue;
+    }
+
+    schedaData[key] = String(value);
+    if (columnKeys.has(key)) patch[key] = value;
+    if (key === "componentiInorganiciAltro") patch.compAltroInorganico = String(value);
+    if (key === "componentiOrganiciAltro") patch.compAltroOrganico = String(value);
+  }
+
+  patch.schedaData = serializeSchedaData(schedaData);
+  return patch as Partial<InsertUS>;
+}
+
+/** Vocabolario dei campi scheda a scelta (select/multiselect) già noti all'AI, o null se il campo è libero. */
+export function aiFieldChoice(key: string): { kind: "select" | "multiselect"; options: string[] } | null {
+  if (Object.prototype.hasOwnProperty.call(SELECT_FIELD_OPTIONS, key)) {
+    return { kind: "select", options: SELECT_FIELD_OPTIONS[key] };
+  }
+  if (Object.prototype.hasOwnProperty.call(MULTISELECT_FIELD_OPTIONS, key)) {
+    return { kind: "multiselect", options: MULTISELECT_FIELD_OPTIONS[key] };
+  }
+  return null;
 }

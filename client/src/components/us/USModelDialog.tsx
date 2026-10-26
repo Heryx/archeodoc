@@ -50,6 +50,13 @@ function errorMessage(error: unknown): string {
   return "Errore sconosciuto";
 }
 
+function syncDescription(sync: { added: string[]; removed: string[]; total: number }): string {
+  const parts = [`La scheda mostra ora ${sync.total} voci del template`];
+  if (sync.added.length) parts.push(`${sync.added.length} aggiunte`);
+  if (sync.removed.length) parts.push(`${sync.removed.length} rimosse`);
+  return parts.join(" · ");
+}
+
 /** Sezione template per un singolo modello (o il template generico se modelKey === "generic"). */
 function ModelTemplateSection({
   cid,
@@ -92,12 +99,37 @@ function ModelTemplateSection({
       if (!res.ok) throw new Error((await res.json()).error || "Errore upload");
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data: { sync?: { added: string[]; removed: string[]; total: number } | null; syncError?: string }) => {
       void refetchTemplate();
-      toast({ title: "Template caricato" });
+      if (data?.sync) {
+        refreshModels();
+        toast({ title: "Template caricato", description: syncDescription(data.sync) });
+      } else if (data?.syncError) {
+        toast({ title: "Template caricato", description: `Voci del modello non aggiornate: ${data.syncError}`, variant: "destructive" });
+      } else {
+        toast({ title: "Template caricato" });
+      }
       setTimeout(() => { void fetchPlaceholders(); }, 600);
     },
     onError: (e: any) => toast({ title: "Errore upload", description: e.message, variant: "destructive" }),
+  });
+
+  const refreshModels = () => {
+    qc.invalidateQueries({ queryKey: ["/api/us-models", activeProjectId] });
+    qc.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us-model", activeProjectId] });
+  };
+
+  const syncMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `${endpoint}/sync-model`);
+      if (!res.ok) throw new Error((await res.json()).error || "Errore");
+      return res.json() as Promise<{ added: string[]; removed: string[]; total: number }>;
+    },
+    onSuccess: (data) => {
+      refreshModels();
+      toast({ title: "Voci della scheda aggiornate", description: syncDescription(data) });
+    },
+    onError: (e: any) => toast({ title: "Errore aggiornamento voci", description: e?.message, variant: "destructive" }),
   });
 
   const deleteMutation = useMutation({
@@ -215,6 +247,19 @@ function ModelTemplateSection({
                 ))}
               </div>
             </div>
+          )}
+
+          {!isGeneric && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full text-xs"
+              onClick={() => syncMutation.mutate()}
+              disabled={syncMutation.isPending}
+              title="Allinea le voci della scheda a quelle del template: aggiunge le mancanti e trasforma i chk… in caselle di spunta"
+            >
+              {syncMutation.isPending ? "Aggiornamento..." : "Aggiorna le voci della scheda dal template"}
+            </Button>
           )}
 
           {/* Crea modello da template solo per il template generico */}
@@ -528,7 +573,7 @@ export function USModelDialog({
                   />
                   <div className="text-xs text-muted-foreground mt-2 space-y-1">
                     <p>Formato: <code className="bg-muted px-1 rounded">Nome</code> oppure <code className="bg-muted px-1 rounded">Nome|tipo</code> oppure <code className="bg-muted px-1 rounded">Nome|tipo|opzione1,opzione2</code></p>
-                    <p>Tipi: <code className="bg-muted px-1 rounded">text</code> · <code className="bg-muted px-1 rounded">textarea</code> · <code className="bg-muted px-1 rounded">date</code> · <code className="bg-muted px-1 rounded">select</code> · <code className="bg-muted px-1 rounded">multiselect</code></p>
+                    <p>Tipi: <code className="bg-muted px-1 rounded">text</code> · <code className="bg-muted px-1 rounded">textarea</code> · <code className="bg-muted px-1 rounded">date</code> · <code className="bg-muted px-1 rounded">select</code> · <code className="bg-muted px-1 rounded">multiselect</code> · <code className="bg-muted px-1 rounded">checkbox</code></p>
                     <p className="mt-1">Ogni campo diventa il placeholder <code className="bg-muted px-1 rounded">{"{"}nomeCampo{"}"}</code> nel template Word.</p>
                   </div>
                 </div>

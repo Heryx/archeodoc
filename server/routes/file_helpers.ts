@@ -1,6 +1,7 @@
 ﻿import fs from "fs";
 import path from "path";
 import type { ProjectDefinition } from "../projects";
+import { historyDirForDb } from "../history";
 
 export function fileToTipo(mimeType: string, originalName: string): string {
   if (mimeType.startsWith("image/")) {
@@ -170,15 +171,46 @@ export function copyAttachmentIfExists(
   return true;
 }
 
+/** Cartella dove restano i file allegati eliminati, cosi' un'eliminazione si puo' annullare. */
+function attachmentTrashDir(project: ProjectDefinition): string {
+  return path.join(historyDirForDb(project.dbPath), "_cestino");
+}
+
+function moveFile(from: string, to: string): void {
+  fs.mkdirSync(path.dirname(to), { recursive: true });
+  try {
+    fs.renameSync(from, to);
+  } catch {
+    fs.copyFileSync(from, to);
+    fs.unlinkSync(from);
+  }
+}
+
+/** "Elimina" un allegato spostandolo nel cestino: il file non e' perso finche' il cestino non viene svuotato. */
 export function removeAttachmentIfExists(project: ProjectDefinition, storedPath: string): void {
   const absolutePath = resolveAttachmentAbsolutePath(project, storedPath);
   if (!absolutePath) return;
 
   try {
-    if (fs.existsSync(absolutePath)) {
-      fs.unlinkSync(absolutePath);
-    }
+    if (!fs.existsSync(absolutePath)) return;
+    let target = path.join(attachmentTrashDir(project), path.relative(path.resolve(project.mediaDir), absolutePath));
+    if (fs.existsSync(target)) target = `${target}.${Date.now()}`;
+    moveFile(absolutePath, target);
   } catch {
-    // Non bloccare il flusso API se il cleanup file fallisce.
+    // Non bloccare il flusso API se lo spostamento del file fallisce: il file resta dov'e'.
+  }
+}
+
+/** Rimette al suo posto un allegato finito nel cestino. Ritorna true se il file e' stato recuperato. */
+export function restoreTrashedAttachment(project: ProjectDefinition, storedPath: string): boolean {
+  const absolutePath = resolveAttachmentAbsolutePath(project, storedPath);
+  if (!absolutePath || fs.existsSync(absolutePath)) return false;
+  const source = path.join(attachmentTrashDir(project), path.relative(path.resolve(project.mediaDir), absolutePath));
+  try {
+    if (!fs.existsSync(source)) return false;
+    moveFile(source, absolutePath);
+    return true;
+  } catch {
+    return false;
   }
 }

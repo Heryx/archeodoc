@@ -12,6 +12,7 @@ import {
   Clock,
   Download,
   FileText,
+  History,
   Package,
   Pencil,
   ShieldCheck,
@@ -33,6 +34,7 @@ import { buildProjectUrl, getProjectHeader } from "@/lib/project";
 import { USAIPanel } from "@/components/us/USAIPanel";
 import { countUSRelations } from "@/lib/us_relations";
 import { USFotoPanel } from "@/components/us/USFotoPanel";
+import { StoricoDialog } from "@/components/storico/StoricoDialog";
 
 function QcIcon({ status }: { status?: string | null }) {
   if (status === "ok") return <CheckCircle2 size={13} className="text-green-600 shrink-0" />;
@@ -82,6 +84,7 @@ export function USCard({
   });
   const backlinks = backlinksQuery.data?.links?.[String(us.id)] || [];
   const [showAllIssues, setShowAllIssues] = useState(false);
+  const [storicoOpen, setStoricoOpen] = useState(false);
 
   const handleExportFormat = async (usId: number, fmt: "pdf" | "odt" | "md") => {
     try {
@@ -134,6 +137,14 @@ export function USCard({
         expanded ? "shadow-md" : "hover:shadow-sm",
       )}
     >
+      <StoricoDialog
+        open={storicoOpen}
+        onOpenChange={setStoricoOpen}
+        entityType="us"
+        entityId={us.id}
+        title={`Cronologia · US ${us.codiceUS}`}
+      />
+
       {/* ── Riga collassata (sempre visibile) ── */}
       <div
         className="flex items-center gap-2 px-3 py-2.5 cursor-pointer select-none"
@@ -205,6 +216,14 @@ export function USCard({
             onClick={(e) => { e.stopPropagation(); onEdit(us); }}
           >
             <Pencil size={13} />
+          </button>
+          <button
+            type="button"
+            className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+            title="Cronologia: torna a una versione precedente"
+            onClick={(e) => { e.stopPropagation(); setStoricoOpen(true); }}
+          >
+            <History size={13} />
           </button>
           <button
             type="button"
@@ -298,7 +317,7 @@ export function USCard({
                 className="gap-1 text-xs"
                 onClick={() => onGenerate(us.id)}
                 disabled={!aiAvailable}
-                title={!aiAvailable ? "Configura una chiave AI nel file .env" : undefined}
+                title={!aiAvailable ? "Configura una chiave AI nel file .env" : "Analizza l'intera scheda e proponi modifiche"}
               >
                 <Wand2 size={12} /> Analizza AI
               </Button>
@@ -368,6 +387,9 @@ export function USCard({
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
+              <Button size="sm" variant="ghost" className="gap-1 text-xs" onClick={() => setStoricoOpen(true)}>
+                <History size={12} /> Cronologia
+              </Button>
               <Button
                 size="sm"
                 variant="ghost"

@@ -5,6 +5,7 @@ import { normalizeUsDefinizioneWithVocabulary, normalizeUsTipoWithVocabulary } f
 import type { IStorage } from "./storage";
 import { generateWithGemini } from "./gemini";
 import { logger } from "./logger";
+import { getAnthropicModel } from "./anthropic_model";
 import { getProjectById, getProjectSchemaDefinition } from "./projects";
 import { buildUsExtractPrompt } from "./prompts/us_extract_prompt";
 import { getUSModel } from "./us_models";
@@ -171,7 +172,7 @@ async function callAI(prompt: string, maxTokens = 2600): Promise<string> {
     const Anthropic = (await import("@anthropic-ai/sdk")).default;
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const response = await client.messages.create({
-      model: "claude-sonnet-4-5",
+      model: getAnthropicModel(),
       max_tokens: maxTokens,
       messages: [{ role: "user", content: prompt }],
     });

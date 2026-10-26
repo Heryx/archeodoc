@@ -6,6 +6,7 @@ export type AiSettings = {
   anthropicKeyPreview: string;
   openaiKeyPreview: string;
   aiProvider: "auto" | "gemini" | "claude" | "openai";
+  anthropicModel: string;
   currentProvider: "gemini" | "claude" | "openai" | "none";
   available: boolean;
 };

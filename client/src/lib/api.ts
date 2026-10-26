@@ -238,3 +238,72 @@ export async function applyUsImportFromJournal(
   });
   return response.json();
 }
+
+// ── Analisi AI dell'intera scheda US (proposte di modifica) ───────────────────────
+
+export type UsReviewCategory = "grammatica" | "miglioramento" | "coerenza" | "rapporti" | "completezza";
+export type UsReviewSeverity = "alta" | "media" | "bassa";
+
+export type UsReviewProposal = {
+  id: string;
+  usId: number;
+  codiceUS: string;
+  field: string;
+  label: string;
+  type: string;
+  options?: string[];
+  currentValue: string;
+  newValue: string;
+  category: UsReviewCategory;
+  severity: UsReviewSeverity;
+  reason: string;
+  origin: "controllo" | "ai";
+  warning?: string;
+};
+
+export type UsReviewFinding = {
+  id: string;
+  category: UsReviewCategory;
+  severity: UsReviewSeverity;
+  message: string;
+  field?: string;
+};
+
+export type UsReviewResult = {
+  summary: string;
+  proposals: UsReviewProposal[];
+  findings: UsReviewFinding[];
+  checkedFields: number;
+};
+
+export type UsReviewEdit = { usId: number; field: string; value: string };
+
+export async function requestUsReview(
+  usId: number,
+  istruzioni: string,
+  signal?: AbortSignal,
+): Promise<UsReviewResult> {
+  const response = await apiRequest("POST", `/api/us/${usId}/analizza-ai/proposte`, { istruzioni }, signal);
+  return response.json();
+}
+
+export async function reviseUsReviewProposal(
+  usId: number,
+  proposal: Pick<UsReviewProposal, "usId" | "field" | "currentValue" | "reason"> & { proposedValue: string },
+  prompt: string,
+  signal?: AbortSignal,
+): Promise<{ newValue: string; reason: string; warning?: string }> {
+  const response = await apiRequest("POST", `/api/us/${usId}/analizza-ai/riformula`, { ...proposal, prompt }, signal);
+  return response.json();
+}
+
+export async function applyUsReviewEdits(
+  usId: number,
+  edits: UsReviewEdit[],
+): Promise<{
+  applied: Array<{ usId: number; codiceUS: string; field: string }>;
+  failed: Array<{ usId: number; field: string; error: string }>;
+}> {
+  const response = await apiRequest("POST", `/api/us/${usId}/analizza-ai/applica`, { edits });
+  return response.json();
+}

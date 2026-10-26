@@ -1,4 +1,4 @@
-export type USModelFieldType = "text" | "textarea" | "date" | "select" | "multiselect";
+export type USModelFieldType = "text" | "textarea" | "date" | "select" | "multiselect" | "checkbox";
 
 export type USModelField = {
   key: string;
@@ -8,7 +8,41 @@ export type USModelField = {
   locked?: boolean;
   options?: string[];
   help?: string;
+  /** Solo per i checkbox: titolo del gruppo sotto cui la scheda li raccoglie (es. "Stato di conservazione"). */
+  group?: string;
 };
+
+/** Gruppi dei checkbox `chkXxx` dei template DOCX, riconosciuti dal prefisso del placeholder.
+ * Servono a raccogliere nella scheda le voci che nel template stanno sotto la stessa intestazione. */
+const CHECKBOX_GROUP_RULES: Array<{ test: RegExp; group: string }> = [
+  { test: /^chk(Artificiale|Naturale)$/, group: "Modo di formazione" },
+  { test: /^chkDensitaInorg/, group: "Densità componenti inorganici" },
+  { test: /^chkDensitaOrg/, group: "Densità componenti organici" },
+  { test: /^chk(MaterialeCostruzione|Ceramica|Metalli|Vetro|Ciottoli|Ghiaia)$/, group: "Componenti inorganici" },
+  { test: /^chk(Fauna|Osso|Corno|Semi|Frutti|Carboni|Legno|Tessuti)$/, group: "Componenti organici" },
+  { test: /^chk(Intatto|Buono|Discreto|Mediocre|Pessimo)$/, group: "Stato di conservazione" },
+  { test: /^chk(Scavata|CorrispondeAltra|AsportataCon|AltroScavo)/, group: "Osservazioni" },
+  { test: /^chk(SequenzaStratigrafica|RepertiDiagnostici)$/, group: "Elementi datanti" },
+  { test: /^chkFlottazione/, group: "Flottazione" },
+  { test: /^chkSetacciatura/, group: "Setacciatura" },
+  { test: /^chkAffid/, group: "Affidabilità stratigrafica" },
+];
+
+/** True se il placeholder del template è un checkbox (convenzione `chkNomeVoce`). */
+export function isCheckboxPlaceholder(key: string): boolean {
+  return /^chk[A-Z]/.test(key);
+}
+
+export function checkboxGroupForKey(key: string): string | undefined {
+  return CHECKBOX_GROUP_RULES.find((rule) => rule.test.test(key))?.group;
+}
+
+/** Valore salvato in schedaData per un checkbox: "true" / "false" (assente = mai toccato). */
+export function isCheckedValue(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  const v = String(value ?? "").trim().toLowerCase();
+  return v === "true" || v === "1" || v === "si" || v === "sì" || v === "yes" || v === "☑" || v === "x";
+}
 
 export type USModelDefinition = {
   key: string;

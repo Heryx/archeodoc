@@ -48,6 +48,8 @@ import {
   type InsertPersona,
 } from "@shared/schema";
 import { ensureWebMapTables } from "./webmap_layers";
+import { ProjectHistory, historyDirForDb } from "./history";
+import path from "path";
 
 // Una cache per connessione: ogni progetto ha il proprio database e le proprie colonne.
 const tableColumnsCache = new WeakMap<Database.Database, Map<string, Set<string>>>();
@@ -676,6 +678,9 @@ function migrate(sqlite: Database.Database) {
 }
 
 export interface IStorage {
+  /** Cronologia delle modifiche e ripristino delle schede. */
+  readonly history: ProjectHistory;
+
   // Cantieri
   getCantieri(): Cantiere[];
   getCantiere(id: number): Cantiere | undefined;
@@ -787,6 +792,7 @@ function now() {
 class SQLiteStorage implements IStorage {
   private sqlite: Database.Database;
   private db: BetterSQLite3Database<Record<string, never>>;
+  readonly history: ProjectHistory;
 
   constructor(dbPath: string) {
     this.sqlite = new Database(dbPath);
@@ -794,6 +800,10 @@ class SQLiteStorage implements IStorage {
     this.sqlite.pragma("foreign_keys = ON");
     this.db = drizzle(this.sqlite);
     migrate(this.sqlite);
+    this.history = new ProjectHistory(
+      this.sqlite,
+      dbPath === ":memory:" ? null : historyDirForDb(dbPath),
+    );
   }
 
   // Cantieri
@@ -810,12 +820,16 @@ class SQLiteStorage implements IStorage {
   }
 
   updateCantiere(id: number, data: Partial<InsertCantiere>) {
-    return this.db.update(cantieri).set(data).where(eq(cantieri.id, id)).returning().get();
+    return this.history.track("cantiere", id, "update", () =>
+      this.db.update(cantieri).set(data).where(eq(cantieri.id, id)).returning().get());
   }
 
   deleteCantiere(id: number) {
     const existing = this.getCantiere(id);
     if (!existing) return false;
+
+    // Un cantiere intero non rientra nelle versioni per scheda: prima di eliminarlo si salva una copia del database.
+    this.history.snapshotDatabase(path.join(path.dirname(path.resolve(this.sqlite.name)), "backups"), `elimina-cantiere-${id}`);
 
     this.db.transaction((tx) => {
       tx.delete(periodi).where(eq(periodi.cantiereId, id)).run();
@@ -849,19 +863,22 @@ class SQLiteStorage implements IStorage {
   }
 
   updateGiornata(id: number, data: Partial<InsertGiornata>) {
-    return this.db.update(giornate).set(data).where(eq(giornate.id, id)).returning().get();
+    return this.history.track("giornata", id, "update", () =>
+      this.db.update(giornate).set(data).where(eq(giornate.id, id)).returning().get());
   }
 
   deleteGiornata(id: number) {
     const existing = this.getGiornata(id);
     if (!existing) return false;
 
-    this.db.transaction((tx) => {
-      tx.delete(qcLogs).where(eq(qcLogs.giornataId, id)).run();
-      tx.delete(allegati).where(eq(allegati.giornataId, id)).run();
-      tx.update(unitaStratigrafiche).set({ giornataId: null }).where(eq(unitaStratigrafiche.giornataId, id)).run();
-      tx.delete(giornate).where(eq(giornate.id, id)).run();
-    });
+    this.history.track("giornata", id, "delete", () =>
+      this.db.transaction((tx) => {
+        tx.delete(qcLogs).where(eq(qcLogs.giornataId, id)).run();
+        tx.delete(allegati).where(eq(allegati.giornataId, id)).run();
+        tx.update(unitaStratigrafiche).set({ giornataId: null }).where(eq(unitaStratigrafiche.giornataId, id)).run();
+        tx.delete(giornate).where(eq(giornate.id, id)).run();
+      }),
+    );
     return true;
   }
 
@@ -884,11 +901,12 @@ class SQLiteStorage implements IStorage {
   }
 
   updatePeriodo(id: number, data: Partial<InsertPeriodo>) {
-    return this.db.update(periodi).set(data).where(eq(periodi.id, id)).returning().get();
+    return this.history.track("periodo", id, "update", () =>
+      this.db.update(periodi).set(data).where(eq(periodi.id, id)).returning().get());
   }
 
   deletePeriodo(id: number) {
-    return this.db.delete(periodi).where(eq(periodi.id, id)).run().changes > 0;
+    return this.history.track("periodo", id, "delete", () => this.db.delete(periodi).where(eq(periodi.id, id)).run().changes > 0);
   }
 
   // Unita' virtuali e paradati
@@ -910,21 +928,24 @@ class SQLiteStorage implements IStorage {
   }
 
   updateNodoParadati(id: number, data: Partial<InsertNodoParadati>) {
-    return this.db.update(nodiParadati).set(data).where(eq(nodiParadati.id, id)).returning().get();
+    return this.history.track("nodo", id, "update", () =>
+      this.db.update(nodiParadati).set(data).where(eq(nodiParadati.id, id)).returning().get());
   }
 
   deleteNodoParadati(id: number) {
     const existing = this.getNodoParadati(id);
     if (!existing) return false;
-    this.db.transaction((tx) => {
-      tx.delete(archiParadati)
-        .where(and(eq(archiParadati.cantiereId, existing.cantiereId), eq(archiParadati.sourceKind, "nodo"), eq(archiParadati.sourceRef, existing.uid)))
-        .run();
-      tx.delete(archiParadati)
-        .where(and(eq(archiParadati.cantiereId, existing.cantiereId), eq(archiParadati.targetKind, "nodo"), eq(archiParadati.targetRef, existing.uid)))
-        .run();
-      tx.delete(nodiParadati).where(eq(nodiParadati.id, id)).run();
-    });
+    this.history.track("nodo", id, "delete", () =>
+      this.db.transaction((tx) => {
+        tx.delete(archiParadati)
+          .where(and(eq(archiParadati.cantiereId, existing.cantiereId), eq(archiParadati.sourceKind, "nodo"), eq(archiParadati.sourceRef, existing.uid)))
+          .run();
+        tx.delete(archiParadati)
+          .where(and(eq(archiParadati.cantiereId, existing.cantiereId), eq(archiParadati.targetKind, "nodo"), eq(archiParadati.targetRef, existing.uid)))
+          .run();
+        tx.delete(nodiParadati).where(eq(nodiParadati.id, id)).run();
+      }),
+    );
     return true;
   }
 
@@ -962,18 +983,21 @@ class SQLiteStorage implements IStorage {
   }
 
   updateUS(id: number, data: Partial<InsertUS>) {
-    return this.db.update(unitaStratigrafiche).set({ ...data, updatedAt: now() }).where(eq(unitaStratigrafiche.id, id)).returning().get();
+    return this.history.track("us", id, "update", () =>
+      this.db.update(unitaStratigrafiche).set({ ...data, updatedAt: now() }).where(eq(unitaStratigrafiche.id, id)).returning().get());
   }
 
   deleteUS(id: number) {
     const existing = this.getUS(id);
     if (!existing) return false;
 
-    this.db.transaction((tx) => {
-      tx.delete(allegati).where(eq(allegati.usId, id)).run();
-      tx.update(raRecords).set({ usId: null }).where(eq(raRecords.usId, id)).run();
-      tx.delete(unitaStratigrafiche).where(eq(unitaStratigrafiche.id, id)).run();
-    });
+    this.history.track("us", id, "delete", () =>
+      this.db.transaction((tx) => {
+        tx.delete(allegati).where(eq(allegati.usId, id)).run();
+        tx.update(raRecords).set({ usId: null }).where(eq(raRecords.usId, id)).run();
+        tx.delete(unitaStratigrafiche).where(eq(unitaStratigrafiche.id, id)).run();
+      }),
+    );
     return true;
   }
 
@@ -991,13 +1015,14 @@ class SQLiteStorage implements IStorage {
   }
 
   updateSasRecord(id: number, data: Partial<InsertSas>) {
-    return this.db.update(sasRecords).set(data).where(eq(sasRecords.id, id)).returning().get();
+    return this.history.track("sas", id, "update", () =>
+      this.db.update(sasRecords).set(data).where(eq(sasRecords.id, id)).returning().get());
   }
 
   deleteSasRecord(id: number) {
     const existing = this.getSasRecord(id);
     if (!existing) return false;
-    this.db.delete(sasRecords).where(eq(sasRecords.id, id)).run();
+    this.history.track("sas", id, "delete", () => this.db.delete(sasRecords).where(eq(sasRecords.id, id)).run());
     return true;
   }
 
@@ -1022,13 +1047,14 @@ class SQLiteStorage implements IStorage {
   }
 
   updateRaRecord(id: number, data: Partial<InsertRa>) {
-    return this.db.update(raRecords).set(data).where(eq(raRecords.id, id)).returning().get();
+    return this.history.track("ra", id, "update", () =>
+      this.db.update(raRecords).set(data).where(eq(raRecords.id, id)).returning().get());
   }
 
   deleteRaRecord(id: number) {
     const existing = this.getRaRecord(id);
     if (!existing) return false;
-    this.db.delete(raRecords).where(eq(raRecords.id, id)).run();
+    this.history.track("ra", id, "delete", () => this.db.delete(raRecords).where(eq(raRecords.id, id)).run());
     return true;
   }
 
@@ -1074,11 +1100,12 @@ class SQLiteStorage implements IStorage {
   }
 
   updateAllegato(id: number, data: Partial<InsertAllegato>) {
-    return this.db.update(allegati).set(data).where(eq(allegati.id, id)).returning().get();
+    return this.history.track("allegato", id, "update", () =>
+      this.db.update(allegati).set(data).where(eq(allegati.id, id)).returning().get());
   }
 
   deleteAllegato(id: number) {
-    this.db.delete(allegati).where(eq(allegati.id, id)).run();
+    this.history.track("allegato", id, "delete", () => this.db.delete(allegati).where(eq(allegati.id, id)).run());
   }
 
   // Map snapshots
@@ -1161,18 +1188,22 @@ class SQLiteStorage implements IStorage {
   }
 
   updateDocumentazione(id: number, data: Partial<InsertDocumentazione>) {
-    return this.db
-      .update(documentazioni)
-      .set({ ...data, updatedAt: now() })
-      .where(eq(documentazioni.id, id))
-      .returning()
-      .get();
+    return this.history.track("documentazione", id, "update", () =>
+      this.db
+        .update(documentazioni)
+        .set({ ...data, updatedAt: now() })
+        .where(eq(documentazioni.id, id))
+        .returning()
+        .get(),
+    );
   }
 
   deleteDocumentazione(id: number) {
     const existing = this.getDocumentazione(id);
     if (!existing) return false;
-    this.db.delete(documentazioni).where(eq(documentazioni.id, id)).run();
+    this.history.track("documentazione", id, "delete", () =>
+      this.db.delete(documentazioni).where(eq(documentazioni.id, id)).run(),
+    );
     return true;
   }
 
@@ -1297,13 +1328,14 @@ class SQLiteStorage implements IStorage {
   }
 
   updatePersona(id: number, data: Partial<InsertPersona>) {
-    return this.db.update(persone).set(data).where(eq(persone.id, id)).returning().get();
+    return this.history.track("persona", id, "update", () =>
+      this.db.update(persone).set(data).where(eq(persone.id, id)).returning().get());
   }
 
   deletePersona(id: number) {
     const existing = this.getPersona(id);
     if (!existing) return false;
-    this.db.delete(persone).where(eq(persone.id, id)).run();
+    this.history.track("persona", id, "delete", () => this.db.delete(persone).where(eq(persone.id, id)).run());
     return true;
   }
 

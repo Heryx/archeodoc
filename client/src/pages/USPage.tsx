@@ -33,7 +33,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ArrowDown, ArrowDownUp, ArrowUp, Download, FileUp, Filter, GitBranch, Package, Plus, Search, Settings2, ShieldCheck, X } from "lucide-react";
+import { ArrowDown, ArrowDownUp, ArrowUp, Download, FileSearch, FileUp, Filter, GitBranch, Package, Plus, Search, Settings2, ShieldCheck, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAiJobMutation } from "@/lib/aiJobs";
 import { buildProjectUrl, getCurrentProjectId, getProjectHeader } from "@/lib/project";
@@ -43,12 +43,14 @@ import { getUsTopLevelThesaurusFromSchema } from "@shared/us_schema_thesaurus";
 import { USCard } from "@/components/us/USCard";
 import { USAllegatiImpact } from "@/components/us/USAllegati";
 import { AiFillPanel } from "@/components/us/AiFillPanel";
+import { USReviewDialog } from "@/components/us/USReviewDialog";
 import { DuplicateUSBanner } from "@/components/us/DuplicateUSBanner";
 import { DiarioSourceDialog } from "@/components/us/DiarioSourceDialog";
 import { USFormDialog } from "@/components/us/USFormDialog";
 import { USModelDialog } from "@/components/us/USModelDialog";
 import { InverseSyncDialog, type PendingInverse } from "@/components/us/InverseSyncDialog";
 import { USBatchImportDialog } from "@/components/us/USBatchImportDialog";
+import { USCrosscheckDialog } from "@/components/us/USCrosscheckDialog";
 import { findPotentialDuplicateUS, useDuplicateUSCheck } from "@/hooks/useDuplicateUSCheck";
 import {
   emptyUSForm,
@@ -194,6 +196,7 @@ export function USPage() {
   const [openEdit, setOpenEdit] = useState(false);
   const [openModelDialog, setOpenModelDialog] = useState(false);
   const [openBatchImport, setOpenBatchImport] = useState(false);
+  const [openCrosscheck, setOpenCrosscheck] = useState(false);
   const [createForm, setCreateForm] = useState<USForm>(emptyUSForm);
   const [editForm, setEditForm] = useState<USForm>(emptyUSForm);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -205,6 +208,7 @@ export function USPage() {
   const [aiSourceDialogOpen, setAiSourceDialogOpen] = useState(false);
   const [aiSourceTarget, setAiSourceTarget] = useState<any | null>(null);
   const [aiFillOpen, setAiFillOpen] = useState(false);
+  const [reviewTarget, setReviewTarget] = useState<{ id: number; codiceUS: string } | null>(null);
   const [aiFillTarget, setAiFillTarget] = useState<any | null>(null);
   const [aiFillSuggestions, setAiFillSuggestions] = useState<AiFillResult | null>(null);
   const [modelDraftKey, setModelDraftKey] = useState(BASE_US_MODEL_KEY);
@@ -435,7 +439,11 @@ export function USPage() {
         const label = parts[0];
         const typeRaw = (parts[1] || "text").toLowerCase();
         const type: USModelField["type"] =
-          typeRaw === "textarea" || typeRaw === "date" || typeRaw === "select" || typeRaw === "multiselect"
+          typeRaw === "textarea" ||
+          typeRaw === "date" ||
+          typeRaw === "select" ||
+          typeRaw === "multiselect" ||
+          typeRaw === "checkbox"
             ? typeRaw
             : "text";
         const options =
@@ -796,7 +804,7 @@ export function USPage() {
 
   const openEditDialog = (us: any) => {
     setEditingId(us.id);
-    const mapped = mapUsToForm(us);
+    const mapped = mapUsToForm(us, availableModels.find((m) => m.key === (us.schedaModelKey || activeModelKey)));
     setEditForm({
       ...mapped,
       schedaModelKey: mapped.schedaModelKey || activeModelKey,
@@ -949,16 +957,19 @@ export function USPage() {
     );
   };
 
-  const handleExportZip = async (scope: "all" | "us") => {
+  const handleExportZip = async (scope: "all" | "us" | "us-elenco") => {
     const slug = String(cid || "cantiere");
-    const fallback = scope === "us" ? `cantiere_${slug}_schede_us.zip` : `cantiere_${slug}_export.zip`;
-    const endpoint = `/api/cantieri/${cid}/export-zip${scope === "us" ? "?scope=us" : ""}`;
+    const labels = {
+      us: { file: "schede_us", ok: "ZIP schede US scaricato", err: "Errore export ZIP schede US" },
+      "us-elenco": { file: "schede_elenco_us", ok: "ZIP schede + elenco US scaricato", err: "Errore export ZIP schede + elenco US" },
+      all: { file: "export", ok: "ZIP completo scaricato", err: "Errore export ZIP completo" },
+    }[scope];
     await downloadBlob(
-      endpoint,
-      fallback,
-      scope === "us" ? "zip-us" : "zip-all",
-      scope === "us" ? "ZIP schede US scaricato" : "ZIP completo scaricato",
-      scope === "us" ? "Errore export ZIP schede US" : "Errore export ZIP completo",
+      `/api/cantieri/${cid}/export-zip${scope === "all" ? "" : `?scope=${scope}`}`,
+      `cantiere_${slug}_${labels.file}.zip`,
+      scope === "all" ? "zip-all" : "zip-us",
+      labels.ok,
+      labels.err,
     );
   };
 
@@ -1049,6 +1060,9 @@ export function USPage() {
                 <DropdownMenuItem onClick={() => setOpenBatchImport(true)}>
                   <FileUp size={14} className="mr-2" /> Import da documento
                 </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setOpenCrosscheck(true)} disabled={usList.length === 0}>
+                  <FileSearch size={14} className="mr-2" /> Verifica schede con documentazione
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={() => runQcAllUS.mutate()}
@@ -1060,6 +1074,9 @@ export function USPage() {
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => void handleExportZip("us")} disabled={exportingKind !== null}>
                   <Download size={14} className="mr-2" /> ZIP schede US
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => void handleExportZip("us-elenco")} disabled={exportingKind !== null}>
+                  <Download size={14} className="mr-2" /> ZIP schede US + elenco US
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => void handleExportZip("all")} disabled={exportingKind !== null}>
                   <Download size={14} className="mr-2" /> ZIP completo cantiere
@@ -1105,6 +1122,8 @@ export function USPage() {
       )}
 
       <DuplicateUSBanner duplicates={duplicateGroups} onGoToUS={openUSById} />
+
+      <USCrosscheckDialog open={openCrosscheck} onOpenChange={setOpenCrosscheck} cid={Number(cid)} />
 
       <USBatchImportDialog
         open={openBatchImport}
@@ -1353,6 +1372,21 @@ export function USPage() {
         }}
       />
 
+      <USReviewDialog
+        open={reviewTarget !== null}
+        onOpenChange={(next) => {
+          if (!next) setReviewTarget(null);
+        }}
+        usId={reviewTarget?.id ?? null}
+        usCode={reviewTarget?.codiceUS}
+        onApplied={() => {
+          qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us"] });
+          invalidateUsRelatedQueries(qcClient, cid);
+          qcClient.invalidateQueries({ queryKey: ["/api/cantieri", cid, "us", activeProjectId] });
+        }}
+        onGenerateText={(id) => generateScheda.mutate(id)}
+      />
+
       <AiFillPanel
         open={aiFillOpen}
         onOpenChange={(value) => {
@@ -1403,7 +1437,7 @@ export function USPage() {
               cantiereId={cid ? Number(cid) : undefined}
               modelName={modelNameByKey[us.schedaModelKey || activeModelKey]}
               completionStatus={completionStatusByUsId.get(us.id) || "bozza"}
-              onGenerate={(id) => generateScheda.mutate(id)}
+              onGenerate={(id) => setReviewTarget({ id, codiceUS: usLabelOf(id) })}
               onAiFill={(item) => {
                 setAiSourceTarget(item);
                 setAiSourceDialogOpen(true);

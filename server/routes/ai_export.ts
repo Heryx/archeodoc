@@ -59,8 +59,8 @@ function parseMatrixMode(raw: unknown): HarrisMatrixMode {
   return "all";
 }
 
-function parseZipExportScope(raw: unknown): "all" | "us" {
-  if (raw === "us") return "us";
+function parseZipExportScope(raw: unknown): "all" | "us" | "us-elenco" {
+  if (raw === "us" || raw === "us-elenco") return raw;
   return "all";
 }
 
@@ -951,6 +951,7 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     if (!cantiere) return res.status(404).json({ error: "Cantiere non trovato" });
     const scope = parseZipExportScope(req.query.scope);
     const includeDiari = scope === "all";
+    const includeElenco = scope === "all" || scope === "us-elenco";
 
     const JSZip = (await import("jszip")).default;
     const zip = new JSZip();
@@ -1001,17 +1002,17 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
     }
 
     // Elenco US: XLSX sempre, DOCX se esiste un template elenco caricato
-    const elencoFolder = folder.folder("elenco_us")!;
     const elencoBase = `Elenco_US_${slug}`;
     let elencoEsportato = false;
-    try {
+    const elencoFolder = includeElenco ? folder.folder("elenco_us")! : null;
+    if (elencoFolder) try {
       const { ws, columns, aoa, XLSX } = await buildElencoUSSheet(ctx.project, cantiere, usList);
       elencoFolder.file(`${elencoBase}.xlsx`, writeElencoUSXlsx(XLSX, ws, columns, aoa));
       elencoEsportato = true;
     } catch {
       // skip
     }
-    try {
+    if (elencoFolder) try {
       const elencoTemplate = elencoUsTemplatePath(ctx.project);
       if (fs.existsSync(elencoTemplate)) {
         elencoFolder.file(`${elencoBase}.docx`, await exportElencoUSDocxFromTemplate(elencoTemplate, usList, cantiere));
@@ -1036,7 +1037,9 @@ export function registerAIExportRoutes(app: Express, withProject: WithProject) {
 
     const zipBuffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
     res.setHeader("Content-Type", "application/zip");
-    const filename = includeDiari ? `${slug}_export.zip` : `${slug}_schede_us.zip`;
+    const filename = includeDiari
+      ? `${slug}_export.zip`
+      : includeElenco ? `${slug}_schede_elenco_us.zip` : `${slug}_schede_us.zip`;
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.send(zipBuffer);
   }));

@@ -10,7 +10,14 @@ import {
   getStorageForProject,
   type ProjectDefinition,
 } from "../projects";
-import { getUSModel, listUSModels, createCustomUSModel, updateCustomUSModel, normalizeFieldKey } from "../us_models";
+import {
+  getUSModel,
+  listUSModels,
+  createCustomUSModel,
+  updateCustomUSModel,
+  normalizeFieldKey,
+  syncModelFieldsWithTemplate,
+} from "../us_models";
 import { usTemplatePath as _usTemplatePathUtil, resolveUSTemplatePath as _resolveUSTemplatePath } from "../us_template_path";
 import {
   elencoUsTemplatePath,
@@ -19,7 +26,7 @@ import {
   writeElencoTemplateChoice,
   clearElencoTemplateChoice,
 } from "../elenco_us_template_path";
-import { detectTemplatePlaceholders, humanizeFieldKey } from "../docx_template_utils";
+import { buildModelFieldsFromTemplate, detectTemplatePlaceholders, humanizeFieldKey } from "../docx_template_utils";
 import { extractTemplateLoopColumns } from "../docx_table_read";
 import { findSimilarField } from "../field_similarity";
 import { resolveElencoColumns, buildElencoRowValues, knownFieldsForCantiere } from "../elenco_columns";
@@ -600,50 +607,10 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
       return res.status(400).json({ error: "Nome modello obbligatorio" });
     }
 
-    // Chiavi da ESCLUDERE dal modello: identificazione US (gestita dal form base),
-    // campi relazione (gestiti da USRelazioni), e metadati export/cantiere (non editabili).
-    const BASE_KNOWN_KEYS = new Set([
-      // Identificazione — gestita sempre dal blocco fisso in cima al form
-      "codiceUS", "settore", "area", "saggio", "quadrati", "localita", "anno",
-      // Relazioni — gestite da USRelazioni
-      "uguale_a", "si_lega_a", "coperto_da", "copre",
-      "tagliatoDa", "taglia", "riempitoDa", "riempie",
-      "gliSiAppoggia", "siAppoggiaA", "posterioreA", "anterioreA",
-      // Metadati export/cantiere — non editabili dall'utente
-      "cantiereCodice", "cantiereNome", "dataExport",
-      "nCatalogoGenerale", "nCatalogoInternazionale",
-      "soprintendenza", "haFoto",
-    ]);
-
     try {
-      const PizZip = (await import("pizzip")).default;
-      const Docxtemplater = (await import("docxtemplater")).default;
-      const InspectModule = (await import("docxtemplater/js/inspect-module.js")).default;
-      const content = fs.readFileSync(templatePath);
-      const zip = new PizZip(content);
-      const iModule = new InspectModule();
-      const doc = new Docxtemplater(zip, {
-        paragraphLoop: true, linebreaks: true, nullGetter: () => "", modules: [iModule],
-      });
-      doc.compile();
-      const tags: Record<string, unknown> = iModule.getAllTags();
-
-      // Placeholder che per convenzione sono testo lungo (textarea)
-      const TEXTAREA_KEYS = new Set([
-        "osservazioni","interpretazione","descrizione","definizione","criteriDistinzione",
-        "modoFormazione","modoFormazioneOrigine","materialiRinvenuti","campioni",
-        "datiQuantitativiReperti","altroScavo","sequenzaFisica","piante","sezioni",
-        "prospetti","tabelleMaterialiRa","tabelleMaterialiN",
-      ]);
-
-      // Filtra i placeholder che non sono campi base noti (relazioni, metadati export)
-      const extraFields = Object.keys(tags)
-        .filter((k) => !BASE_KNOWN_KEYS.has(k))
-        .map((k) => ({
-          key: k,
-          label: humanizeFieldKey(k),
-          type: (TEXTAREA_KEYS.has(k) ? "textarea" : "text") as "text" | "textarea",
-        }));
+      // Un campo per ogni placeholder del template (i chk… diventano checkbox): la scheda deve
+      // mostrare le stesse voci del documento. Fuori restano solo i blocchi fissi della scheda.
+      const { fields: extraFields, placeholders } = await buildModelFieldsFromTemplate(templatePath);
 
       const model = createCustomUSModel(ctx.project, {
         name: modelName,
@@ -657,14 +624,27 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
         fs.copyFileSync(templatePath, modelTemplateDest);
       }
 
-      res.json({ ok: true, model, detectedPlaceholders: Object.keys(tags), extraFields });
+      res.json({ ok: true, model, detectedPlaceholders: placeholders, extraFields });
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "Errore analisi template", detail: String(e) });
     }
   }));
 
+  // POST — riallinea le voci di un modello personalizzato al suo template DOCX
+  // (aggiunge le voci mancanti, trasforma i chk… in checkbox, toglie quelle che il template non ha più)
+  app.post("/api/cantieri/:cid/us-template/:modelKey/sync-model", withProject(async (ctx, req, res) => {
+    const modelKey = String(req.params.modelKey);
+    try {
+      const result = await syncModelFieldsWithTemplate(ctx.project, modelKey);
+      if (!result) return res.status(404).json({ error: "Modello personalizzato o template non trovato" });
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Errore sincronizzazione modello", detail: String(e) });
+    }
+  }));
+
   // POST — carica un template DOCX per un modello specifico
-  app.post("/api/cantieri/:cid/us-template/:modelKey", upload.single("template"), withProject((ctx, req, res) => {
+  app.post("/api/cantieri/:cid/us-template/:modelKey", upload.single("template"), withProject(async (ctx, req, res) => {
     const modelKey = String(req.params.modelKey);
     const file = (req as any).file as Express.Multer.File | undefined;
     if (!file) return res.status(400).json({ error: "Nessun file ricevuto" });
@@ -676,7 +656,19 @@ export function registerFieldworkRoutes(app: Express, helpers: FieldworkHelpers)
     if (!fs.existsSync(path.dirname(dest))) fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.renameSync(file.path, dest);
     const stat = fs.statSync(dest);
-    res.json({ ok: true, modelKey, sizeBytes: stat.size, updatedAt: stat.mtime.toISOString() });
+
+    // Nuovo template per un modello personalizzato ⇒ la scheda deve mostrare le stesse voci del template.
+    let sync: { added: string[]; removed: string[]; total: number } | null = null;
+    let syncError: string | undefined;
+    if (modelKey !== "generic") {
+      try {
+        const result = await syncModelFieldsWithTemplate(ctx.project, modelKey);
+        if (result) sync = { added: result.added, removed: result.removed, total: result.total };
+      } catch (e: any) {
+        syncError = e?.message || "Errore sincronizzazione voci del modello";
+      }
+    }
+    res.json({ ok: true, modelKey, sizeBytes: stat.size, updatedAt: stat.mtime.toISOString(), sync, syncError });
   }));
 
   // DELETE — rimuove il template di un modello specifico

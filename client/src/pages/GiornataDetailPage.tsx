@@ -1,9 +1,11 @@
 import { useParams, useLocation } from "wouter";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { StoricoDialog } from "@/components/storico/StoricoDialog";
 import { apiRequest } from "@/lib/queryClient";
 import { getCurrentProjectId } from "@/lib/project";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, CalendarDays, Clock, CloudSun, HardHat, User, FileText } from "lucide-react";
+import { ArrowLeft, CalendarDays, Clock, CloudSun, HardHat, User, FileText, History } from "lucide-react";
 import { parseOperatori } from "@/components/giornata/types";
 
 function InfoRow({ icon: Icon, label, value }: { icon: any; label: string; value?: string | null }) {
@@ -23,6 +25,7 @@ export function GiornataDetailPage() {
   const { cid, gid } = useParams<{ cid: string; gid: string }>();
   const [, navigate] = useLocation();
   const activeProjectId = getCurrentProjectId();
+  const [storicoOpen, setStoricoOpen] = useState(false);
 
   const { data: giornata, isLoading } = useQuery<any>({
     queryKey: ["/api/giornate", gid, activeProjectId],
@@ -58,12 +61,24 @@ export function GiornataDetailPage() {
       >
         <ArrowLeft size={14} /> Torna alle giornate
       </button>
+      <StoricoDialog
+        open={storicoOpen}
+        onOpenChange={setStoricoOpen}
+        entityType="giornata"
+        entityId={giornata.id}
+        title={`Cronologia · Giornata ${giornata.data}`}
+      />
 
       <div className="mb-6">
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <CalendarDays size={22} />
-          {giornata.data}
-        </h1>
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            <CalendarDays size={22} />
+            {giornata.data}
+          </h1>
+          <Button variant="ghost" size="sm" className="gap-1.5" onClick={() => setStoricoOpen(true)}>
+            <History size={15} /> Cronologia
+          </Button>
+        </div>
         {giornata.settore && (
           <p className="text-muted-foreground text-sm mt-1">Settore: {giornata.settore}</p>
         )}

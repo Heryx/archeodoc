@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { extractPathFromLocation, extractSearchFromLocation, useHashPathLocation } from "@/lib/location";
 import { Toaster } from "@/components/ui/toaster";
+import { StoricoUndoToaster } from "@/components/storico/StoricoUndoToaster";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { Sidebar } from "@/components/Sidebar";
 import { AiAssistantProvider, useAiAssistant } from "@/components/ai/AiAssistantContext";
@@ -234,6 +235,7 @@ export default function App() {
       <ThemeProvider>
         <AppLayout />
         <Toaster />
+        <StoricoUndoToaster />
       </ThemeProvider>
     </QueryClientProvider>
   );

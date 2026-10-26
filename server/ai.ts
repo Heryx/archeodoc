@@ -2,6 +2,7 @@ import type { UnitaStratigrafica, Giornata } from "@shared/schema";
 import { getSetting } from "./ai_settings";
 import { generateWithGemini } from "./gemini";
 import { logger } from "./logger";
+import { getAnthropicModel } from "./anthropic_model";
 
 // ─── Rilevamento provider ────────────────────────────────────────────────────
 // Preferisce Gemini (gratuito) se la chiave è presente, poi OpenAI, poi Claude.
@@ -125,7 +126,7 @@ export async function callAI(prompt: string, maxTokens = 3000, systemPrompt?: st
     const Anthropic = (await import("@anthropic-ai/sdk")).default;
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const response = await client.messages.create({
-      model: "claude-sonnet-4-5",
+      model: getAnthropicModel(),
       max_tokens: maxTokens,
       ...(systemPrompt ? { system: systemPrompt } : {}),
       messages: [{ role: "user", content: prompt }],
