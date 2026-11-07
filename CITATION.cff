@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "Se usi questo software, citalo come indicato di seguito."
+title: "ArcheoDoc"
+type: software
+version: "1.0.0"
+date-released: "2026-11-07"
+license: MIT
+repository-code: "https://github.com/Heryx/archeodoc"
+authors:
+  - family-names: Guarino
+    given-names: Giuseppe
+abstract: >-
+  Web app (TypeScript, Node.js, Express, SQLite, React) per la documentazione
+  di scavo archeologico: gestione di cantieri e giornate, schede US/SAS/RA,
+  Harris Matrix, quality control, thesaurus di progetto, import GeoPackage,
+  WebMap GIS ed editor di relazioni e elaborati con supporto AI.
+keywords:
+  - archeologia
+  - documentazione di scavo
+  - scheda US
+  - Harris Matrix
+  - stratigrafia
+  - GeoPackage
+  - archaeology
+  - excavation recording
