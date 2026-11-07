@@ -9,6 +9,7 @@ repository-code: "https://github.com/Heryx/archeodoc"
 authors:
   - family-names: Guarino
     given-names: Giuseppe
+    orcid: "https://orcid.org/0000-0001-9260-4810"
 abstract: >-
   Web app (TypeScript, Node.js, Express, SQLite, React) per la documentazione
   di scavo archeologico: gestione di cantieri e giornate, schede US/SAS/RA,
