@@ -1,5 +1,7 @@
 # ArcheoDoc - Documentazione di Scavo Archeologico
 
+[![DOI](https://zenodo.org/badge/1188960980.svg)](https://doi.org/10.5281/zenodo.24041860)
+
 ArcheoDoc e una web app TypeScript (Node.js + Express + SQLite + React) per gestire la documentazione di scavo:
 - cantieri e giornate,
 - schede US/SAS/RA,
